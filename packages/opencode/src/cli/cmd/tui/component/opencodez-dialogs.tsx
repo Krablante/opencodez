@@ -38,7 +38,7 @@ export function OpenCodezPromptSelector(props: {
       when={entries()}
       fallback={
         <box paddingLeft={2} paddingRight={2}>
-          Loading prompt library...
+          <text>Loading prompt library...</text>
         </box>
       }
     >
