@@ -108,8 +108,19 @@ prompts/templates/gpt55.jsonc -> /template gpt55
 That list includes:
 
 - upstream OpenCode built-in system prompts;
-- bundled OpenCodez Codex presets such as `codex_gpt_5_5`;
+- bundled OpenCodez Codex presets;
 - user-created prompts in `prompts/core/`.
+
+Bundled OpenCodez Core/System prompts:
+
+```text
+codex_gpt_5_2
+codex_gpt_5_2_codex
+codex_gpt_5_3_codex
+codex_gpt_5_4
+codex_gpt_5_4_mini
+codex_gpt_5_5
+```
 
 The selector is not model-filtered. A user can pick any available System prompt
 for any model.
@@ -123,12 +134,20 @@ This keeps overrides simple and visible.
 
 That list includes:
 
-- bundled OpenCodez Tone presets such as `codex_pragmatic`;
+- bundled OpenCodez Tone presets;
 - user-created tone files in `prompts/tone/`;
 - any future tone/style prompts that are added to the shared library.
 
-The selector is not model-filtered. A user can choose `codex_pragmatic` for
-DeepSeek, Anthropic, OpenAI, or any other model if that is what they want.
+Bundled OpenCodez Tone presets:
+
+```text
+codex_friendly
+codex_pragmatic
+```
+
+The selector is not model-filtered. A user can choose `codex_friendly` or
+`codex_pragmatic` for DeepSeek, Anthropic, OpenAI, or any other model if that is
+what they want.
 
 ### Templates
 
@@ -224,6 +243,9 @@ gpt-5.4 -> codex_gpt_5_4
 gpt-5.5 -> codex_gpt_5_5
 ```
 
+The bundled library also includes Codex-specific and mini variants such as
+`codex_gpt_5_2_codex`, `codex_gpt_5_3_codex`, and `codex_gpt_5_4_mini`.
+
 The built-in default Tone for those GPT models is:
 
 ```text
@@ -254,7 +276,7 @@ Example:
       },
       "tone": {
         "default": "codex_pragmatic",
-        "anthropic": "codex_pragmatic"
+        "anthropic": "codex_friendly"
       }
     }
   }

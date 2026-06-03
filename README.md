@@ -128,6 +128,24 @@ Prompt library paths:
 
 Bundled Codex-derived prompt files use the `codex_` prefix. User-created prompt files do not need that prefix.
 
+Bundled Core/System prompts:
+
+```text
+codex_gpt_5_2
+codex_gpt_5_2_codex
+codex_gpt_5_3_codex
+codex_gpt_5_4
+codex_gpt_5_4_mini
+codex_gpt_5_5
+```
+
+Bundled Tone presets:
+
+```text
+codex_friendly
+codex_pragmatic
+```
+
 Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one prompt name for all models, or a mapping keyed by model id, family, `provider/model`, or `default`:
 
 ```jsonc
@@ -141,7 +159,7 @@ Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one p
       },
       "tone": {
         "default": "codex_pragmatic",
-        "anthropic": "codex_pragmatic"
+        "anthropic": "codex_friendly"
       }
     }
   }
@@ -156,6 +174,7 @@ Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one p
 
 /tone
 /tone codex_pragmatic
+/tone codex_friendly
 
 /template
 /template gpt55
