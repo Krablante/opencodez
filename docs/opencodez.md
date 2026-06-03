@@ -68,13 +68,16 @@ to reuse upstream OpenCode settings should copy only the settings and prompt
 files they actually want into the OpenCodez config root.
 
 OpenCodez does not publish to npm. Public installs and updates are designed to
-use GitHub Releases:
+use GitHub Releases after public releases are enabled:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install.sh | sh
 opencodez update
 opencodez update --check
 ```
+
+These commands are the future public-release channel, not the local dogfooding
+path.
 
 For local dogfooding before a public release, build and install a local
 OpenCodez binary, then test the installed `opencodez` command in the live TUI.
@@ -234,17 +237,21 @@ Built-in default resolution works like this:
 - Other models keep the normal upstream OpenCode defaults unless the user
   config says otherwise.
 
-For OpenAI Responses GPT models, OpenCodez can choose model-specific System
-presets, for example:
+For OpenAI Responses GPT models, OpenCodez chooses model-specific System
+presets:
 
 ```text
 gpt-5.2 -> codex_gpt_5_2
+gpt-5.2-codex -> codex_gpt_5_2_codex
+gpt-5.3-codex -> codex_gpt_5_3_codex
+gpt-5.3-codex-spark -> codex_gpt_5_3_codex
 gpt-5.4 -> codex_gpt_5_4
+gpt-5.4-mini -> codex_gpt_5_4_mini
 gpt-5.5 -> codex_gpt_5_5
 ```
 
-The bundled library also includes Codex-specific and mini variants such as
-`codex_gpt_5_2_codex`, `codex_gpt_5_3_codex`, and `codex_gpt_5_4_mini`.
+`gpt-5.3-codex-spark` intentionally reuses `codex_gpt_5_3_codex` unless a
+separate spark prompt is added later.
 
 The built-in default Tone for those GPT models is:
 
@@ -271,7 +278,10 @@ Example:
     "responses": {
       "system": {
         "default": "codex_gpt_5_5",
+        "gpt-5.2-codex": "codex_gpt_5_2_codex",
+        "gpt-5.3-codex-spark": "codex_gpt_5_3_codex",
         "gpt-5.4": "codex_gpt_5_4",
+        "gpt-5.4-mini": "codex_gpt_5_4_mini",
         "deepseek": "default"
       },
       "tone": {

@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
+import { SystemPrompt } from "../../src/session/system"
 
 let tmp = ""
 let LLMRequestPrep: typeof import("../../src/session/llm/request").LLMRequestPrep
@@ -90,6 +91,25 @@ const baseInput = {
   },
 } as any
 
+const corePrompts = {
+  codex_gpt_5_2: "CORE PROMPT 5.2",
+  codex_gpt_5_2_codex: "CORE PROMPT 5.2 CODEX",
+  codex_gpt_5_3_codex: "CORE PROMPT 5.3 CODEX",
+  codex_gpt_5_4: "CORE PROMPT 5.4",
+  codex_gpt_5_4_mini: "CORE PROMPT 5.4 MINI",
+  codex_gpt_5_5: "CORE PROMPT 5.5",
+} as const
+
+const defaultSystemCases = [
+  { modelID: "gpt-5.2", prompt: corePrompts.codex_gpt_5_2 },
+  { modelID: "gpt-5.2-codex", prompt: corePrompts.codex_gpt_5_2_codex },
+  { modelID: "gpt-5.3-codex", prompt: corePrompts.codex_gpt_5_3_codex },
+  { modelID: "gpt-5.3-codex-spark", prompt: corePrompts.codex_gpt_5_3_codex },
+  { modelID: "gpt-5.4", prompt: corePrompts.codex_gpt_5_4 },
+  { modelID: "gpt-5.4-mini", prompt: corePrompts.codex_gpt_5_4_mini },
+  { modelID: "gpt-5.5", prompt: corePrompts.codex_gpt_5_5 },
+] as const
+
 describe("LLMRequestPrep OpenCodez integration", () => {
   beforeAll(async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "opencodez-request-prep-"))
@@ -105,7 +125,11 @@ describe("LLMRequestPrep OpenCodez integration", () => {
     const root = path.join(tmp, "config", "opencodez", "prompts")
     await fs.mkdir(path.join(root, "core"), { recursive: true })
     await fs.mkdir(path.join(root, "tone"), { recursive: true })
-    await fs.writeFile(path.join(root, "core", "codex_gpt_5_5.md"), "CORE PROMPT")
+    await Promise.all(
+      Object.entries(corePrompts).map(([name, content]) =>
+        fs.writeFile(path.join(root, "core", `${name}.md`), content),
+      ),
+    )
     await fs.writeFile(path.join(root, "tone", "codex_pragmatic.md"), "TONE PROMPT")
     await fs.writeFile(path.join(root, "core", "manual_core.md"), "MANUAL SYSTEM PROMPT")
     await fs.writeFile(path.join(root, "tone", "manual_tone.md"), "MANUAL TONE PROMPT")
@@ -125,10 +149,33 @@ describe("LLMRequestPrep OpenCodez integration", () => {
     expect(system).toContain("AGENT PROMPT")
     expect(system).toContain("TONE PROMPT")
     expect(system).toContain("EXTRA SYSTEM")
+    expect(system).not.toContain(SystemPrompt.builtinPrompt("gpt")!)
     expect(prepared.messages[0]).toEqual({
       role: "system",
       content: prepared.system[0],
     })
+  })
+
+  test("selects mapped Codex Core defaults for OpenAI Responses GPT variants", async () => {
+    await Promise.all(
+      defaultSystemCases.map(async (item) => {
+        const prepared = await Effect.runPromise(
+          LLMRequestPrep.prepare({
+            ...baseInput,
+            model: {
+              ...model,
+              id: item.modelID,
+              api: { id: item.modelID, url: "https://api.openai.com/v1", npm: "@ai-sdk/openai" },
+            },
+          }),
+        )
+        const system = prepared.system.join("\n")
+
+        expect(system).toContain(item.prompt)
+        expect(system).toContain("TONE PROMPT")
+        expect(system).toContain("AGENT PROMPT")
+      }),
+    )
   })
 
   test("detects production-shaped OpenAI Responses GPT models", async () => {

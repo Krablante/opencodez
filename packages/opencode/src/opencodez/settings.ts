@@ -34,7 +34,11 @@ export const defaults = {
   system: {
     default: "codex_gpt_5_5",
     "gpt-5.2": "codex_gpt_5_2",
+    "gpt-5.2-codex": "codex_gpt_5_2_codex",
+    "gpt-5.3-codex": "codex_gpt_5_3_codex",
+    "gpt-5.3-codex-spark": "codex_gpt_5_3_codex",
     "gpt-5.4": "codex_gpt_5_4",
+    "gpt-5.4-mini": "codex_gpt_5_4_mini",
     "gpt-5.5": "codex_gpt_5_5",
   },
   tone: "codex_pragmatic",

@@ -58,13 +58,17 @@ For detailed behavior, defaults, command semantics, pruning rules, and maintenan
 
 OpenCodez is designed to install from GitHub Releases once public releases are enabled. It does not publish to npm and does not install over upstream `opencode`.
 
-Install:
+The commands below are the future public-release channel. For local dogfooding
+before a release exists, use the source checkout or a local `OPENCODEZ_BUILD=1`
+binary.
+
+Public release install:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install.sh | sh
 ```
 
-Update:
+Public release update:
 
 ```bash
 opencodez update
@@ -146,6 +150,18 @@ codex_friendly
 codex_pragmatic
 ```
 
+Out-of-the-box OpenAI Responses GPT System defaults:
+
+```text
+gpt-5.2 -> codex_gpt_5_2
+gpt-5.2-codex -> codex_gpt_5_2_codex
+gpt-5.3-codex -> codex_gpt_5_3_codex
+gpt-5.3-codex-spark -> codex_gpt_5_3_codex
+gpt-5.4 -> codex_gpt_5_4
+gpt-5.4-mini -> codex_gpt_5_4_mini
+gpt-5.5 -> codex_gpt_5_5
+```
+
 Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one prompt name for all models, or a mapping keyed by model id, family, `provider/model`, or `default`:
 
 ```jsonc
@@ -154,7 +170,10 @@ Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one p
     "responses": {
       "system": {
         "default": "codex_gpt_5_5",
+        "gpt-5.2-codex": "codex_gpt_5_2_codex",
+        "gpt-5.3-codex-spark": "codex_gpt_5_3_codex",
         "gpt-5.4": "codex_gpt_5_4",
+        "gpt-5.4-mini": "codex_gpt_5_4_mini",
         "deepseek": "default"
       },
       "tone": {

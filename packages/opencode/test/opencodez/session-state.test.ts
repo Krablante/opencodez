@@ -19,6 +19,16 @@ const config = {
   },
 }
 
+const mappedDefaults = [
+  { modelID: "gpt-5.2", system: "codex_gpt_5_2" },
+  { modelID: "gpt-5.2-codex", system: "codex_gpt_5_2_codex" },
+  { modelID: "gpt-5.3-codex", system: "codex_gpt_5_3_codex" },
+  { modelID: "gpt-5.3-codex-spark", system: "codex_gpt_5_3_codex" },
+  { modelID: "gpt-5.4", system: "codex_gpt_5_4" },
+  { modelID: "gpt-5.4-mini", system: "codex_gpt_5_4_mini" },
+  { modelID: "gpt-5.5", system: "codex_gpt_5_5" },
+] as const
+
 describe("OpenCodez session-bound state", () => {
   test("restores manual System and Tone from session metadata", () => {
     const metadata = {
@@ -119,6 +129,25 @@ describe("OpenCodez session-bound state", () => {
       tone: undefined,
       systemManual: false,
       toneManual: false,
+    })
+  })
+
+  test("maps built-in Codex System defaults for OpenAI Responses GPT variants", () => {
+    mappedDefaults.forEach((item) => {
+      expect(
+        OpenCodezSession.effective({
+          model: {
+            id: item.modelID,
+            providerID: "openai",
+            api: { id: item.modelID, npm: "@ai-sdk/openai" },
+          },
+        }),
+      ).toMatchObject({
+        system: item.system,
+        tone: "codex_pragmatic",
+        systemManual: false,
+        toneManual: false,
+      })
     })
   })
 
