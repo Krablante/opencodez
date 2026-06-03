@@ -47,7 +47,7 @@ OpenCodez keeps the normal OpenCode shape, but adds a few practical controls:
 - `/new --system`, `/new --tone`, and `/new --template` start a new session with explicit prompt settings.
 - Model-aware defaults can choose System/Tone presets automatically for OpenAI Responses GPT models, and users can configure defaults for other models too.
 - Manual `/system`, `/tone`, and `/template` choices stay active when you switch models.
-- The TUI shows a compact System + Tone indicator while you work.
+- The TUI shows the concrete active System prompt id and Tone preset while you work.
 - `/pruning` lets you view and change session-local pruning settings.
 - Tool calls stay readable while tool result and reasoning payloads can be replaced with deterministic placeholders.
 

@@ -40,17 +40,21 @@ export function builtinPrompt(name: string) {
   return builtin[name as keyof typeof builtin]
 }
 
-export function providerName(model: Provider.Model) {
-  if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3")) return "beast"
-  if (model.api.id.includes("gpt")) {
-    if (model.api.id.includes("codex")) return "codex"
+export function providerNameFromID(modelID: string) {
+  if (modelID.includes("gpt-4") || modelID.includes("o1") || modelID.includes("o3")) return "beast"
+  if (modelID.includes("gpt")) {
+    if (modelID.includes("codex")) return "codex"
     return "gpt"
   }
-  if (model.api.id.includes("gemini-")) return "gemini"
-  if (model.api.id.includes("claude")) return "anthropic"
-  if (model.api.id.toLowerCase().includes("trinity")) return "trinity"
-  if (model.api.id.toLowerCase().includes("kimi")) return "kimi"
+  if (modelID.includes("gemini-")) return "gemini"
+  if (modelID.includes("claude")) return "anthropic"
+  if (modelID.toLowerCase().includes("trinity")) return "trinity"
+  if (modelID.toLowerCase().includes("kimi")) return "kimi"
   return "default"
+}
+
+export function providerName(model: Provider.Model) {
+  return providerNameFromID(model.api.id)
 }
 
 export function provider(model: Provider.Model) {

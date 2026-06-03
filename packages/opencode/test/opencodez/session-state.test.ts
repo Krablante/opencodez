@@ -151,6 +151,79 @@ describe("OpenCodez session-bound state", () => {
     })
   })
 
+  test("reports concrete System prompt ids for the TUI indicator", () => {
+    const deepseek = {
+      id: "deepseek-chat",
+      providerID: "deepseek",
+      family: "deepseek",
+      api: { id: "deepseek-chat" },
+    }
+
+    expect(OpenCodezSession.effective({ model: deepseek }).system).toBeUndefined()
+    expect(OpenCodezSession.indicator({ model: deepseek })).toEqual({
+      system: "default",
+      tone: undefined,
+      systemManual: false,
+      toneManual: false,
+    })
+
+    expect(
+      OpenCodezSession.indicator({
+        model: {
+          id: "claude-sonnet-4-5-20250929",
+          providerID: "anthropic",
+          family: "anthropic",
+          api: { id: "claude-sonnet-4-5-20250929" },
+        },
+      }).system,
+    ).toBe("anthropic")
+
+    expect(
+      OpenCodezSession.indicator({
+        model: {
+          id: "gpt-5.5",
+          providerID: "openai",
+          api: { id: "gpt-5.5", npm: "@ai-sdk/openai" },
+        },
+      }),
+    ).toMatchObject({
+      system: "codex_gpt_5_5",
+      tone: "codex_pragmatic",
+    })
+  })
+
+  test("reflects manual System and Tone choices in the TUI indicator", () => {
+    const model = {
+      id: "deepseek-chat",
+      providerID: "deepseek",
+      family: "deepseek",
+      api: { id: "deepseek-chat" },
+    }
+
+    OpenCodezSession.apply(
+      "indicator-manual",
+      {
+        system: "codex_gpt_5_5",
+        tone: "codex_pragmatic",
+        systemManual: true,
+        toneManual: true,
+      },
+      {},
+    )
+
+    expect(
+      OpenCodezSession.indicator({
+        model,
+        sessionID: "indicator-manual",
+      }),
+    ).toEqual({
+      system: "codex_gpt_5_5",
+      tone: "codex_pragmatic",
+      systemManual: true,
+      toneManual: true,
+    })
+  })
+
   test("restores and serializes pruning overrides without config rewrites", () => {
     const metadata = {
       keep: "unchanged",

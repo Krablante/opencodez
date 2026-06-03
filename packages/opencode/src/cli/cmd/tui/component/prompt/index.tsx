@@ -228,7 +228,7 @@ export function Prompt(props: PromptProps) {
   const currentProviderLabel = createMemo(() => local.model.parsed().provider)
   const openCodezSelection = createMemo(() => {
     openCodezVersion()
-    return OpenCodezSession.effective({
+    return OpenCodezSession.indicator({
       config: sync.data.config,
       model: currentOpenCodezModel(),
       modelID: local.model.current()?.modelID,
@@ -237,9 +237,12 @@ export function Prompt(props: PromptProps) {
     })
   })
   const openCodezIndicator = createMemo(() => {
-    const label = `S: ${openCodezSelection().system ?? "upstream"} · T: ${openCodezSelection().tone ?? "none"}`
+    const selection = openCodezSelection()
+    const tone = selection.tone ?? "none"
+    const label = `S: ${selection.system} · T: ${tone}`
+    const compactLabel = label.length > 35 ? `S:${selection.system}·T:${tone}` : label
     const width = Math.max(18, Math.min(56, Math.floor(dimensions().width / 3)))
-    return Locale.truncateMiddle(label, width)
+    return Locale.truncateMiddle(compactLabel, width)
   })
 
   function selectWorkspace(selection: WorkspaceSelection | undefined) {
@@ -1852,9 +1855,9 @@ export function Prompt(props: PromptProps) {
                 </Show>
               </box>
               <Show when={hasRightContent()}>
-                <box flexDirection="row" gap={1} alignItems="center">
+                <box flexDirection="row" gap={1} alignItems="center" minWidth={0}>
                   <Show when={OpenCodezIdentity.enabled && store.mode === "normal"}>
-                    <text flexShrink={1} fg={fadeColor(theme.textMuted, modelMetaAlpha())}>
+                    <text flexShrink={1} wrapMode="none" overflow="hidden" fg={fadeColor(theme.textMuted, modelMetaAlpha())}>
                       {openCodezIndicator()}
                     </text>
                   </Show>

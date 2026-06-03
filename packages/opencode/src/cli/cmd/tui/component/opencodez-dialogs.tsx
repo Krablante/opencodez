@@ -21,14 +21,14 @@ export function OpenCodezPromptSelector(props: {
   const toast = useToast()
   const sdk = useSDK()
   const current = createMemo(() => {
-    const effective = OpenCodezSession.effective({
+    const indicator = OpenCodezSession.indicator({
       config: props.config,
       model: props.model,
       sessionID: props.sessionID,
       metadata: props.metadata,
     })
-    if (props.kind === "system") return effective.system
-    if (props.kind === "tone") return effective.tone
+    if (props.kind === "system") return indicator.system
+    if (props.kind === "tone") return indicator.tone
     return undefined
   })
 

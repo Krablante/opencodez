@@ -337,12 +337,19 @@ The indicator should be compact and permanent, for example:
 S: codex_gpt_5_5 · T: codex_pragmatic
 ```
 
-If the current model is using the upstream system prompt without an explicit
-OpenCodez System selection, the indicator can show:
+`S:` always shows the concrete active System prompt id. If the current model is
+using an upstream OpenCode built-in prompt without an explicit OpenCodez System
+selection, the indicator still shows that prompt id:
 
 ```text
-S: upstream · T: none
+S: default · T: none
 ```
+
+OpenAI Responses GPT defaults show the selected Codex prompt id, such as
+`codex_gpt_5_5`. Manual `/system` choices update `S:` immediately.
+
+`T: none` is normal when no separate Tone preset is active. Manual `/tone`
+choices update `T:` immediately.
 
 The indicator should stay simple. It should not invent a separate `/status`
 command, and it should not use complicated truncation logic. `/system` and

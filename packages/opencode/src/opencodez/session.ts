@@ -1,6 +1,7 @@
 export * as OpenCodezSession from "./session"
 
 import { OpenCodezSettings } from "./settings"
+import { SystemPrompt } from "@/session/system"
 
 export type Selection = {
   system?: string
@@ -83,6 +84,20 @@ export function effective(input: {
     tone: state.toneManual && state.tone ? state.tone : defaults.tone,
     systemManual: state.systemManual === true,
     toneManual: state.toneManual === true,
+  }
+}
+
+export function indicator(input: {
+  config?: OpenCodezSettings.ConfigLike
+  model?: OpenCodezSettings.ModelLike
+  modelID?: string
+  sessionID?: string
+  metadata?: Record<string, unknown>
+}) {
+  const result = effective(input)
+  return {
+    ...result,
+    system: result.system ?? upstreamSystemPromptID(input.model ?? input.modelID),
   }
 }
 
@@ -178,6 +193,15 @@ function selectionForSession(sessionID: string, metadata?: Record<string, unknow
 
 function pruningForSession(sessionID: string, metadata?: Record<string, unknown>) {
   return pruningOverrides.get(sessionID) ?? fromMetadata(metadata).pruning ?? {}
+}
+
+function upstreamSystemPromptID(model: OpenCodezSettings.ModelLike | undefined) {
+  const id =
+    typeof model === "string"
+      ? (model.includes("/") ? model.split("/").at(-1) : model)
+      : (model?.api?.id ?? model?.id)
+  if (!id) return "default"
+  return SystemPrompt.providerNameFromID(id)
 }
 
 function mergePruning(current: PruningOverride, next: PruningOverride): PruningOverride {
