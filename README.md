@@ -104,7 +104,7 @@ Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one p
       },
       "tone": {
         "default": "codex_pragmatic",
-        "anthropic": "codex_friendly"
+        "anthropic": "codex_pragmatic"
       }
     }
   }
