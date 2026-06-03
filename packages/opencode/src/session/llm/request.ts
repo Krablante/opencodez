@@ -64,20 +64,18 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     ? yield* Effect.promise(async () => {
         const opencodez = OpenCodezSession.effective({
           config: input.config,
+          model: input.model,
           modelID: input.model.id,
           sessionID: input.sessionID,
           metadata: input.sessionMetadata,
         })
-        try {
-          return {
-            system: await OpenCodezPromptLibrary.readPrompt("core", opencodez.system),
-            tone: await OpenCodezPromptLibrary.readPrompt("tone", opencodez.tone),
-          }
-        } catch {
-          return {
-            system: undefined,
-            tone: undefined,
-          }
+        return {
+          system: opencodez.system
+            ? await OpenCodezPromptLibrary.readPrompt("core", opencodez.system).catch(() => undefined)
+            : undefined,
+          tone: opencodez.tone
+            ? await OpenCodezPromptLibrary.readPrompt("tone", opencodez.tone).catch(() => undefined)
+            : undefined,
         }
       })
     : {
@@ -85,14 +83,11 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         tone: undefined,
       }
   const baseSystem = [
-    ...(OpenCodezIdentity.enabled
-      ? opencodezPrompts.system
-        ? [opencodezPrompts.system]
-        : SystemPrompt.provider(input.model)
+    ...(OpenCodezIdentity.enabled && opencodezPrompts.system
+      ? [opencodezPrompts.system, ...(input.agent.prompt ? [input.agent.prompt] : [])]
       : input.agent.prompt
         ? [input.agent.prompt]
         : SystemPrompt.provider(input.model)),
-    ...(OpenCodezIdentity.enabled && input.agent.prompt ? [input.agent.prompt] : []),
   ]
   const system = [
     [

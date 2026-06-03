@@ -5,7 +5,7 @@ import { Schema } from "effect"
 
 export const Responses = Schema.Struct({
   system: Schema.optional(Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.String)])),
-  tone: Schema.optional(Schema.String),
+  tone: Schema.optional(Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.String)])),
 })
 
 export const Pruning = Schema.Struct({

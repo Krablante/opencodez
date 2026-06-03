@@ -211,6 +211,16 @@ export function Prompt(props: PromptProps) {
   onCleanup(() => unsubscribeOpenCodez?.())
   const currentOpenCodezMetadata = () =>
     props.sessionID ? (sync.session.get(props.sessionID)?.metadata as Record<string, unknown> | undefined) : undefined
+  const currentOpenCodezModel = () => {
+    const selected = local.model.current()
+    if (!selected) return
+    return (
+      sync.data.provider.find((item) => item.id === selected.providerID)?.models[selected.modelID] ?? {
+        id: selected.modelID,
+        providerID: selected.providerID,
+      }
+    )
+  }
   createEffect(() => {
     if (!OpenCodezIdentity.enabled) return
     OpenCodezSession.hydrate(props.sessionID, currentOpenCodezMetadata())
@@ -220,13 +230,14 @@ export function Prompt(props: PromptProps) {
     openCodezVersion()
     return OpenCodezSession.effective({
       config: sync.data.config,
+      model: currentOpenCodezModel(),
       modelID: local.model.current()?.modelID,
       sessionID: props.sessionID,
       metadata: currentOpenCodezMetadata(),
     })
   })
   const openCodezIndicator = createMemo(() => {
-    const label = `S: ${openCodezSelection().system} · T: ${openCodezSelection().tone}`
+    const label = `S: ${openCodezSelection().system ?? "upstream"} · T: ${openCodezSelection().tone ?? "none"}`
     const width = Math.max(18, Math.min(56, Math.floor(dimensions().width / 3)))
     return Locale.truncateMiddle(label, width)
   })
@@ -1114,7 +1125,7 @@ export function Prompt(props: PromptProps) {
           sessionID={sessionID}
           metadata={currentOpenCodezMetadata()}
           config={sync.data.config}
-          modelID={kind === "template" ? undefined : selectedModel?.modelID}
+          model={kind === "template" ? undefined : currentOpenCodezModel() ?? selectedModel?.modelID}
         />
       ))
       return true

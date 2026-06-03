@@ -18,7 +18,7 @@ const modalities = {
 const model = {
   id: "gpt-5.5",
   providerID: "openai",
-  api: { id: "responses", url: "https://api.openai.com/v1", npm: "@ai-sdk/openai" },
+  api: { id: "gpt-5.5", url: "https://api.openai.com/v1", npm: "@ai-sdk/openai" },
   name: "GPT-5.5",
   family: undefined,
   capabilities: {
@@ -80,10 +80,6 @@ const baseInput = {
   isWorkflow: false,
   config: {
     opencodez: {
-      responses: {
-        system: { default: "codex_gpt_5_5" },
-        tone: "codex_pragmatic",
-      },
       pruning: {
         enabled: true,
         pruning_size: 20_000,
@@ -121,7 +117,7 @@ describe("LLMRequestPrep OpenCodez integration", () => {
     if (tmp) await fs.rm(tmp, { recursive: true, force: true })
   })
 
-  test("includes Core, agent prompt, and Tone in request system context", async () => {
+  test("uses Codex Core and Tone defaults for OpenAI Responses GPT", async () => {
     const prepared = await Effect.runPromise(LLMRequestPrep.prepare(baseInput))
     const system = prepared.system.join("\n")
 
@@ -133,6 +129,138 @@ describe("LLMRequestPrep OpenCodez integration", () => {
       role: "system",
       content: prepared.system[0],
     })
+  })
+
+  test("detects production-shaped OpenAI Responses GPT models", async () => {
+    const prepared = await Effect.runPromise(
+      LLMRequestPrep.prepare({
+        ...baseInput,
+        model: {
+          ...model,
+          api: { id: "gpt-5.5", url: "https://api.openai.com/v1", npm: "@ai-sdk/openai" },
+        },
+      }),
+    )
+    const system = prepared.system.join("\n")
+
+    expect(system).toContain("CORE PROMPT")
+    expect(system).toContain("TONE PROMPT")
+  })
+
+  test("uses OpenAI API model id when the catalog model id is an alias", async () => {
+    const prepared = await Effect.runPromise(
+      LLMRequestPrep.prepare({
+        ...baseInput,
+        model: {
+          ...model,
+          id: "alias-gpt55",
+          api: { id: "gpt-5.5", url: "https://api.openai.com/v1", npm: "@ai-sdk/openai" },
+        },
+      }),
+    )
+    const system = prepared.system.join("\n")
+
+    expect(system).toContain("CORE PROMPT")
+    expect(system).toContain("TONE PROMPT")
+  })
+
+  test("matches config defaults by OpenAI API model id when the catalog model id is an alias", async () => {
+    const prepared = await Effect.runPromise(
+      LLMRequestPrep.prepare({
+        ...baseInput,
+        config: {
+          opencodez: {
+            responses: {
+              system: { "gpt-5.5": "manual_core" },
+              tone: { "gpt-5.5": "manual_tone" },
+            },
+            pruning: {
+              enabled: true,
+              pruning_size: 20_000,
+              preserve_tools: [],
+              prune: { reasoning: true, tool: true },
+            },
+          },
+        },
+        model: {
+          ...model,
+          id: "alias-gpt55",
+          api: { id: "gpt-5.5", url: "https://api.openai.com/v1", npm: "@ai-sdk/openai" },
+        },
+      }),
+    )
+    const system = prepared.system.join("\n")
+
+    expect(system).toContain("MANUAL SYSTEM PROMPT")
+    expect(system).toContain("MANUAL TONE PROMPT")
+    expect(system).not.toContain("CORE PROMPT")
+  })
+
+  test("keeps upstream request system for non-Responses models without OpenCodez defaults", async () => {
+    const prepared = await Effect.runPromise(
+      LLMRequestPrep.prepare({
+        ...baseInput,
+        model: {
+          ...model,
+          id: "deepseek-chat",
+          providerID: "deepseek",
+          api: { id: "deepseek-chat", url: "https://api.deepseek.com", npm: "@ai-sdk/deepseek" },
+          name: "DeepSeek Chat",
+        },
+        provider: {
+          ...provider,
+          id: "deepseek",
+          models: {},
+        },
+      }),
+    )
+    const system = prepared.system.join("\n")
+
+    expect(system).toContain("AGENT PROMPT")
+    expect(system).toContain("EXTRA SYSTEM")
+    expect(system).not.toContain("CORE PROMPT")
+    expect(system).not.toContain("TONE PROMPT")
+  })
+
+  test("applies user config defaults to non-Responses model families", async () => {
+    const prepared = await Effect.runPromise(
+      LLMRequestPrep.prepare({
+        ...baseInput,
+        config: {
+          opencodez: {
+            responses: {
+              system: { deepseek: "manual_core" },
+              tone: { deepseek: "manual_tone" },
+            },
+            pruning: {
+              enabled: true,
+              pruning_size: 20_000,
+              preserve_tools: [],
+              prune: { reasoning: true, tool: true },
+            },
+          },
+        },
+        model: {
+          ...model,
+          id: "deepseek-chat",
+          providerID: "deepseek",
+          family: "deepseek",
+          api: { id: "deepseek-chat", url: "https://api.deepseek.com", npm: "@ai-sdk/deepseek" },
+          name: "DeepSeek Chat",
+        },
+        provider: {
+          ...provider,
+          id: "deepseek",
+          models: {},
+        },
+      }),
+    )
+    const system = prepared.system.join("\n")
+
+    expect(system).toContain("MANUAL SYSTEM PROMPT")
+    expect(system).toContain("MANUAL TONE PROMPT")
+    expect(system).toContain("AGENT PROMPT")
+    expect(system).not.toContain("CORE PROMPT")
   })
 
   test("applies pruning to prepared messages", async () => {

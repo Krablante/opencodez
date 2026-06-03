@@ -7,6 +7,7 @@ import { useToast } from "../ui/toast"
 import { useSDK } from "../context/sdk"
 import { OpenCodezPromptLibrary } from "@/opencodez/prompt-library"
 import { OpenCodezSession } from "@/opencodez/session"
+import { OpenCodezSettings } from "@/opencodez/settings"
 
 export function OpenCodezPromptSelector(props: {
   kind: "system" | "tone" | "template"
@@ -14,7 +15,7 @@ export function OpenCodezPromptSelector(props: {
   sessionID?: string
   metadata?: Record<string, unknown>
   config?: Config
-  modelID?: string
+  model?: OpenCodezSettings.ModelLike
 }) {
   const dialog = useDialog()
   const toast = useToast()
@@ -22,7 +23,7 @@ export function OpenCodezPromptSelector(props: {
   const current = createMemo(() => {
     const effective = OpenCodezSession.effective({
       config: props.config,
-      modelID: props.modelID,
+      model: props.model,
       sessionID: props.sessionID,
       metadata: props.metadata,
     })

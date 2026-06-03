@@ -91,6 +91,26 @@ Prompt library paths:
 
 Bundled Codex-derived prompt files use the `codex_` prefix. User-created prompt files do not need that prefix.
 
+Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one prompt name for all models, or a mapping keyed by model id, family, `provider/model`, or `default`:
+
+```jsonc
+{
+  "opencodez": {
+    "responses": {
+      "system": {
+        "default": "codex_gpt_5_5",
+        "gpt-5.4": "codex_gpt_5_4",
+        "deepseek": "default"
+      },
+      "tone": {
+        "default": "codex_pragmatic",
+        "anthropic": "codex_friendly"
+      }
+    }
+  }
+}
+```
+
 ## Commands
 
 ```text

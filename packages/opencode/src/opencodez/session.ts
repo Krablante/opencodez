@@ -67,13 +67,15 @@ export function resetPending(selection: Selection = {}, pruning: PruningOverride
 
 export function effective(input: {
   config?: OpenCodezSettings.ConfigLike
+  model?: OpenCodezSettings.ModelLike
   modelID?: string
   sessionID?: string
   metadata?: Record<string, unknown>
 }) {
+  const model = input.model ?? input.modelID
   const defaults = {
-    system: OpenCodezSettings.defaultSystem(input.config, input.modelID),
-    tone: OpenCodezSettings.defaultTone(input.config),
+    system: OpenCodezSettings.defaultSystem(input.config, model),
+    tone: OpenCodezSettings.defaultTone(input.config, model),
   }
   const state = input.sessionID ? selectionForSession(input.sessionID, input.metadata) : pendingSelection
   return {

@@ -4,7 +4,7 @@ export type ConfigLike = Record<string, unknown> & {
   opencodez?: {
     responses?: {
       system?: string | Record<string, string>
-      tone?: string
+      tone?: string | Record<string, string>
     }
     pruning?: {
       enabled?: boolean
@@ -17,6 +17,18 @@ export type ConfigLike = Record<string, unknown> & {
     }
   }
 }
+
+export type ModelLike =
+  | string
+  | {
+      id?: string
+      providerID?: string
+      family?: string
+      api?: {
+        id?: string
+        npm?: string
+      }
+    }
 
 export const defaults = {
   system: {
@@ -37,15 +49,20 @@ export const defaults = {
   },
 }
 
-export function defaultSystem(config: ConfigLike | undefined, modelID: string | undefined) {
+export function defaultSystem(config: ConfigLike | undefined, model: ModelLike | undefined) {
   const configured = config?.opencodez?.responses?.system
   if (typeof configured === "string") return configured
-  const mapping = configured ?? defaults.system
-  return resolveModelMapping(mapping, modelID) ?? defaults.system.default
+  if (configured) return resolveModelMapping(configured, model)
+  if (!isOpenAIResponsesGPT(model)) return undefined
+  return resolveModelMapping(defaults.system, model) ?? defaults.system.default
 }
 
-export function defaultTone(config: ConfigLike | undefined) {
-  return config?.opencodez?.responses?.tone ?? defaults.tone
+export function defaultTone(config: ConfigLike | undefined, model: ModelLike | undefined) {
+  const configured = config?.opencodez?.responses?.tone
+  if (typeof configured === "string") return configured
+  if (configured) return resolveModelMapping(configured, model)
+  if (!isOpenAIResponsesGPT(model)) return undefined
+  return defaults.tone
 }
 
 export function pruning(config: ConfigLike | undefined) {
@@ -61,10 +78,24 @@ export function pruning(config: ConfigLike | undefined) {
   }
 }
 
-function resolveModelMapping(mapping: Record<string, string>, modelID: string | undefined) {
-  if (!modelID) return mapping.default
-  const candidates = new Set<string>([modelID, modelID.toLowerCase()])
-  const last = modelID.split("/").at(-1)
+function resolveModelMapping(mapping: Record<string, string>, model: ModelLike | undefined) {
+  const info = modelInfo(model)
+  if (!info.id && !info.apiID) return mapping.default
+  const candidates = new Set(
+    [
+      info.id,
+      info.id?.toLowerCase(),
+      info.apiID,
+      info.apiID?.toLowerCase(),
+      info.family,
+      info.family?.toLowerCase(),
+      info.providerID && `${info.providerID}/${info.id}`,
+      info.providerID && `${info.providerID}/${info.id}`.toLowerCase(),
+      info.providerID && info.apiID && `${info.providerID}/${info.apiID}`,
+      info.providerID && info.apiID && `${info.providerID}/${info.apiID}`.toLowerCase(),
+    ].filter((value): value is string => Boolean(value)),
+  )
+  const last = (info.apiID ?? info.id)?.split("/").at(-1)
   if (last) {
     candidates.add(last)
     candidates.add(last.toLowerCase())
@@ -73,4 +104,33 @@ function resolveModelMapping(mapping: Record<string, string>, modelID: string | 
     if (mapping[key]) return mapping[key]
   }
   return mapping.default
+}
+
+function isOpenAIResponsesGPT(model: ModelLike | undefined) {
+  const info = modelInfo(model)
+  return (
+    info.providerID === "openai" &&
+    info.apiNpm === "@ai-sdk/openai" &&
+    (info.apiID ?? info.id ?? "").toLowerCase().startsWith("gpt-")
+  )
+}
+
+function modelInfo(model: ModelLike | undefined) {
+  if (typeof model === "string") {
+    const [providerID, ...rest] = model.includes("/") ? model.split("/") : []
+    return {
+      id: rest.length ? rest.join("/") : model,
+      providerID,
+      family: undefined,
+      apiID: undefined,
+      apiNpm: undefined,
+    }
+  }
+  return {
+    id: model?.id,
+    providerID: model?.providerID,
+    family: model?.family,
+    apiID: model?.api?.id,
+    apiNpm: model?.api?.npm,
+  }
 }

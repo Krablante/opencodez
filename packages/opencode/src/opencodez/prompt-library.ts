@@ -7,6 +7,7 @@ import fs from "fs/promises"
 import { parse } from "jsonc-parser"
 import path from "path"
 import { defaultPromptAssets } from "./default-prompts"
+import { SystemPrompt } from "@/session/system"
 
 export type Kind = "core" | "tone" | "templates"
 
@@ -14,6 +15,7 @@ export interface Entry {
   name: string
   path: string
   kind: Kind
+  source: "builtin" | "library"
 }
 
 export interface Template {
@@ -50,14 +52,25 @@ export async function list(kind: Kind): Promise<Entry[]> {
   const dir = directories()[kind]
   const ext = kind === "templates" ? ".jsonc" : ".md"
   const files = await fs.readdir(dir).catch(() => [])
-  return files
+  const library = files
     .filter((file) => file.endsWith(ext))
-    .sort((a, b) => a.localeCompare(b))
     .map((file) => ({
       name: path.basename(file, ext),
       path: path.join(dir, file),
       kind,
+      source: "library" as const,
     }))
+  const builtin =
+    kind === "core"
+      ? SystemPrompt.builtinEntries().map((item) => ({
+          ...item,
+          kind,
+          source: "builtin" as const,
+        }))
+      : []
+  return Array.from(new Map([...builtin, ...library].map((item) => [item.name, item])).values()).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )
 }
 
 export async function get(kind: Kind, name: string) {
@@ -69,6 +82,7 @@ export async function get(kind: Kind, name: string) {
 export async function readPrompt(kind: "core" | "tone", name: string) {
   const entry = await get(kind, name)
   if (!entry) return
+  if (entry.source === "builtin" && kind === "core") return SystemPrompt.builtinPrompt(name)
   return Bun.file(entry.path).text()
 }
 

@@ -16,20 +16,45 @@ import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import { Skill } from "@/skill"
 
-export function provider(model: Provider.Model) {
-  if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
-    return [PROMPT_BEAST]
+const builtin = {
+  anthropic: PROMPT_ANTHROPIC,
+  beast: PROMPT_BEAST,
+  codex: PROMPT_CODEX,
+  default: PROMPT_DEFAULT,
+  gemini: PROMPT_GEMINI,
+  gpt: PROMPT_GPT,
+  kimi: PROMPT_KIMI,
+  trinity: PROMPT_TRINITY,
+} as const
+
+export function builtinEntries() {
+  return Object.keys(builtin)
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => ({
+      name,
+      path: `builtin:session/prompt/${name}.txt`,
+    }))
+}
+
+export function builtinPrompt(name: string) {
+  return builtin[name as keyof typeof builtin]
+}
+
+export function providerName(model: Provider.Model) {
+  if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3")) return "beast"
   if (model.api.id.includes("gpt")) {
-    if (model.api.id.includes("codex")) {
-      return [PROMPT_CODEX]
-    }
-    return [PROMPT_GPT]
+    if (model.api.id.includes("codex")) return "codex"
+    return "gpt"
   }
-  if (model.api.id.includes("gemini-")) return [PROMPT_GEMINI]
-  if (model.api.id.includes("claude")) return [PROMPT_ANTHROPIC]
-  if (model.api.id.toLowerCase().includes("trinity")) return [PROMPT_TRINITY]
-  if (model.api.id.toLowerCase().includes("kimi")) return [PROMPT_KIMI]
-  return [PROMPT_DEFAULT]
+  if (model.api.id.includes("gemini-")) return "gemini"
+  if (model.api.id.includes("claude")) return "anthropic"
+  if (model.api.id.toLowerCase().includes("trinity")) return "trinity"
+  if (model.api.id.toLowerCase().includes("kimi")) return "kimi"
+  return "default"
+}
+
+export function provider(model: Provider.Model) {
+  return [builtinPrompt(providerName(model)) ?? PROMPT_DEFAULT]
 }
 
 export interface Interface {

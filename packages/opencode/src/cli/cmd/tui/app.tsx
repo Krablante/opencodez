@@ -559,7 +559,16 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
 
   const connected = useConnected()
   const openCodezSessionID = () => (route.data.type === "session" ? route.data.sessionID : undefined)
-  const openCodezModelID = () => local.model.current()?.modelID
+  const openCodezModel = () => {
+    const selected = local.model.current()
+    if (!selected) return
+    return (
+      sync.data.provider.find((item) => item.id === selected.providerID)?.models[selected.modelID] ?? {
+        id: selected.modelID,
+        providerID: selected.providerID,
+      }
+    )
+  }
   const openCodezMetadata = () => {
     const sessionID = openCodezSessionID()
     return sessionID ? (sync.session.get(sessionID)?.metadata as Record<string, unknown> | undefined) : undefined
@@ -576,7 +585,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
           sessionID={openCodezSessionID()}
           metadata={openCodezMetadata()}
           config={sync.data.config}
-          modelID={kind === "template" ? undefined : openCodezModelID()}
+          model={kind === "template" ? undefined : openCodezModel()}
         />
       ))
     } catch (error) {

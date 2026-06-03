@@ -89,6 +89,39 @@ describe("OpenCodez session-bound state", () => {
     })
   })
 
+  test("uses built-in Codex defaults only for OpenAI Responses GPT", () => {
+    expect(
+      OpenCodezSession.effective({
+        model: {
+          id: "alias-gpt55",
+          providerID: "openai",
+          api: { id: "gpt-5.5", npm: "@ai-sdk/openai" },
+        },
+      }),
+    ).toEqual({
+      system: "codex_gpt_5_5",
+      tone: "codex_pragmatic",
+      systemManual: false,
+      toneManual: false,
+    })
+
+    expect(
+      OpenCodezSession.effective({
+        model: {
+          id: "deepseek-chat",
+          providerID: "deepseek",
+          family: "deepseek",
+          api: { id: "deepseek-chat" },
+        },
+      }),
+    ).toEqual({
+      system: undefined,
+      tone: undefined,
+      systemManual: false,
+      toneManual: false,
+    })
+  })
+
   test("restores and serializes pruning overrides without config rewrites", () => {
     const metadata = {
       keep: "unchanged",
