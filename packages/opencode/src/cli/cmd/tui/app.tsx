@@ -85,6 +85,7 @@ import {
   OpenCodezPruningStatusDialog,
 } from "./component/opencodez-dialogs"
 import { OpenCodezIdentity } from "@/opencodez/identity"
+import { OpenCodezPromptLibrary } from "@/opencodez/prompt-library"
 
 const appGlobalBindingCommands = [
   "session.list",
@@ -563,6 +564,25 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     const sessionID = openCodezSessionID()
     return sessionID ? (sync.session.get(sessionID)?.metadata as Record<string, unknown> | undefined) : undefined
   }
+  const openCodezPromptSelector = async (kind: "system" | "tone" | "template") => {
+    try {
+      const entries = await OpenCodezPromptLibrary.list(
+        kind === "system" ? "core" : kind === "tone" ? "tone" : "templates",
+      )
+      dialog.replace(() => (
+        <OpenCodezPromptSelector
+          kind={kind}
+          entries={entries}
+          sessionID={openCodezSessionID()}
+          metadata={openCodezMetadata()}
+          config={sync.data.config}
+          modelID={kind === "template" ? undefined : openCodezModelID()}
+        />
+      ))
+    } catch (error) {
+      toast.show({ message: errorMessage(error), variant: "error", duration: 3500 })
+    }
+  }
   const currentWorktreeWorkspace = createMemo(() => {
     const workspaceID = project.workspace.current()
     if (!workspaceID) return
@@ -614,15 +634,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
               category: "OpenCodez",
               slashName: "system",
               run: () => {
-                dialog.replace(() => (
-                  <OpenCodezPromptSelector
-                    kind="system"
-                    sessionID={openCodezSessionID()}
-                    metadata={openCodezMetadata()}
-                    config={sync.data.config}
-                    modelID={openCodezModelID()}
-                  />
-                ))
+                void openCodezPromptSelector("system")
               },
             },
             {
@@ -631,15 +643,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
               category: "OpenCodez",
               slashName: "tone",
               run: () => {
-                dialog.replace(() => (
-                  <OpenCodezPromptSelector
-                    kind="tone"
-                    sessionID={openCodezSessionID()}
-                    metadata={openCodezMetadata()}
-                    config={sync.data.config}
-                    modelID={openCodezModelID()}
-                  />
-                ))
+                void openCodezPromptSelector("tone")
               },
             },
             {
@@ -648,14 +652,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
               category: "OpenCodez",
               slashName: "template",
               run: () => {
-                dialog.replace(() => (
-                  <OpenCodezPromptSelector
-                    kind="template"
-                    sessionID={openCodezSessionID()}
-                    metadata={openCodezMetadata()}
-                    config={sync.data.config}
-                  />
-                ))
+                void openCodezPromptSelector("template")
               },
             },
             {

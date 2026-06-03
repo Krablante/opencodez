@@ -1,5 +1,5 @@
 import type { Config } from "@opencode-ai/sdk/v2"
-import { createMemo, createResource, Show } from "solid-js"
+import { createMemo } from "solid-js"
 import { DialogSelect } from "../ui/dialog-select"
 import { DialogAlert } from "../ui/dialog-alert"
 import { useDialog } from "../ui/dialog"
@@ -10,6 +10,7 @@ import { OpenCodezSession } from "@/opencodez/session"
 
 export function OpenCodezPromptSelector(props: {
   kind: "system" | "tone" | "template"
+  entries: OpenCodezPromptLibrary.Entry[]
   sessionID?: string
   metadata?: Record<string, unknown>
   config?: Config
@@ -18,9 +19,6 @@ export function OpenCodezPromptSelector(props: {
   const dialog = useDialog()
   const toast = useToast()
   const sdk = useSDK()
-  const libraryKind = (): OpenCodezPromptLibrary.Kind =>
-    props.kind === "system" ? "core" : props.kind === "tone" ? "tone" : "templates"
-  const [entries] = createResource(libraryKind, (kind) => OpenCodezPromptLibrary.list(kind))
   const current = createMemo(() => {
     const effective = OpenCodezSession.effective({
       config: props.config,
@@ -34,46 +32,35 @@ export function OpenCodezPromptSelector(props: {
   })
 
   return (
-    <Show
-      when={entries()}
-      fallback={
-        <box paddingLeft={2} paddingRight={2}>
-          <text>Loading prompt library...</text>
-        </box>
-      }
-    >
-      {(items) => (
-        <DialogSelect
-          title={props.kind === "system" ? "Select System" : props.kind === "tone" ? "Select Tone" : "Select Template"}
-          placeholder="Type to filter"
-          current={current()}
-          flat
-          options={items().map((item) => ({
-            title: item.name,
-            value: item.name,
-            description: item.path,
-          }))}
-          onSelect={(option) => {
-            void applySelection(props.kind, option.value, props.sessionID, props.metadata)
-              .then(async (label) => {
-                await persistSelection(sdk.client, props.sessionID, props.metadata)
-                return label
-              })
-              .then((label) => {
-                toast.show({ message: label, variant: "info", duration: 2500 })
-                dialog.clear()
-              })
-              .catch((error) => {
-                toast.show({
-                  message: error instanceof Error ? error.message : String(error),
-                  variant: "error",
-                  duration: 3500,
-                })
-              })
-          }}
-        />
-      )}
-    </Show>
+    <DialogSelect
+      title={props.kind === "system" ? "Select System" : props.kind === "tone" ? "Select Tone" : "Select Template"}
+      placeholder="Type to filter"
+      current={current()}
+      flat
+      options={props.entries.map((item) => ({
+        title: item.name,
+        value: item.name,
+        description: item.path,
+      }))}
+      onSelect={(option) => {
+        void applySelection(props.kind, option.value, props.sessionID, props.metadata)
+          .then(async (label) => {
+            await persistSelection(sdk.client, props.sessionID, props.metadata)
+            return label
+          })
+          .then((label) => {
+            toast.show({ message: label, variant: "info", duration: 2500 })
+            dialog.clear()
+          })
+          .catch((error) => {
+            toast.show({
+              message: error instanceof Error ? error.message : String(error),
+              variant: "error",
+              duration: 3500,
+            })
+          })
+      }}
+    />
   )
 }
 

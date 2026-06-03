@@ -1101,20 +1101,34 @@ export function Prompt(props: PromptProps) {
     }
   }
 
+  async function openOpenCodezPromptSelector(kind: "system" | "tone" | "template", sessionID: string | undefined) {
+    try {
+      const selectedModel = local.model.current()
+      const entries = await OpenCodezPromptLibrary.list(
+        kind === "system" ? "core" : kind === "tone" ? "tone" : "templates",
+      )
+      dialog.replace(() => (
+        <OpenCodezPromptSelector
+          kind={kind}
+          entries={entries}
+          sessionID={sessionID}
+          metadata={currentOpenCodezMetadata()}
+          config={sync.data.config}
+          modelID={kind === "template" ? undefined : selectedModel?.modelID}
+        />
+      ))
+      return true
+    } catch (error) {
+      toast.show({ message: errorMessage(error), variant: "error", duration: 3500 })
+      return false
+    }
+  }
+
   async function handleOpenCodezSlash(command: OpenCodezSlash.Command) {
     const sessionID = props.sessionID
-    const selectedModel = local.model.current()
     if (command.type === "system") {
       if (!command.name) {
-        dialog.replace(() => (
-          <OpenCodezPromptSelector
-            kind="system"
-            sessionID={sessionID}
-            metadata={currentOpenCodezMetadata()}
-            config={sync.data.config}
-            modelID={selectedModel?.modelID}
-          />
-        ))
+        if (!(await openOpenCodezPromptSelector("system", sessionID))) return true
         return clearCommandInput()
       }
       if (!(await applyNamedPrompt("system", command.name, sessionID))) return true
@@ -1122,15 +1136,7 @@ export function Prompt(props: PromptProps) {
     }
     if (command.type === "tone") {
       if (!command.name) {
-        dialog.replace(() => (
-          <OpenCodezPromptSelector
-            kind="tone"
-            sessionID={sessionID}
-            metadata={currentOpenCodezMetadata()}
-            config={sync.data.config}
-            modelID={selectedModel?.modelID}
-          />
-        ))
+        if (!(await openOpenCodezPromptSelector("tone", sessionID))) return true
         return clearCommandInput()
       }
       if (!(await applyNamedPrompt("tone", command.name, sessionID))) return true
@@ -1138,14 +1144,7 @@ export function Prompt(props: PromptProps) {
     }
     if (command.type === "template") {
       if (!command.name) {
-        dialog.replace(() => (
-          <OpenCodezPromptSelector
-            kind="template"
-            sessionID={sessionID}
-            metadata={currentOpenCodezMetadata()}
-            config={sync.data.config}
-          />
-        ))
+        if (!(await openOpenCodezPromptSelector("template", sessionID))) return true
         return clearCommandInput()
       }
       if (!(await applyTemplate(command.name, sessionID))) return true
