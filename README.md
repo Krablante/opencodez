@@ -1,3 +1,127 @@
+<h1 align="center">OpenCodez</h1>
+
+<p align="center">
+  A small, local-first fork of OpenCode with explicit prompt control, bundled Codex-style prompts, and safer context pruning.
+</p>
+
+<p align="center">
+  <strong>OpenCodez is not an official OpenCode project.</strong><br>
+  It is a personal distribution/fork that keeps upstream OpenCode recognizable and maintainable.
+</p>
+
+---
+
+## What OpenCodez Adds
+
+OpenCodez keeps the normal OpenCode shape, but adds a few practical controls for people who want predictable prompt setup and cleaner context handling:
+
+- `/system` selects the active Core/System prompt.
+- `/tone` selects the active Tone preset.
+- `/template` applies a saved System + Tone pair.
+- `/new --system`, `/new --tone`, and `/new --template` start a new session with explicit prompt settings.
+- Model-aware defaults can choose System/Tone presets automatically for GPT/OpenAI Responses models.
+- Manual `/system`, `/tone`, and `/template` choices stay active when you switch models.
+- The TUI shows a compact System + Tone indicator while you work.
+- `/pruning` lets you view and change session-local pruning settings.
+- Tool calls stay readable while large tool results and reasoning payloads can be replaced with deterministic placeholders.
+
+OpenCodez is meant to be a small fork, not a full rebrand. Upstream internals, docs, workflows, integrations, and package surfaces should stay as close to OpenCode as practical unless a fork-specific change is genuinely needed.
+
+## Install & Update
+
+OpenCodez is designed to install from GitHub Releases once public releases are enabled. It does not publish to npm and does not install over upstream `opencode`.
+
+Install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install.sh | sh
+```
+
+Update:
+
+```bash
+opencodez update
+```
+
+Check for updates without installing:
+
+```bash
+opencodez update --check
+```
+
+The update path is intentionally simple: GitHub Releases are the source of truth, the installer downloads the right release artifact, and `opencodez update` uses the same release channel from inside the app.
+
+## Run From Source
+
+For local development before a public release exists, run the source-checkout launcher directly:
+
+```bash
+./packages/opencode/bin/opencodez --help
+./packages/opencode/bin/opencodez
+```
+
+Future release builds should set `OPENCODEZ_BUILD=1` so the build script emits `opencodez-*` artifacts with an `opencodez` binary inside.
+
+## Side-by-Side With OpenCode
+
+OpenCodez is expected to live next to upstream OpenCode:
+
+```text
+opencode   # upstream OpenCode
+opencodez  # this fork
+```
+
+It uses its own config, data, and cache roots:
+
+```text
+~/.config/opencodez/
+~/.local/share/opencodez/
+~/.cache/opencodez/
+```
+
+OpenCodez does not automatically read from or write to `~/.config/opencode/`. If you want to reuse upstream OpenCode settings or prompt files, copy only the pieces you want into the OpenCodez config root manually.
+
+Prompt library paths:
+
+```text
+~/.config/opencodez/prompts/core/<name>.md
+~/.config/opencodez/prompts/tone/<name>.md
+~/.config/opencodez/prompts/templates/<name>.jsonc
+```
+
+Bundled Codex-derived prompt files use the `codex_` prefix. User-created prompt files do not need that prefix.
+
+## Commands
+
+```text
+/system
+/system codex_gpt_5_5
+
+/tone
+/tone codex_pragmatic
+
+/template
+/template gpt55
+
+/new --system codex_gpt_5_5 --tone codex_pragmatic
+/new -s codex_gpt_5_5 -o codex_pragmatic
+/new --template gpt55
+/new -t gpt55
+
+/prompts
+
+/pruning
+/pruning on
+/pruning off
+/pruning size 20000
+```
+
+## Upstream OpenCode README
+
+The original OpenCode README is kept below for general upstream context. OpenCodez-specific behavior is described in the sections above.
+
+---
+
 <p align="center">
   <a href="https://opencode.ai">
     <picture>

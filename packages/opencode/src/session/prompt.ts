@@ -1447,6 +1447,7 @@ export const layer = Layer.effect(
               permission: session.permission,
               sessionID,
               parentSessionID: session.parentID,
+              sessionMetadata: session.metadata,
               system,
               messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
               tools,

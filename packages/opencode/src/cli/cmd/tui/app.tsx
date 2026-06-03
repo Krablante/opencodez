@@ -79,6 +79,12 @@ import {
 
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
+import {
+  OpenCodezPromptSelector,
+  OpenCodezPromptsHelpDialog,
+  OpenCodezPruningStatusDialog,
+} from "./component/opencodez-dialogs"
+import { OpenCodezIdentity } from "@/opencodez/identity"
 
 const appGlobalBindingCommands = [
   "session.list",
@@ -551,6 +557,12 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
   )
 
   const connected = useConnected()
+  const openCodezSessionID = () => (route.data.type === "session" ? route.data.sessionID : undefined)
+  const openCodezModelID = () => local.model.current()?.modelID
+  const openCodezMetadata = () => {
+    const sessionID = openCodezSessionID()
+    return sessionID ? (sync.session.get(sessionID)?.metadata as Record<string, unknown> | undefined) : undefined
+  }
   const currentWorktreeWorkspace = createMemo(() => {
     const workspaceID = project.workspace.current()
     if (!workspaceID) return
@@ -594,6 +606,84 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
           dialog.clear()
         },
       },
+      ...(OpenCodezIdentity.enabled
+        ? [
+            {
+              name: "opencodez.system",
+              title: "Select System",
+              category: "OpenCodez",
+              slashName: "system",
+              run: () => {
+                dialog.replace(() => (
+                  <OpenCodezPromptSelector
+                    kind="system"
+                    sessionID={openCodezSessionID()}
+                    metadata={openCodezMetadata()}
+                    config={sync.data.config}
+                    modelID={openCodezModelID()}
+                  />
+                ))
+              },
+            },
+            {
+              name: "opencodez.tone",
+              title: "Select Tone",
+              category: "OpenCodez",
+              slashName: "tone",
+              run: () => {
+                dialog.replace(() => (
+                  <OpenCodezPromptSelector
+                    kind="tone"
+                    sessionID={openCodezSessionID()}
+                    metadata={openCodezMetadata()}
+                    config={sync.data.config}
+                    modelID={openCodezModelID()}
+                  />
+                ))
+              },
+            },
+            {
+              name: "opencodez.template",
+              title: "Select Template",
+              category: "OpenCodez",
+              slashName: "template",
+              run: () => {
+                dialog.replace(() => (
+                  <OpenCodezPromptSelector
+                    kind="template"
+                    sessionID={openCodezSessionID()}
+                    metadata={openCodezMetadata()}
+                    config={sync.data.config}
+                  />
+                ))
+              },
+            },
+            {
+              name: "opencodez.prompts",
+              title: "Show prompt library paths",
+              category: "OpenCodez",
+              slashName: "prompts",
+              run: () => {
+                dialog.replace(() => <OpenCodezPromptsHelpDialog />)
+              },
+            },
+            {
+              name: "opencodez.pruning",
+              title: "Show pruning settings",
+              category: "OpenCodez",
+              slashName: "pruning",
+              run: () => {
+                dialog.replace(() => (
+                  <OpenCodezPruningStatusDialog
+                    sessionID={openCodezSessionID()}
+                    metadata={openCodezMetadata()}
+                    config={sync.data.config}
+                  />
+                ))
+              },
+            },
+          ]
+        : []),
       {
         name: "workspace.copy_path",
         title: "Copy worktree path",

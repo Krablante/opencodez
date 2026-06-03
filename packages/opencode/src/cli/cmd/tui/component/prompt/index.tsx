@@ -62,6 +62,11 @@ import { Flag } from "@opencode-ai/core/flag/flag"
 import { type WorkspaceStatus } from "../workspace-label"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
 import { useTuiConfig } from "../../context/tui-config"
+import { OpenCodezPromptSelector, OpenCodezPromptsHelpDialog, OpenCodezPruningStatusDialog } from "../opencodez-dialogs"
+import { OpenCodezPromptLibrary } from "@/opencodez/prompt-library"
+import { OpenCodezSession } from "@/opencodez/session"
+import { OpenCodezSlash } from "@/opencodez/slash"
+import { OpenCodezIdentity } from "@/opencodez/identity"
 
 export type PromptProps = {
   sessionID?: string
@@ -199,8 +204,35 @@ export function Prompt(props: PromptProps) {
   const [workspaceCreatingDots, setWorkspaceCreatingDots] = createSignal(3)
   const [warpNotice, setWarpNotice] = createSignal<string>()
   const [cursorVersion, setCursorVersion] = createSignal(0)
+  const [openCodezVersion, setOpenCodezVersion] = createSignal(OpenCodezSession.version())
+  const unsubscribeOpenCodez = OpenCodezIdentity.enabled
+    ? OpenCodezSession.subscribe(() => setOpenCodezVersion(OpenCodezSession.version()))
+    : undefined
+  onCleanup(() => unsubscribeOpenCodez?.())
+  const currentOpenCodezMetadata = () =>
+    props.sessionID ? (sync.session.get(props.sessionID)?.metadata as Record<string, unknown> | undefined) : undefined
+  createEffect(() => {
+    if (!OpenCodezIdentity.enabled) return
+    OpenCodezSession.hydrate(props.sessionID, currentOpenCodezMetadata())
+  })
   const currentProviderLabel = createMemo(() => local.model.parsed().provider)
-  const hasRightContent = createMemo(() => Boolean(props.right))
+  const openCodezSelection = createMemo(() => {
+    openCodezVersion()
+    return OpenCodezSession.effective({
+      config: sync.data.config,
+      modelID: local.model.current()?.modelID,
+      sessionID: props.sessionID,
+      metadata: currentOpenCodezMetadata(),
+    })
+  })
+  const openCodezIndicator = createMemo(() => {
+    const label = `S: ${openCodezSelection().system} · T: ${openCodezSelection().tone}`
+    const width = Math.max(18, Math.min(56, Math.floor(dimensions().width / 3)))
+    return Locale.truncateMiddle(label, width)
+  })
+  const hasRightContent = createMemo(
+    () => (OpenCodezIdentity.enabled && store.mode === "normal") || Boolean(props.right),
+  )
 
   function selectWorkspace(selection: WorkspaceSelection | undefined) {
     setWorkspaceSelection(selection)
@@ -1005,6 +1037,200 @@ export function Prompt(props: PromptProps) {
     }
   })
 
+  async function clearCommandInput() {
+    setStore("prompt", {
+      input: "",
+      parts: [],
+    })
+    setStore("extmarkToPartIndex", new Map())
+    input?.clear()
+    return true
+  }
+
+  async function applyNamedPrompt(kind: "system" | "tone", name: string, sessionID: string | undefined) {
+    const libraryKind = kind === "system" ? "core" : "tone"
+    const entry = await OpenCodezPromptLibrary.get(libraryKind, name)
+    if (!entry) {
+      toast.show({ message: `Nothing found for "${name}". Try another name.`, variant: "warning", duration: 3500 })
+      return false
+    }
+    if (kind === "system") {
+      OpenCodezSession.apply(sessionID, { system: name, systemManual: true }, currentOpenCodezMetadata())
+      toast.show({ message: `System set to ${name}`, variant: "info", duration: 2500 })
+    } else {
+      OpenCodezSession.apply(sessionID, { tone: name, toneManual: true }, currentOpenCodezMetadata())
+      toast.show({ message: `Tone set to ${name}`, variant: "info", duration: 2500 })
+    }
+    await persistOpenCodezState(sessionID)
+    return true
+  }
+
+  async function applyTemplate(name: string, sessionID: string | undefined) {
+    const template = await OpenCodezPromptLibrary.readTemplate(name)
+    if (!template) {
+      toast.show({ message: `Nothing found for "${name}". Try another name.`, variant: "warning", duration: 3500 })
+      return false
+    }
+    OpenCodezSession.apply(
+      sessionID,
+      {
+        system: template.system,
+        tone: template.tone,
+        systemManual: true,
+        toneManual: true,
+      },
+      currentOpenCodezMetadata(),
+    )
+    toast.show({ message: `Template set to ${name}`, variant: "info", duration: 2500 })
+    await persistOpenCodezState(sessionID)
+    return true
+  }
+
+  async function persistOpenCodezState(sessionID: string | undefined) {
+    if (!sessionID) return
+    const result = await sdk.client.session.update({
+      sessionID,
+      metadata: OpenCodezSession.metadataWithSessionState(currentOpenCodezMetadata(), sessionID),
+    })
+    if (result.error) {
+      toast.show({
+        message: `Could not save OpenCodez session state: ${errorMessage(result.error)}`,
+        variant: "warning",
+        duration: 3500,
+      })
+    }
+  }
+
+  async function handleOpenCodezSlash(command: OpenCodezSlash.Command) {
+    const sessionID = props.sessionID
+    const selectedModel = local.model.current()
+    if (command.type === "system") {
+      if (!command.name) {
+        dialog.replace(() => (
+          <OpenCodezPromptSelector
+            kind="system"
+            sessionID={sessionID}
+            metadata={currentOpenCodezMetadata()}
+            config={sync.data.config}
+            modelID={selectedModel?.modelID}
+          />
+        ))
+        return clearCommandInput()
+      }
+      if (!(await applyNamedPrompt("system", command.name, sessionID))) return true
+      return clearCommandInput()
+    }
+    if (command.type === "tone") {
+      if (!command.name) {
+        dialog.replace(() => (
+          <OpenCodezPromptSelector
+            kind="tone"
+            sessionID={sessionID}
+            metadata={currentOpenCodezMetadata()}
+            config={sync.data.config}
+            modelID={selectedModel?.modelID}
+          />
+        ))
+        return clearCommandInput()
+      }
+      if (!(await applyNamedPrompt("tone", command.name, sessionID))) return true
+      return clearCommandInput()
+    }
+    if (command.type === "template") {
+      if (!command.name) {
+        dialog.replace(() => (
+          <OpenCodezPromptSelector
+            kind="template"
+            sessionID={sessionID}
+            metadata={currentOpenCodezMetadata()}
+            config={sync.data.config}
+          />
+        ))
+        return clearCommandInput()
+      }
+      if (!(await applyTemplate(command.name, sessionID))) return true
+      return clearCommandInput()
+    }
+    if (command.type === "prompts") {
+      dialog.replace(() => <OpenCodezPromptsHelpDialog />)
+      return clearCommandInput()
+    }
+    if (command.type === "pruning") {
+      if (command.error) {
+        toast.show({ message: command.error, variant: "warning", duration: 3500 })
+        return true
+      }
+      if (!command.action) {
+        dialog.replace(() => (
+          <OpenCodezPruningStatusDialog
+            sessionID={sessionID}
+            metadata={currentOpenCodezMetadata()}
+            config={sync.data.config}
+          />
+        ))
+        return clearCommandInput()
+      }
+      if (command.action === "on") OpenCodezSession.setPruning(sessionID, { enabled: true }, currentOpenCodezMetadata())
+      if (command.action === "off")
+        OpenCodezSession.setPruning(sessionID, { enabled: false }, currentOpenCodezMetadata())
+      if (command.action === "size")
+        OpenCodezSession.setPruning(sessionID, { pruning_size: command.size }, currentOpenCodezMetadata())
+      await persistOpenCodezState(sessionID)
+      toast.show({ message: "Pruning settings updated for this session", variant: "info", duration: 2500 })
+      return clearCommandInput()
+    }
+    if (command.type === "new") {
+      if (command.error) {
+        toast.show({ message: command.error, variant: "warning", duration: 3500 })
+        return true
+      }
+      const selection: OpenCodezSession.Selection = {}
+      if (command.template) {
+        const template = await OpenCodezPromptLibrary.readTemplate(command.template)
+        if (!template) {
+          toast.show({
+            message: `Nothing found for "${command.template}". Try another name.`,
+            variant: "warning",
+            duration: 3500,
+          })
+          return true
+        }
+        selection.system = template.system
+        selection.tone = template.tone
+        selection.systemManual = true
+        selection.toneManual = true
+      }
+      if (command.system) {
+        if (!(await OpenCodezPromptLibrary.get("core", command.system))) {
+          toast.show({
+            message: `Nothing found for "${command.system}". Try another name.`,
+            variant: "warning",
+            duration: 3500,
+          })
+          return true
+        }
+        selection.system = command.system
+        selection.systemManual = true
+      }
+      if (command.tone) {
+        if (!(await OpenCodezPromptLibrary.get("tone", command.tone))) {
+          toast.show({
+            message: `Nothing found for "${command.tone}". Try another name.`,
+            variant: "warning",
+            duration: 3500,
+          })
+          return true
+        }
+        selection.tone = command.tone
+        selection.toneManual = true
+      }
+      OpenCodezSession.resetPending(selection)
+      route.navigate({ type: "home" })
+      dialog.clear()
+      return clearCommandInput()
+    }
+  }
+
   let submitting = false
   async function submit() {
     // Prevent overlapping invocations (e.g. a double-pressed Enter, or the
@@ -1042,6 +1268,10 @@ export function Prompt(props: PromptProps) {
     if (trimmed === "exit" || trimmed === "quit" || trimmed === ":q") {
       void exit()
       return true
+    }
+    if (OpenCodezIdentity.enabled) {
+      const openCodezCommand = OpenCodezSlash.parse(trimmed)
+      if (openCodezCommand) return handleOpenCodezSlash(openCodezCommand)
     }
     const selectedModel = local.model.current()
     if (!selectedModel) {
@@ -1092,6 +1322,9 @@ export function Prompt(props: PromptProps) {
           id: selectedModel.modelID,
           variant,
         },
+        metadata: Object.keys(OpenCodezSession.pendingMetadata()).length
+          ? OpenCodezSession.pendingMetadata()
+          : undefined,
       })
 
       if (res.error) {
@@ -1106,6 +1339,7 @@ export function Prompt(props: PromptProps) {
       }
 
       sessionID = res.data.id
+      OpenCodezSession.consumePending(sessionID)
     }
 
     const messageID = MessageID.ascending()
@@ -1609,6 +1843,11 @@ export function Prompt(props: PromptProps) {
               </box>
               <Show when={hasRightContent()}>
                 <box flexDirection="row" gap={1} alignItems="center">
+                  <Show when={OpenCodezIdentity.enabled && store.mode === "normal"}>
+                    <text flexShrink={1} fg={fadeColor(theme.textMuted, modelMetaAlpha())}>
+                      {openCodezIndicator()}
+                    </text>
+                  </Show>
                   {props.right}
                 </box>
               </Show>

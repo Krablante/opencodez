@@ -6,12 +6,25 @@ import { Context, Effect, Layer } from "effect"
 import { Flock } from "./util/flock"
 import { Flag } from "./flag/flag"
 
-const app = "opencode"
+const app = (() => {
+  const value = process.env["OPENCODE_APP_NAME"]?.trim()
+  if (value && /^[a-z0-9._-]+$/i.test(value)) return value
+  const invoked = [process.argv[0], process.argv[1], process.execPath]
+    .filter(Boolean)
+    .map((item) => path.basename(item!))
+  if (invoked.some((item) => item === "opencodez" || item === "opencodez.exe")) return "opencodez"
+  return "opencode"
+})()
 const data = path.join(xdgData!, app)
 const cache = path.join(xdgCache!, app)
 const config = path.join(xdgConfig!, app)
 const state = path.join(xdgState!, app)
 const tmp = path.join(os.tmpdir(), app)
+const lightweight = (() => {
+  if (app !== "opencodez") return false
+  if (process.argv.some((arg) => arg === "-h" || arg === "--help" || arg === "-v" || arg === "--version")) return true
+  return process.argv.some((arg) => ["update", "upgrade", "uninstall"].includes(arg))
+})()
 
 const paths = {
   get home() {
@@ -31,15 +44,17 @@ export const Path = paths
 
 Flock.setGlobal({ state })
 
-await Promise.all([
-  fs.mkdir(Path.data, { recursive: true }),
-  fs.mkdir(Path.config, { recursive: true }),
-  fs.mkdir(Path.state, { recursive: true }),
-  fs.mkdir(Path.tmp, { recursive: true }),
-  fs.mkdir(Path.log, { recursive: true }),
-  fs.mkdir(Path.bin, { recursive: true }),
-  fs.mkdir(Path.repos, { recursive: true }),
-])
+if (!lightweight) {
+  await Promise.all([
+    fs.mkdir(Path.data, { recursive: true }),
+    fs.mkdir(Path.config, { recursive: true }),
+    fs.mkdir(Path.state, { recursive: true }),
+    fs.mkdir(Path.tmp, { recursive: true }),
+    fs.mkdir(Path.log, { recursive: true }),
+    fs.mkdir(Path.bin, { recursive: true }),
+    fs.mkdir(Path.repos, { recursive: true }),
+  ])
+}
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Global") {}
 

@@ -30,8 +30,6 @@ import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
 import { DbCommand } from "./cli/cmd/db"
-import path from "path"
-import { Global } from "@opencode-ai/core/global"
 import { JsonMigration } from "@/storage/json-migration"
 import { Database } from "@/storage/db"
 import { errorMessage } from "./util/error"
@@ -40,6 +38,9 @@ import { Heap } from "./cli/heap"
 import { drizzle } from "drizzle-orm/bun-sqlite"
 import { ensureProcessMetadata } from "@opencode-ai/core/util/opencode-process"
 import { isRecord } from "@/util/record"
+import { OpenCodezUpdateCommand, OpenCodezUpgradeCommand } from "./cli/cmd/opencodez-update"
+import { OpenCodezUninstallCommand } from "./cli/cmd/opencodez-uninstall"
+import { OpenCodezIdentity } from "./opencodez/identity"
 
 const processMetadata = ensureProcessMetadata("main")
 
@@ -56,10 +57,16 @@ process.on("uncaughtException", (e) => {
 })
 
 const args = hideBin(process.argv)
+const cliName = OpenCodezIdentity.cliName
+const lightweightCommand = (() => {
+  if (args.some((arg) => arg === "-h" || arg === "--help" || arg === "-v" || arg === "--version")) return true
+  const command = args.find((arg) => !arg.startsWith("-"))
+  return OpenCodezIdentity.enabled && command !== undefined && ["update", "upgrade", "uninstall"].includes(command)
+})()
 
 function show(out: string) {
   const text = out.trimStart()
-  if (!text.startsWith("opencode ")) {
+  if (!text.startsWith(`${cliName} `)) {
     process.stderr.write(UI.logo() + EOL + EOL)
     process.stderr.write(text)
     return
@@ -67,9 +74,9 @@ function show(out: string) {
   process.stderr.write(out)
 }
 
-const cli = yargs(args)
+let cli = yargs(args)
   .parserConfiguration({ "populate--": true })
-  .scriptName("opencode")
+  .scriptName(cliName)
   .wrap(100)
   .help("help", "show help")
   .alias("help", "h")
@@ -92,6 +99,8 @@ const cli = yargs(args)
     if (opts.pure) {
       process.env.OPENCODE_PURE = "1"
     }
+
+    if (lightweightCommand) return
 
     await Log.init({
       print: process.argv.includes("--print-logs"),
@@ -116,7 +125,7 @@ const cli = yargs(args)
       run_id: processMetadata.runID,
     })
 
-    const marker = path.join(Global.Path.data, "opencode.db")
+    const marker = Database.getPath()
     if (!(await Filesystem.exists(marker))) {
       const tty = process.stderr.isTTY
       process.stderr.write("Performing one time database migration, may take a few minutes..." + EOL)
@@ -165,8 +174,6 @@ const cli = yargs(args)
   .command(ConsoleCommand)
   .command(ProvidersCommand)
   .command(AgentCommand)
-  .command(UpgradeCommand)
-  .command(UninstallCommand)
   .command(ServeCommand)
   .command(WebCommand)
   .command(ModelsCommand)
@@ -178,6 +185,17 @@ const cli = yargs(args)
   .command(SessionCommand)
   .command(PluginCommand)
   .command(DbCommand)
+
+if (OpenCodezIdentity.enabled) {
+  cli = cli.command(OpenCodezUpgradeCommand)
+  cli = cli.command(OpenCodezUninstallCommand)
+  cli = cli.command(OpenCodezUpdateCommand)
+} else {
+  cli = cli.command(UpgradeCommand)
+  cli = cli.command(UninstallCommand)
+}
+
+cli
   .fail((msg, err) => {
     if (
       msg?.startsWith("Unknown argument") ||

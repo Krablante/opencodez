@@ -13,6 +13,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
 import { GlobalUpgradeInput } from "../groups/global"
+import { OpenCodezIdentity } from "@/opencodez/identity"
 
 const log = Log.create({ service: "server" })
 
@@ -96,6 +97,15 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {
+      if (OpenCodezIdentity.enabled) {
+        return {
+          status: 400,
+          body: {
+            success: false as const,
+            error: "OpenCodez uses GitHub Releases for updates. Run `opencodez update` or `opencodez update --check`.",
+          },
+        }
+      }
       const method = yield* installation.method()
       if (method === "unknown") {
         return {

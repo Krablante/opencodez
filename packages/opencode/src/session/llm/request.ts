@@ -12,6 +12,11 @@ import { Effect, Record } from "effect"
 import { jsonSchema, tool as aiTool, type ModelMessage, type Tool } from "ai"
 import type { Plugin } from "@/plugin"
 import { mergeDeep } from "remeda"
+import type { Info as ConfigInfo } from "@/config/config"
+import { OpenCodezPromptLibrary } from "@/opencodez/prompt-library"
+import { OpenCodezSession } from "@/opencodez/session"
+import { OpenCodezContextPrune } from "./context-prune"
+import { OpenCodezIdentity } from "@/opencodez/identity"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
@@ -19,6 +24,7 @@ type PrepareInput = {
   readonly user: MessageV2.User
   readonly sessionID: string
   readonly parentSessionID?: string
+  readonly sessionMetadata?: Record<string, unknown>
   readonly model: Provider.Model
   readonly agent: Agent.Info
   readonly permission?: Permission.Ruleset
@@ -31,6 +37,7 @@ type PrepareInput = {
   readonly plugin: Plugin.Interface
   readonly flags: RuntimeFlags.Info
   readonly isWorkflow: boolean
+  readonly config: ConfigInfo
 }
 
 export type Prepared = {
@@ -53,9 +60,44 @@ const mergeOptions = (target: Record<string, any>, source: Record<string, any> |
 
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
+  const opencodezPrompts = OpenCodezIdentity.enabled
+    ? yield* Effect.promise(async () => {
+        const opencodez = OpenCodezSession.effective({
+          config: input.config,
+          modelID: input.model.id,
+          sessionID: input.sessionID,
+          metadata: input.sessionMetadata,
+        })
+        try {
+          return {
+            system: await OpenCodezPromptLibrary.readPrompt("core", opencodez.system),
+            tone: await OpenCodezPromptLibrary.readPrompt("tone", opencodez.tone),
+          }
+        } catch {
+          return {
+            system: undefined,
+            tone: undefined,
+          }
+        }
+      })
+    : {
+        system: undefined,
+        tone: undefined,
+      }
+  const baseSystem = [
+    ...(OpenCodezIdentity.enabled
+      ? opencodezPrompts.system
+        ? [opencodezPrompts.system]
+        : SystemPrompt.provider(input.model)
+      : input.agent.prompt
+        ? [input.agent.prompt]
+        : SystemPrompt.provider(input.model)),
+    ...(OpenCodezIdentity.enabled && input.agent.prompt ? [input.agent.prompt] : []),
+  ]
   const system = [
     [
-      ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)),
+      ...baseSystem,
+      ...(opencodezPrompts.tone ? [opencodezPrompts.tone] : []),
       ...input.system,
       ...(input.user.system ? [input.user.system] : []),
     ]
@@ -101,6 +143,21 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
           ),
           ...input.messages,
         ]
+  const prunedMessages = OpenCodezContextPrune.apply({
+    messages,
+    settings: OpenCodezIdentity.enabled
+      ? OpenCodezSession.effectivePruning({
+          config: input.config,
+          sessionID: input.sessionID,
+          metadata: input.sessionMetadata,
+        })
+      : {
+          enabled: false,
+          pruning_size: 0,
+          preserve_tools: [],
+          prune: { reasoning: false, tool: false },
+        },
+  })
 
   const params = yield* input.plugin.trigger(
     "chat.params",
@@ -161,7 +218,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
 
   return {
     system,
-    messages,
+    messages: prunedMessages,
     tools: Object.fromEntries(Object.entries(tools).toSorted(([a], [b]) => a.localeCompare(b))),
     params,
     messageTransformOptions: options,

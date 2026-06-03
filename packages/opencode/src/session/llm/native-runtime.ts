@@ -23,6 +23,7 @@ type StreamInput = {
   readonly provider: Provider.Info
   readonly auth: Auth.Info | undefined
   readonly llmClient: LLMClientShape
+  readonly system?: readonly string[]
   readonly messages: ModelMessage[]
   readonly tools: Record<string, Tool>
   readonly toolChoice?: "auto" | "required" | "none"
@@ -83,6 +84,7 @@ export function stream(input: StreamInput): StreamResult {
       model: input.model,
       apiKey: current.apiKey,
       baseURL: current.baseURL,
+      system: input.system,
       messages: ProviderTransform.message(input.messages, input.model, input.providerOptions ?? {}),
       toolChoice: input.toolChoice,
       temperature: input.temperature,
