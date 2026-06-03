@@ -1,7 +1,7 @@
 <h1 align="center">OpenCodez</h1>
 
 <p align="center">
-  A small, local-first OpenCode fork with explicit prompt control, bundled Codex-style prompts, and cleaner context handling.
+  A local-first OpenCode fork for flexible System/Tone prompt control, token-saving pruning, and bundled Codex prompts for a Codex-like experience.
 </p>
 
 <p align="center">
@@ -23,11 +23,11 @@
 
 ## At a Glance
 
-OpenCodez is for people who want OpenCode to stay OpenCode, but with predictable prompt setup and less noisy model context.
+OpenCodez is for people who want OpenCode to stay OpenCode, but with flexible prompt control, a ready-to-use Codex-style prompt set, and less noisy model context.
 
 | Area | What OpenCodez adds |
 | --- | --- |
-| Prompt control | `/system`, `/tone`, `/template`, and `/new` flags for explicit session setup. |
+| Prompt control | `/system`, `/tone`, `/template`, `/prompts`, and `/new` flags for explicit session setup. |
 | Prompt library | Upstream built-ins, bundled Codex presets, and user prompt files in one shared selector. |
 | Model defaults | Configurable System/Tone defaults, with Codex-style defaults only for OpenAI Responses GPT models out of the box. |
 | Session state | Manual System/Tone/Template choices stay with the session and do not reset on `/model`. |
@@ -43,6 +43,7 @@ OpenCodez keeps the normal OpenCode shape, but adds a few practical controls:
 - `/system` selects the active Core/System prompt.
 - `/tone` selects the active Tone preset.
 - `/template` applies a saved System + Tone pair.
+- `/prompts` shows prompt library roots, current selections, and where editable prompt files live.
 - `/new --system`, `/new --tone`, and `/new --template` start a new session with explicit prompt settings.
 - Model-aware defaults can choose System/Tone presets automatically for OpenAI Responses GPT models, and users can configure defaults for other models too.
 - Manual `/system`, `/tone`, and `/template` choices stay active when you switch models.
@@ -187,29 +188,24 @@ Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one p
 
 ## Commands
 
-```text
-/system
-/system codex_gpt_5_5
-
-/tone
-/tone codex_pragmatic
-/tone codex_friendly
-
-/template
-/template gpt55
-
-/new --system codex_gpt_5_5 --tone codex_pragmatic
-/new -s codex_gpt_5_5 -o codex_pragmatic
-/new --template gpt55
-/new -t gpt55
-
-/prompts
-
-/pruning
-/pruning on
-/pruning off
-/pruning size 20000
-```
+| Command | What it does |
+| --- | --- |
+| `/system` | Opens the Core/System prompt selector. |
+| `/system codex_gpt_5_5` | Sets the current session System prompt directly. |
+| `/tone` | Opens the Tone selector. |
+| `/tone codex_pragmatic` | Sets the current session Tone preset directly. |
+| `/tone codex_friendly` | Sets the current session Tone preset directly. |
+| `/template` | Opens the Template selector. |
+| `/template gpt55` | Applies a saved System + Tone template. |
+| `/new --system codex_gpt_5_5 --tone codex_pragmatic` | Starts a new session with explicit System and Tone values. |
+| `/new -s codex_gpt_5_5 -o codex_pragmatic` | Short-flag form of the same command. |
+| `/new --template gpt55` | Starts a new session from a saved template. |
+| `/new -t gpt55` | Short-flag form of the template command. |
+| `/prompts` | Shows prompt library paths, current selections, and editable prompt locations. |
+| `/pruning` | Opens the pruning settings view. |
+| `/pruning on` | Enables pruning for the current session. |
+| `/pruning off` | Disables pruning for the current session. |
+| `/pruning size 20000` | Sets the current session pruning payload budget. |
 
 ## Upstream OpenCode README
 
