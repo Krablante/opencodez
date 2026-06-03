@@ -230,9 +230,6 @@ export function Prompt(props: PromptProps) {
     const width = Math.max(18, Math.min(56, Math.floor(dimensions().width / 3)))
     return Locale.truncateMiddle(label, width)
   })
-  const hasRightContent = createMemo(
-    () => (OpenCodezIdentity.enabled && store.mode === "normal") || Boolean(props.right),
-  )
 
   function selectWorkspace(selection: WorkspaceSelection | undefined) {
     setWorkspaceSelection(selection)
@@ -411,6 +408,9 @@ export function Prompt(props: PromptProps) {
     extmarkToPartIndex: new Map(),
     interrupt: 0,
   })
+  const hasRightContent = createMemo(
+    () => (OpenCodezIdentity.enabled && store.mode === "normal") || Boolean(props.right),
+  )
 
   createEffect(
     on(
