@@ -1,31 +1,58 @@
 <h1 align="center">OpenCodez</h1>
 
 <p align="center">
-  A small, local-first fork of OpenCode with explicit prompt control, bundled Codex-style prompts, and safer context pruning.
+  A small, local-first OpenCode fork with explicit prompt control, bundled Codex-style prompts, and cleaner context handling.
 </p>
 
 <p align="center">
   <strong>OpenCodez is not an official OpenCode project.</strong><br>
-  It is a personal distribution/fork that keeps upstream OpenCode recognizable and maintainable.
+  It keeps upstream OpenCode recognizable while adding a few practical controls for prompt-heavy work.
+</p>
+
+<p align="center">
+  <a href="docs/opencodez.md"><strong>OpenCodez Docs</strong></a>
+  ·
+  <a href="#install--update">Install & Update</a>
+  ·
+  <a href="#commands">Commands</a>
+  ·
+  <a href="#upstream-opencode-readme">Upstream README</a>
 </p>
 
 ---
 
+## At a Glance
+
+OpenCodez is for people who want OpenCode to stay OpenCode, but with predictable prompt setup and less noisy model context.
+
+| Area | What OpenCodez adds |
+| --- | --- |
+| Prompt control | `/system`, `/tone`, `/template`, and `/new` flags for explicit session setup. |
+| Prompt library | Upstream built-ins, bundled Codex presets, and user prompt files in one shared selector. |
+| Model defaults | Configurable System/Tone defaults, with Codex-style defaults only for OpenAI Responses GPT models out of the box. |
+| Session state | Manual System/Tone/Template choices stay with the session and do not reset on `/model`. |
+| Pruning | Reasoning and tool result payloads can be replaced with clear placeholders before context is sent to the model. |
+| Updates | `opencodez update` uses GitHub Releases when public releases are enabled. |
+
+Read the full public feature reference in [docs/opencodez.md](docs/opencodez.md).
+
 ## What OpenCodez Adds
 
-OpenCodez keeps the normal OpenCode shape, but adds a few practical controls for people who want predictable prompt setup and cleaner context handling:
+OpenCodez keeps the normal OpenCode shape, but adds a few practical controls:
 
 - `/system` selects the active Core/System prompt.
 - `/tone` selects the active Tone preset.
 - `/template` applies a saved System + Tone pair.
 - `/new --system`, `/new --tone`, and `/new --template` start a new session with explicit prompt settings.
-- Model-aware defaults can choose System/Tone presets automatically for GPT/OpenAI Responses models.
+- Model-aware defaults can choose System/Tone presets automatically for OpenAI Responses GPT models, and users can configure defaults for other models too.
 - Manual `/system`, `/tone`, and `/template` choices stay active when you switch models.
 - The TUI shows a compact System + Tone indicator while you work.
 - `/pruning` lets you view and change session-local pruning settings.
-- Tool calls stay readable while large tool results and reasoning payloads can be replaced with deterministic placeholders.
+- Tool calls stay readable while tool result and reasoning payloads can be replaced with deterministic placeholders.
 
 OpenCodez is meant to be a small fork, not a full rebrand. Upstream internals, docs, workflows, integrations, and package surfaces should stay as close to OpenCode as practical unless a fork-specific change is genuinely needed.
+
+For detailed behavior, defaults, command semantics, pruning rules, and maintenance notes, use [OpenCodez Docs](docs/opencodez.md).
 
 ## Install & Update
 
@@ -80,6 +107,16 @@ It uses its own config, data, and cache roots:
 ```
 
 OpenCodez does not automatically read from or write to `~/.config/opencode/`. If you want to reuse upstream OpenCode settings or prompt files, copy only the pieces you want into the OpenCodez config root manually.
+
+## OpenCodez Docs
+
+The maintained public reference for OpenCodez-specific behavior is:
+
+```text
+docs/opencodez.md
+```
+
+It covers prompt defaults, selectors, templates, pruning, config roots, session behavior, and maintenance expectations for this fork. Upstream OpenCode documentation remains the source for normal OpenCode behavior.
 
 Prompt library paths:
 
