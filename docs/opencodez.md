@@ -110,6 +110,8 @@ prompts/templates/gpt55.jsonc -> /template gpt55
 
 That list includes:
 
+- `None`, which disables the selectable Core/System prompt for the current
+  session;
 - upstream OpenCode built-in system prompts;
 - bundled OpenCodez Codex presets;
 - user-created prompts in `prompts/core/`.
@@ -137,6 +139,7 @@ This keeps overrides simple and visible.
 
 That list includes:
 
+- `None`, which disables any separate Tone preset for the current session;
 - bundled OpenCodez Tone presets;
 - user-created tone files in `prompts/tone/`;
 - any future tone/style prompts that are added to the shared library.
@@ -327,18 +330,32 @@ If no manual prompt command was used yet in the session, changing the model can
 change the effective defaults because the session is still following default
 resolution.
 
+Choosing `None` in the System or Tone selector is a manual session choice. It
+does not clear the manual override back to defaults; it explicitly disables that
+selectable prompt for the current session and is stored in metadata.
+
 ## Web Composer Controls
 
 The web composer shows OpenCodez prompt controls in the same bottom control row
 as the normal agent/model controls.
 
-- `System: <id>` shows the concrete effective System prompt id.
-- `Tone: <id>` shows the selected Tone prompt id, or `none` when no separate
+- `S: <id>` shows the concrete effective System prompt id, or `none` when the
+  session explicitly disables the selectable System prompt.
+- `T: <id>` shows the selected Tone prompt id, or `none` when no separate
   Tone preset is active.
 - `Template` opens the template picker. Choosing a template applies that
   template's `System + Tone` pair; the concrete result is then visible in the
-  `System` and `Tone` controls. The web UI does not keep or display a separate
+  `S:` and `T:` controls. The web UI does not keep or display a separate
   current template state.
+
+The normal session/model controls stay to the left of OpenCodez prompt controls:
+
+```text
+Build · Model · Reasoning · S: ... · T: ... · Template
+```
+
+The System and Tone pickers include `None`. The Template picker does not include
+`None`, because a template is an action rather than an active state.
 
 Prompt lists are loaded through the OpenCodez server API when a picker opens.
 The browser does not read prompt files directly.
@@ -370,6 +387,10 @@ OpenAI Responses GPT defaults show the selected Codex prompt id, such as
 
 `T: none` is normal when no separate Tone preset is active. Manual `/tone`
 choices update `T:` immediately.
+
+Explicit `System -> None` shows `S: none` and suppresses the selectable System
+prompt fallback for the session. Explicit `Tone -> None` shows `T: none` and
+suppresses any default Tone prompt for the session.
 
 The indicator should stay simple. It should not invent a separate `/status`
 command, and it should not use complicated truncation logic. `/system` and

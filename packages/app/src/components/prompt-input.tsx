@@ -706,16 +706,29 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
     const search = picker.promptSearch[kind].trim().toLowerCase()
     const selected = kind === "system" ? picker.promptState?.system : kind === "tone" ? picker.promptState?.tone : undefined
-    const items = picker.promptEntries[kind].filter((entry) => {
+    const entries = [
+      ...(kind === "template"
+        ? []
+        : [
+            {
+              name: "none",
+              kind,
+              source: "builtin" as const,
+            },
+          ]),
+      ...picker.promptEntries[kind],
+    ]
+    const items = entries.filter((entry) => {
+      const label = entry.name === "none" && kind !== "template" ? "None" : entry.name
       if (!search) return true
-      return entry.name.toLowerCase().includes(search)
+      return label.toLowerCase().includes(search)
     })
     if (items.length === 0) {
       return [{ icon: promptKindIcon(kind), label: "No prompts found", disabled: true, onSelect: () => {} }]
     }
     return items.map((entry) => ({
       icon: promptKindIcon(kind),
-      label: entry.name,
+      label: entry.name === "none" && kind !== "template" ? "None" : entry.name,
       selected: kind !== "template" && entry.name === selected,
       onSelect: () => void selectPrompt(kind, entry.name),
     }))
@@ -725,12 +738,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     const labels = {
       system: {
         action: "prompt-system",
-        label: `System: ${picker.promptState?.system ?? "default"}`,
+        label: `S: ${picker.promptState?.system ?? "default"}`,
         search: "Search system prompts...",
       },
       tone: {
         action: "prompt-tone",
-        label: `Tone: ${picker.promptState?.tone ?? "none"}`,
+        label: `T: ${picker.promptState?.tone ?? "none"}`,
         search: "Search tone prompts...",
       },
       template: {
@@ -1788,10 +1801,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   <Show when={newSession() && !selectedProject()}>
                     <ComposerPickerTrigger state={newProjectTriggerState()} />
                   </Show>
+                  <ComposerModelControl state={modelControlState()} />
                   <Show when={store.mode !== "shell"}>
                     <For each={promptPickerKinds}>{(kind) => <ComposerPicker state={promptControlState(kind)} />}</For>
                   </Show>
-                  <ComposerModelControl state={modelControlState()} />
                 </div>
                 <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
                   <IconButton
@@ -2035,9 +2048,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                         </TooltipKeybind>
                       </div>
                     </Show>
-                    <Show when={store.mode !== "shell"}>
-                      <For each={promptPickerKinds}>{(kind) => <ComposerPicker state={promptControlState(kind)} />}</For>
-                    </Show>
                     <Show when={!providersLoading()}>
                       <Show when={store.mode !== "shell"}>
                         <div
@@ -2144,6 +2154,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                           </div>
                         </Show>
                       </Show>
+                    </Show>
+                    <Show when={store.mode !== "shell"}>
+                      <For each={promptPickerKinds}>{(kind) => <ComposerPicker state={promptControlState(kind)} />}</For>
                     </Show>
                   </div>
                 </div>

@@ -70,6 +70,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
           metadata: input.sessionMetadata,
         })
         return {
+          systemDisabled: opencodez.systemManual && !opencodez.system,
           system: opencodez.system
             ? await OpenCodezPromptLibrary.readPrompt("core", opencodez.system).catch(() => undefined)
             : undefined,
@@ -79,26 +80,30 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         }
       })
     : {
+        systemDisabled: false,
         system: undefined,
         tone: undefined,
       }
   const baseSystem = [
     ...(OpenCodezIdentity.enabled && opencodezPrompts.system
       ? [opencodezPrompts.system, ...(input.agent.prompt ? [input.agent.prompt] : [])]
+      : OpenCodezIdentity.enabled && opencodezPrompts.systemDisabled
+        ? input.agent.prompt
+          ? [input.agent.prompt]
+          : []
       : input.agent.prompt
         ? [input.agent.prompt]
         : SystemPrompt.provider(input.model)),
   ]
-  const system = [
-    [
-      ...baseSystem,
-      ...(opencodezPrompts.tone ? [opencodezPrompts.tone] : []),
-      ...input.system,
-      ...(input.user.system ? [input.user.system] : []),
-    ]
-      .filter((x) => x)
-      .join("\n"),
+  const systemContent = [
+    ...baseSystem,
+    ...(opencodezPrompts.tone ? [opencodezPrompts.tone] : []),
+    ...input.system,
+    ...(input.user.system ? [input.user.system] : []),
   ]
+    .filter((x) => x)
+    .join("\n")
+  const system = systemContent ? [systemContent] : []
 
   const header = system[0]
   yield* input.plugin.trigger(

@@ -4,8 +4,8 @@ import { OpenCodezSettings } from "./settings"
 import { SystemPrompt } from "@/session/system"
 
 export type Selection = {
-  system?: string
-  tone?: string
+  system?: string | null
+  tone?: string | null
   systemManual?: boolean
   toneManual?: boolean
 }
@@ -27,6 +27,17 @@ const listeners = new Set<() => void>()
 let pendingSelection: Selection = {}
 let pendingPruning: PruningOverride = {}
 let versionID = 0
+
+export const noneID = "none"
+
+export function isNone(name: string) {
+  return name.trim().toLowerCase() === noneID
+}
+
+export function disable(kind: "system" | "tone"): Selection {
+  if (kind === "system") return { system: null, systemManual: true }
+  return { tone: null, toneManual: true }
+}
 
 export function version() {
   return versionID
@@ -88,7 +99,7 @@ export function indicator(input: {
   const result = effective(input)
   return {
     ...result,
-    system: result.system ?? upstreamSystemPromptID(input.model ?? input.modelID),
+    system: result.system ?? (result.systemManual ? noneID : upstreamSystemPromptID(input.model ?? input.modelID)),
   }
 }
 
@@ -105,7 +116,7 @@ export function indicatorFromMetadata(input: {
   )
   return {
     ...result,
-    system: result.system ?? upstreamSystemPromptID(input.model ?? input.modelID),
+    system: result.system ?? (result.systemManual ? noneID : upstreamSystemPromptID(input.model ?? input.modelID)),
   }
 }
 
@@ -196,8 +207,8 @@ export function withState(metadata: Record<string, unknown> | undefined, state: 
 
 function merge(current: Selection, next: Selection): Selection {
   return {
-    system: next.system ?? current.system,
-    tone: next.tone ?? current.tone,
+    system: next.system !== undefined ? next.system : current.system,
+    tone: next.tone !== undefined ? next.tone : current.tone,
     systemManual: next.systemManual ?? current.systemManual,
     toneManual: next.toneManual ?? current.toneManual,
   }
@@ -213,8 +224,8 @@ function effectiveForSelection(
     tone: OpenCodezSettings.defaultTone(config, model),
   }
   return {
-    system: state.systemManual && state.system ? state.system : defaults.system,
-    tone: state.toneManual && state.tone ? state.tone : defaults.tone,
+    system: state.systemManual ? (state.system ?? undefined) : defaults.system,
+    tone: state.toneManual ? (state.tone ?? undefined) : defaults.tone,
     systemManual: state.systemManual === true,
     toneManual: state.toneManual === true,
   }
@@ -246,8 +257,8 @@ function mergePruning(current: PruningOverride, next: PruningOverride): PruningO
 
 function readSelection(input: Record<string, unknown>): Selection {
   return {
-    system: typeof input.system === "string" ? input.system : undefined,
-    tone: typeof input.tone === "string" ? input.tone : undefined,
+    system: typeof input.system === "string" || input.system === null ? input.system : undefined,
+    tone: typeof input.tone === "string" || input.tone === null ? input.tone : undefined,
     systemManual: typeof input.systemManual === "boolean" ? input.systemManual : undefined,
     toneManual: typeof input.toneManual === "boolean" ? input.toneManual : undefined,
   }
@@ -264,11 +275,13 @@ function readPruning(input: Record<string, unknown>): PruningOverride {
 }
 
 function cleanSelection(input: Selection): Selection | undefined {
+  const systemManual = input.systemManual === true
+  const toneManual = input.toneManual === true
   const selection = {
-    system: input.systemManual && input.system ? input.system : undefined,
-    tone: input.toneManual && input.tone ? input.tone : undefined,
-    systemManual: input.systemManual && input.system ? true : undefined,
-    toneManual: input.toneManual && input.tone ? true : undefined,
+    system: systemManual ? (input.system ?? null) : undefined,
+    tone: toneManual ? (input.tone ?? null) : undefined,
+    systemManual: systemManual ? true : undefined,
+    toneManual: toneManual ? true : undefined,
   }
   return Object.values(selection).some((value) => value !== undefined) ? selection : undefined
 }

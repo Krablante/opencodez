@@ -95,12 +95,14 @@ export const opencodezHandlers = HttpApiBuilder.group(InstanceHttpApi, "opencode
 function selectionFor(input: typeof OpenCodezPromptSelectPayload.Type) {
   return Effect.gen(function* () {
     if (input.kind === "system") {
+      if (OpenCodezSession.isNone(input.name)) return OpenCodezSession.disable("system")
       const entry = yield* Effect.promise(() => OpenCodezPromptLibrary.get("core", input.name))
       if (!entry) return yield* new HttpApiError.BadRequest({})
       return { system: input.name, systemManual: true }
     }
 
     if (input.kind === "tone") {
+      if (OpenCodezSession.isNone(input.name)) return OpenCodezSession.disable("tone")
       const entry = yield* Effect.promise(() => OpenCodezPromptLibrary.get("tone", input.name))
       if (!entry) return yield* new HttpApiError.BadRequest({})
       return { tone: input.name, toneManual: true }

@@ -211,6 +211,46 @@ describe("OpenCodez session-bound state", () => {
     expect(OpenCodezSession.pendingMetadata()).toEqual({})
   })
 
+  test("persists explicit None as prompt disable state", () => {
+    const metadata = OpenCodezSession.metadataWithSelection(undefined, {
+      system: null,
+      tone: null,
+      systemManual: true,
+      toneManual: true,
+    })
+
+    expect(metadata).toEqual({
+      opencodez: {
+        version: 1,
+        selection: {
+          system: null,
+          tone: null,
+          systemManual: true,
+          toneManual: true,
+        },
+      },
+    })
+    expect(
+      OpenCodezSession.effective({
+        config,
+        modelID: "gpt-5.2",
+        sessionID: "metadata-none",
+        metadata,
+      }),
+    ).toEqual({
+      system: undefined,
+      tone: undefined,
+      systemManual: true,
+      toneManual: true,
+    })
+    expect(OpenCodezSession.indicator({ config, modelID: "gpt-5.2", sessionID: "metadata-none", metadata })).toEqual({
+      system: "none",
+      tone: undefined,
+      systemManual: true,
+      toneManual: true,
+    })
+  })
+
   test("reflects manual System and Tone choices in the TUI indicator", () => {
     const model = {
       id: "deepseek-chat",

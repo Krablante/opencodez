@@ -28,8 +28,24 @@ export function OpenCodezPromptSelector(props: {
       metadata: props.metadata,
     })
     if (props.kind === "system") return indicator.system
-    if (props.kind === "tone") return indicator.tone
+    if (props.kind === "tone") return indicator.tone ?? OpenCodezSession.noneID
     return undefined
+  })
+  const options = createMemo(() => {
+    const prompts = props.entries.map((item) => ({
+      title: item.name,
+      value: item.name,
+      description: item.path,
+    }))
+    if (props.kind === "template") return prompts
+    return [
+      {
+        title: "None",
+        value: OpenCodezSession.noneID,
+        description: `Disable ${props.kind === "system" ? "System" : "Tone"} prompt for this session`,
+      },
+      ...prompts,
+    ]
   })
 
   return (
@@ -38,11 +54,7 @@ export function OpenCodezPromptSelector(props: {
       placeholder="Type to filter"
       current={current()}
       flat
-      options={props.entries.map((item) => ({
-        title: item.name,
-        value: item.name,
-        description: item.path,
-      }))}
+      options={options()}
       onSelect={(option) => {
         void applySelection(props.kind, option.value, props.sessionID, props.metadata)
           .then(async (label) => {
@@ -96,10 +108,18 @@ async function applySelection(
   metadata: Record<string, unknown> | undefined,
 ) {
   if (kind === "system") {
+    if (OpenCodezSession.isNone(name)) {
+      OpenCodezSession.apply(sessionID, OpenCodezSession.disable("system"), metadata)
+      return "System set to None"
+    }
     OpenCodezSession.apply(sessionID, { system: name, systemManual: true }, metadata)
     return `System set to ${name}`
   }
   if (kind === "tone") {
+    if (OpenCodezSession.isNone(name)) {
+      OpenCodezSession.apply(sessionID, OpenCodezSession.disable("tone"), metadata)
+      return "Tone set to None"
+    }
     OpenCodezSession.apply(sessionID, { tone: name, toneManual: true }, metadata)
     return `Tone set to ${name}`
   }

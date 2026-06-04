@@ -1062,6 +1062,12 @@ export function Prompt(props: PromptProps) {
   }
 
   async function applyNamedPrompt(kind: "system" | "tone", name: string, sessionID: string | undefined) {
+    if (OpenCodezSession.isNone(name)) {
+      OpenCodezSession.apply(sessionID, OpenCodezSession.disable(kind), currentOpenCodezMetadata())
+      toast.show({ message: `${kind === "system" ? "System" : "Tone"} set to None`, variant: "info", duration: 2500 })
+      await persistOpenCodezState(sessionID)
+      return true
+    }
     const libraryKind = kind === "system" ? "core" : "tone"
     const entry = await OpenCodezPromptLibrary.get(libraryKind, name)
     if (!entry) {
@@ -1214,28 +1220,36 @@ export function Prompt(props: PromptProps) {
         selection.toneManual = true
       }
       if (command.system) {
-        if (!(await OpenCodezPromptLibrary.get("core", command.system))) {
+        if (OpenCodezSession.isNone(command.system)) {
+          selection.system = null
+          selection.systemManual = true
+        } else if (!(await OpenCodezPromptLibrary.get("core", command.system))) {
           toast.show({
             message: `Nothing found for "${command.system}". Try another name.`,
             variant: "warning",
             duration: 3500,
           })
           return true
+        } else {
+          selection.system = command.system
+          selection.systemManual = true
         }
-        selection.system = command.system
-        selection.systemManual = true
       }
       if (command.tone) {
-        if (!(await OpenCodezPromptLibrary.get("tone", command.tone))) {
+        if (OpenCodezSession.isNone(command.tone)) {
+          selection.tone = null
+          selection.toneManual = true
+        } else if (!(await OpenCodezPromptLibrary.get("tone", command.tone))) {
           toast.show({
             message: `Nothing found for "${command.tone}". Try another name.`,
             variant: "warning",
             duration: 3500,
           })
           return true
+        } else {
+          selection.tone = command.tone
+          selection.toneManual = true
         }
-        selection.tone = command.tone
-        selection.toneManual = true
       }
       OpenCodezSession.resetPending(selection)
       route.navigate({ type: "home" })

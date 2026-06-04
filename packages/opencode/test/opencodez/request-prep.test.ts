@@ -415,4 +415,86 @@ describe("LLMRequestPrep OpenCodez integration", () => {
     expect(system).not.toContain("CORE PROMPT")
     expect(assistant.content[0].text).toBe("[reasoning pruned: 16 chars]")
   })
+
+  test("explicit None disables session System and Tone defaults", async () => {
+    const prepared = await Effect.runPromise(
+      LLMRequestPrep.prepare({
+        ...baseInput,
+        agent: {
+          ...baseInput.agent,
+          prompt: undefined,
+        },
+        sessionID: "session-none",
+        sessionMetadata: {
+          opencodez: {
+            selection: {
+              system: null,
+              tone: null,
+              systemManual: true,
+              toneManual: true,
+            },
+          },
+        },
+        config: {
+          opencodez: {
+            responses: {
+              system: "codex_gpt_5_5",
+              tone: "codex_pragmatic",
+            },
+            pruning: {
+              enabled: true,
+              pruning_size: 20_000,
+              preserve_tools: [],
+              prune: { reasoning: true, tool: true },
+            },
+          },
+        },
+      }),
+    )
+    const system = prepared.system.join("\n")
+
+    expect(system).toContain("EXTRA SYSTEM")
+    expect(system).not.toContain("CORE PROMPT")
+    expect(system).not.toContain("TONE PROMPT")
+    expect(system).not.toContain("AGENT PROMPT")
+    expect(system).not.toContain(SystemPrompt.provider(model)[0])
+
+    const emptyPrepared = await Effect.runPromise(
+      LLMRequestPrep.prepare({
+        ...baseInput,
+        agent: {
+          ...baseInput.agent,
+          prompt: undefined,
+        },
+        system: [],
+        sessionID: "session-none-empty",
+        sessionMetadata: {
+          opencodez: {
+            selection: {
+              system: null,
+              tone: null,
+              systemManual: true,
+              toneManual: true,
+            },
+          },
+        },
+        config: {
+          opencodez: {
+            responses: {
+              system: "codex_gpt_5_5",
+              tone: "codex_pragmatic",
+            },
+            pruning: {
+              enabled: true,
+              pruning_size: 20_000,
+              preserve_tools: [],
+              prune: { reasoning: true, tool: true },
+            },
+          },
+        },
+      }),
+    )
+    expect(emptyPrepared.system).toEqual([])
+    expect(emptyPrepared.messages).toEqual([])
+  })
 })
