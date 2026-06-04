@@ -14,8 +14,14 @@ process.chdir(dir)
 
 const generated = await import("./generate.ts")
 
-import { Script } from "@opencode-ai/script"
 import pkg from "../package.json"
+
+if (process.env.OPENCODEZ_BUILD === "1") {
+  process.env.OPENCODE_VERSION ??= pkg.version
+  process.env.OPENCODE_CHANNEL ??= "latest"
+}
+
+const { Script } = await import("@opencode-ai/script")
 
 // Load migrations from migration directories
 const migrationDirs = (
