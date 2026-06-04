@@ -61,10 +61,16 @@ For detailed behavior, defaults, command semantics, pruning rules, and maintenan
 
 OpenCodez installs from GitHub Releases. It does not publish to npm and does not install over upstream `opencode`.
 
-Public release install:
+Linux and macOS install:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install.sh | sh
+```
+
+Windows PowerShell install:
+
+```powershell
+irm https://raw.githubusercontent.com/Krablante/opencodez/main/install.ps1 | iex
 ```
 
 Public release update:
@@ -79,7 +85,7 @@ Check for updates without installing:
 opencodez update --check
 ```
 
-The update path is intentionally simple: GitHub Releases are the source of truth, the installer downloads the right release artifact, and `opencodez update` uses the same release channel from inside the app.
+The update path is intentionally simple: GitHub Releases are the source of truth, the installer downloads the right release artifact for the current OS and architecture, and `opencodez update` uses the same release channel from inside the app.
 
 ## Run From Source
 

@@ -72,11 +72,23 @@ Releases:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install.sh | sh
+```
+
+On Windows, use PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Krablante/opencodez/main/install.ps1 | iex
+```
+
+Updates use the same release channel:
+
+```bash
 opencodez update
 opencodez update --check
 ```
 
-These commands use the public release channel, not the local dogfooding path.
+These commands download ready-made release artifacts, not a source checkout.
+They use the public release channel, not the local dogfooding path.
 
 For local dogfooding of unreleased changes, build and install a local OpenCodez
 binary, then test the installed `opencodez` command in the live TUI. Checking
