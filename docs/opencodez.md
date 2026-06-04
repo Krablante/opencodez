@@ -67,8 +67,8 @@ OpenCodez does not automatically migrate `~/.config/opencode/`. Users who want
 to reuse upstream OpenCode settings should copy only the settings and prompt
 files they actually want into the OpenCodez config root.
 
-OpenCodez does not publish to npm. Public installs and updates are designed to
-use GitHub Releases after public releases are enabled:
+OpenCodez does not publish to npm. Public installs and updates use GitHub
+Releases:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install.sh | sh
@@ -76,13 +76,12 @@ opencodez update
 opencodez update --check
 ```
 
-These commands are the future public-release channel, not the local dogfooding
-path.
+These commands use the public release channel, not the local dogfooding path.
 
-For local dogfooding before a public release, build and install a local
-OpenCodez binary, then test the installed `opencodez` command in the live TUI.
-Checking only `--help` or `--version` is not enough because those commands do
-not render the TUI.
+For local dogfooding of unreleased changes, build and install a local OpenCodez
+binary, then test the installed `opencodez` command in the live TUI. Checking
+only `--help` or `--version` is not enough because those commands do not render
+the TUI.
 
 ## Prompt Library
 
@@ -401,7 +400,7 @@ command, and it should not use complicated truncation logic. `/system` and
 OpenCodez pruning changes what is sent back to the model as context. It does
 not physically delete saved history.
 
-Config lives under:
+Config lives in `~/.config/opencodez/opencode.jsonc` under:
 
 ```jsonc
 {

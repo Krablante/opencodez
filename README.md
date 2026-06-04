@@ -32,7 +32,7 @@ OpenCodez is for people who want OpenCode to stay OpenCode, but with flexible pr
 | Model defaults | Configurable System/Tone defaults, with Codex-style defaults only for OpenAI Responses GPT models out of the box. |
 | Session state | Manual System/Tone/Template choices stay with the session and do not reset on `/model`. |
 | Pruning | Reasoning and tool result payloads can be replaced with clear placeholders before context is sent to the model. |
-| Updates | `opencodez update` uses GitHub Releases when public releases are enabled. |
+| Updates | `opencodez update` uses GitHub Releases. |
 
 Read the full public feature reference in [docs/opencodez.md](docs/opencodez.md).
 
@@ -59,11 +59,7 @@ For detailed behavior, defaults, command semantics, pruning rules, and maintenan
 
 ## Install & Update
 
-OpenCodez is designed to install from GitHub Releases once public releases are enabled. It does not publish to npm and does not install over upstream `opencode`.
-
-The commands below are the future public-release channel. For local dogfooding
-before a release exists, use the source checkout or a local `OPENCODEZ_BUILD=1`
-binary.
+OpenCodez installs from GitHub Releases. It does not publish to npm and does not install over upstream `opencode`.
 
 Public release install:
 
@@ -87,14 +83,14 @@ The update path is intentionally simple: GitHub Releases are the source of truth
 
 ## Run From Source
 
-For local development before a public release exists, run the source-checkout launcher directly:
+For local development, run the source-checkout launcher directly:
 
 ```bash
 ./packages/opencode/bin/opencodez --help
 ./packages/opencode/bin/opencodez
 ```
 
-Future release builds should set `OPENCODEZ_BUILD=1` so the build script emits `opencodez-*` artifacts with an `opencodez` binary inside.
+Release builds should set `OPENCODEZ_BUILD=1` so the build script emits `opencodez-*` artifacts with an `opencodez` binary inside.
 
 ## Side-by-Side With OpenCode
 
@@ -187,6 +183,30 @@ Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one p
   }
 }
 ```
+
+## Pruning Config
+
+Pruning defaults also live in `~/.config/opencodez/opencode.jsonc`:
+
+```jsonc
+{
+  "opencodez": {
+    "pruning": {
+      "enabled": true,
+      "pruning_size": 20000,
+      "prune": {
+        "reasoning": true,
+        "tool": true
+      },
+      "preserve_tools": []
+    }
+  }
+}
+```
+
+`enabled` turns pruning on or off. `pruning_size` is the payload budget, currently counted in characters. `prune.reasoning` and `prune.tool` decide which payload types can be replaced with placeholders. `preserve_tools` is a list of tool names or glob patterns that should never be pruned.
+
+The `/pruning` TUI command changes only the current session's `enabled` state and `pruning_size`. It does not rewrite `opencode.jsonc`.
 
 ## Commands
 
