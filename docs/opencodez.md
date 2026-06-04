@@ -39,7 +39,7 @@ When adding or changing OpenCodez features:
 - do not rename OpenCode internals just to make the fork feel branded;
 - do not remove GitHub workflows, actions, locales, or upstream docs unless the
   user explicitly asks for that exact cleanup;
-- keep OpenCodez useful outside any private Atlas environment;
+- keep OpenCodez useful outside any one private environment or workflow;
 - keep public docs in English.
 
 If a future upstream OpenCode release introduces a similar feature, compare it
@@ -497,6 +497,15 @@ packages/opencode/src/cli/cmd/tui/component/opencodez-dialogs.tsx
 packages/opencode/src/cli/cmd/tui/app.tsx
 ```
 
+Web composer and prompt API surface:
+
+```text
+packages/app/src/components/prompt-input.tsx
+packages/opencode/src/server/routes/instance/httpapi/groups/opencodez.ts
+packages/opencode/src/server/routes/instance/httpapi/handlers/opencodez.ts
+packages/sdk/js/src/v2/gen/
+```
+
 Focused tests:
 
 ```text
@@ -532,3 +541,12 @@ The live TUI check should confirm that:
 - `/prompts` opens;
 - `/pruning` opens;
 - the compact System/Tone indicator reflects the current session state.
+
+For web prompt-control changes, also open the web composer and confirm that:
+
+- normal controls stay on the left: Build, Model, then Reasoning;
+- `S:`, `T:`, and `Template` appear after the normal controls;
+- System and Tone selectors include `None`;
+- the Template selector does not include `None`;
+- selecting System or Tone `None` updates the visible state to `S: none` or
+  `T: none`.

@@ -27,7 +27,7 @@ OpenCodez is for people who want OpenCode to stay OpenCode, but with flexible pr
 
 | Area | What OpenCodez adds |
 | --- | --- |
-| Prompt control | `/system`, `/tone`, `/template`, `/prompts`, and `/new` flags for explicit session setup. |
+| Prompt control | TUI commands and web composer controls for System, Tone, Template, and explicit session setup. |
 | Prompt library | Upstream built-ins, bundled Codex presets, and user prompt files in one shared selector. |
 | Model defaults | Configurable System/Tone defaults, with Codex-style defaults only for OpenAI Responses GPT models out of the box. |
 | Session state | Manual System/Tone/Template choices stay with the session and do not reset on `/model`. |
@@ -45,6 +45,8 @@ OpenCodez keeps the normal OpenCode shape, but adds a few practical controls:
 - `/template` applies a saved System + Tone pair.
 - `/prompts` shows prompt library roots, current selections, and where editable prompt files live.
 - `/new --system`, `/new --tone`, and `/new --template` start a new session with explicit prompt settings.
+- The web composer has `S:`, `T:`, and `Template` controls for the same session-level prompt choices.
+- `None` in the System or Tone selector explicitly disables that selectable prompt for the current session.
 - Model-aware defaults can choose System/Tone presets automatically for OpenAI Responses GPT models, and users can configure defaults for other models too.
 - Manual `/system`, `/tone`, and `/template` choices stay active when you switch models.
 - The TUI shows the concrete active System prompt id and Tone preset while you work.
@@ -192,9 +194,11 @@ Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one p
 | --- | --- |
 | `/system` | Opens the Core/System prompt selector. |
 | `/system codex_gpt_5_5` | Sets the current session System prompt directly. |
+| `/system none` | Explicitly disables the selectable System prompt for the current session. |
 | `/tone` | Opens the Tone selector. |
 | `/tone codex_pragmatic` | Sets the current session Tone preset directly. |
 | `/tone codex_friendly` | Sets the current session Tone preset directly. |
+| `/tone none` | Explicitly disables the Tone preset for the current session. |
 | `/template` | Opens the Template selector. |
 | `/template gpt55` | Applies a saved System + Tone template. |
 | `/new --system codex_gpt_5_5 --tone codex_pragmatic` | Starts a new session with explicit System and Tone values. |
