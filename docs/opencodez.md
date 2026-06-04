@@ -327,6 +327,26 @@ If no manual prompt command was used yet in the session, changing the model can
 change the effective defaults because the session is still following default
 resolution.
 
+## Web Composer Controls
+
+The web composer shows OpenCodez prompt controls in the same bottom control row
+as the normal agent/model controls.
+
+- `System: <id>` shows the concrete effective System prompt id.
+- `Tone: <id>` shows the selected Tone prompt id, or `none` when no separate
+  Tone preset is active.
+- `Template` opens the template picker. Choosing a template applies that
+  template's `System + Tone` pair; the concrete result is then visible in the
+  `System` and `Tone` controls. The web UI does not keep or display a separate
+  current template state.
+
+Prompt lists are loaded through the OpenCodez server API when a picker opens.
+The browser does not read prompt files directly.
+
+For existing sessions, web prompt choices are written to session metadata. For a
+new session before the first message, the choice stays in composer draft
+metadata and is sent when the session is created.
+
 ## Compact Indicator
 
 The TUI shows the active System and Tone while the user works.

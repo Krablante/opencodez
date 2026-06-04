@@ -1223,6 +1223,29 @@ export type Config = {
    * Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications
    */
   autoupdate?: boolean | "notify"
+  opencodez?: {
+    responses?: {
+      system?:
+        | string
+        | {
+            [key: string]: string
+          }
+      tone?:
+        | string
+        | {
+            [key: string]: string
+          }
+    }
+    pruning?: {
+      enabled?: boolean
+      pruning_size?: number
+      preserve_tools?: Array<string>
+      prune?: {
+        reasoning?: boolean
+        tool?: boolean
+      }
+    }
+  }
   disabled_providers?: Array<string>
   enabled_providers?: Array<string>
   model?: string
@@ -1713,6 +1736,43 @@ export type McpServerNotFoundError = {
   message: string
 }
 
+export type OpenCodezPromptKind = "system" | "tone" | "template"
+
+export type OpenCodezPromptEntry = {
+  name: string
+  kind: OpenCodezPromptKind
+  source: "builtin" | "library"
+}
+
+export type OpenCodezPromptModel = {
+  id?: string
+  providerID?: string
+  family?: string
+  api?: {
+    id?: string
+    npm?: string
+  }
+}
+
+export type OpenCodezPromptState = {
+  system: string
+  tone: string
+}
+
+export type OpenCodezPromptStateResult = {
+  state: OpenCodezPromptState
+  metadata: {
+    [key: string]: unknown
+  }
+}
+
+export type NotFoundError = {
+  name: "NotFoundError"
+  data: {
+    message: string
+  }
+}
+
 export type ProjectNotFoundError = {
   _tag: "ProjectNotFoundError"
   projectID: string
@@ -1793,13 +1853,6 @@ export type ProviderAuthError1 = {
     field?: string
     message?: string
     kind?: string
-  }
-}
-
-export type NotFoundError = {
-  name: "NotFoundError"
-  data: {
-    message: string
   }
 }
 
@@ -5377,6 +5430,113 @@ export type McpDisconnectResponses = {
 }
 
 export type McpDisconnectResponse = McpDisconnectResponses[keyof McpDisconnectResponses]
+
+export type OpencodezPromptListData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    kind: OpenCodezPromptKind
+  }
+  url: "/opencodez/prompts"
+}
+
+export type OpencodezPromptListErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type OpencodezPromptListError = OpencodezPromptListErrors[keyof OpencodezPromptListErrors]
+
+export type OpencodezPromptListResponses = {
+  /**
+   * List OpenCodez prompts
+   */
+  200: Array<OpenCodezPromptEntry>
+}
+
+export type OpencodezPromptListResponse = OpencodezPromptListResponses[keyof OpencodezPromptListResponses]
+
+export type OpencodezPromptStateData = {
+  body?: {
+    sessionID?: string
+    metadata?: {
+      [key: string]: unknown
+    }
+    model?: OpenCodezPromptModel
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/opencodez/prompts/state"
+}
+
+export type OpencodezPromptStateErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type OpencodezPromptStateError = OpencodezPromptStateErrors[keyof OpencodezPromptStateErrors]
+
+export type OpencodezPromptStateResponses = {
+  /**
+   * OpenCodez prompt state
+   */
+  200: OpenCodezPromptStateResult
+}
+
+export type OpencodezPromptStateResponse = OpencodezPromptStateResponses[keyof OpencodezPromptStateResponses]
+
+export type OpencodezPromptSelectData = {
+  body?: {
+    sessionID?: string
+    metadata?: {
+      [key: string]: unknown
+    }
+    model?: OpenCodezPromptModel
+    kind: OpenCodezPromptKind
+    name: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/opencodez/prompts/select"
+}
+
+export type OpencodezPromptSelectErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type OpencodezPromptSelectError = OpencodezPromptSelectErrors[keyof OpencodezPromptSelectErrors]
+
+export type OpencodezPromptSelectResponses = {
+  /**
+   * Updated OpenCodez prompt state
+   */
+  200: OpenCodezPromptStateResult
+}
+
+export type OpencodezPromptSelectResponse = OpencodezPromptSelectResponses[keyof OpencodezPromptSelectResponses]
 
 export type ProjectListData = {
   body?: never

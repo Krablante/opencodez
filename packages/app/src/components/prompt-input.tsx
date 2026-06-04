@@ -78,6 +78,12 @@ import { useQueryOptions } from "@/context/server-sync"
 import { pathKey } from "@/utils/path-key"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { displayName } from "@/pages/layout/helpers"
+import type {
+  OpenCodezPromptEntry,
+  OpenCodezPromptKind,
+  OpenCodezPromptModel,
+  OpenCodezPromptState,
+} from "@opencode-ai/sdk/v2/client"
 
 interface PromptInputProps {
   class?: string
@@ -121,6 +127,10 @@ const EXAMPLES = [
   "prompt.example.25",
 ] as const
 
+type PromptPickerRecord<T> = Record<OpenCodezPromptKind, T>
+
+const promptPickerKinds = ["system", "tone", "template"] as const satisfies readonly OpenCodezPromptKind[]
+
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
   const navigate = useNavigate()
@@ -146,6 +156,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   let scrollRef!: HTMLDivElement
   let slashPopoverRef!: HTMLDivElement
   let projectSearchRef: HTMLInputElement | undefined
+  let systemSearchRef: HTMLInputElement | undefined
+  let toneSearchRef: HTMLInputElement | undefined
+  let templateSearchRef: HTMLInputElement | undefined
 
   const mirror = { input: false }
   const inset = 56
@@ -286,9 +299,28 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     mode: "normal",
     applyingHistory: false,
   })
-  const [picker, setPicker] = createStore({
+  const [picker, setPicker] = createStore<{
+    projectOpen: boolean
+    projectSearch: string
+    promptOpen: PromptPickerRecord<boolean>
+    promptSearch: PromptPickerRecord<string>
+    promptEntries: PromptPickerRecord<OpenCodezPromptEntry[]>
+    promptLoading: PromptPickerRecord<boolean>
+    promptLoaded: PromptPickerRecord<boolean>
+    promptError: PromptPickerRecord<string | undefined>
+    promptMetadata: Record<string, unknown>
+    promptState?: OpenCodezPromptState
+  }>({
     projectOpen: false,
     projectSearch: "",
+    promptOpen: { system: false, tone: false, template: false },
+    promptSearch: { system: "", tone: "", template: "" },
+    promptEntries: { system: [], tone: [], template: [] },
+    promptLoading: { system: false, tone: false, template: false },
+    promptLoaded: { system: false, tone: false, template: false },
+    promptError: { system: undefined, tone: undefined, template: undefined },
+    promptMetadata: {},
+    promptState: undefined,
   })
 
   const buttonsSpring = useSpring(() => (store.mode === "normal" ? 1 : 0), { visualDuration: 0.2, bounce: 0 })
@@ -543,6 +575,193 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       setCursorPosition(editorRef, cursor)
       queueScroll()
     })
+  }
+
+  const promptSearchInput = (kind: OpenCodezPromptKind) => {
+    if (kind === "system") return systemSearchRef
+    if (kind === "tone") return toneSearchRef
+    return templateSearchRef
+  }
+
+  const setPromptSearchRef = (kind: OpenCodezPromptKind) => (el: HTMLInputElement) => {
+    if (kind === "system") systemSearchRef = el
+    if (kind === "tone") toneSearchRef = el
+    if (kind === "template") templateSearchRef = el
+  }
+
+  const openCodezModel = createMemo<OpenCodezPromptModel | undefined>(() => {
+    const model = local.model.current()
+    if (!model) return
+    return {
+      id: model.id,
+      providerID: model.provider.id,
+      family: model.family,
+      api: {
+        id: model.api.id,
+        npm: model.api.npm,
+      },
+    }
+  })
+
+  let promptStateRequest = 0
+  const refreshPromptState = async () => {
+    const request = ++promptStateRequest
+    const result = await sdk.client.opencodez.prompt
+      .state({
+        sessionID: params.id,
+        metadata: params.id ? undefined : picker.promptMetadata,
+        model: openCodezModel(),
+      })
+      .then((x) => x.data ?? undefined)
+      .catch(() => undefined)
+    if (!result || request !== promptStateRequest) return
+    setPicker("promptState", result.state)
+    if (!params.id) setPicker("promptMetadata", result.metadata)
+  }
+
+  createEffect(
+    on(
+      () =>
+        [
+          params.id,
+          params.id ? JSON.stringify(info()?.metadata ?? {}) : "",
+          JSON.stringify(openCodezModel() ?? {}),
+        ] as const,
+      () => {
+        void refreshPromptState()
+      },
+    ),
+  )
+
+  createEffect(
+    on(
+      () => params.id,
+      (id) => {
+        if (id) setPicker("promptMetadata", {})
+      },
+      { defer: true },
+    ),
+  )
+
+  const loadPromptEntries = async (kind: OpenCodezPromptKind) => {
+    if (picker.promptLoaded[kind] || picker.promptLoading[kind]) return
+    setPicker("promptLoading", kind, true)
+    setPicker("promptError", kind, undefined)
+    const entries = await sdk.client.opencodez.prompt
+      .list({ kind })
+      .then((x) => x.data ?? undefined)
+      .catch(() => undefined)
+    setPicker("promptLoading", kind, false)
+    if (!entries) {
+      setPicker("promptError", kind, language.t("common.requestFailed"))
+      return
+    }
+    setPicker("promptEntries", kind, entries)
+    setPicker("promptLoaded", kind, true)
+  }
+
+  const promptKindIcon = (kind: OpenCodezPromptKind): IconProps["name"] => {
+    if (kind === "system") return "prompt"
+    if (kind === "tone") return "sliders"
+    return "models"
+  }
+
+  const setPromptOpen = (kind: OpenCodezPromptKind, open: boolean) => {
+    setPicker("promptOpen", kind, open)
+    if (open) {
+      void loadPromptEntries(kind)
+      requestAnimationFrame(() => promptSearchInput(kind)?.focus())
+      return
+    }
+    restoreFocus()
+  }
+
+  const selectPrompt = async (kind: OpenCodezPromptKind, name: string) => {
+    const result = await sdk.client.opencodez.prompt
+      .select({
+        sessionID: params.id,
+        metadata: params.id ? undefined : picker.promptMetadata,
+        model: openCodezModel(),
+        kind,
+        name,
+      })
+      .then((x) => x.data ?? undefined)
+      .catch(() => undefined)
+    if (!result) return
+    setPicker("promptState", result.state)
+    if (!params.id) setPicker("promptMetadata", result.metadata)
+    setPicker("promptOpen", kind, false)
+    setPicker("promptSearch", kind, "")
+    restoreFocus()
+  }
+
+  const promptControlItems = (kind: OpenCodezPromptKind): ComposerPickerItemState[] => {
+    if (picker.promptLoading[kind]) {
+      return [{ icon: promptKindIcon(kind), label: "Loading...", disabled: true, onSelect: () => {} }]
+    }
+    const error = picker.promptError[kind]
+    if (error) {
+      return [{ icon: promptKindIcon(kind), label: error, disabled: true, onSelect: () => {} }]
+    }
+
+    const search = picker.promptSearch[kind].trim().toLowerCase()
+    const selected = kind === "system" ? picker.promptState?.system : kind === "tone" ? picker.promptState?.tone : undefined
+    const items = picker.promptEntries[kind].filter((entry) => {
+      if (!search) return true
+      return entry.name.toLowerCase().includes(search)
+    })
+    if (items.length === 0) {
+      return [{ icon: promptKindIcon(kind), label: "No prompts found", disabled: true, onSelect: () => {} }]
+    }
+    return items.map((entry) => ({
+      icon: promptKindIcon(kind),
+      label: entry.name,
+      selected: kind !== "template" && entry.name === selected,
+      onSelect: () => void selectPrompt(kind, entry.name),
+    }))
+  }
+
+  const promptControlState = (kind: OpenCodezPromptKind): ComposerPickerState => {
+    const labels = {
+      system: {
+        action: "prompt-system",
+        label: `System: ${picker.promptState?.system ?? "default"}`,
+        search: "Search system prompts...",
+      },
+      tone: {
+        action: "prompt-tone",
+        label: `Tone: ${picker.promptState?.tone ?? "none"}`,
+        search: "Search tone prompts...",
+      },
+      template: {
+        action: "prompt-template",
+        label: "Template",
+        search: "Search templates...",
+      },
+    } satisfies PromptPickerRecord<{ action: string; label: string; search: string }>
+
+    return {
+      open: picker.promptOpen[kind],
+      trigger: {
+        action: labels[kind].action,
+        icon: promptKindIcon(kind),
+        label: labels[kind].label,
+        style: control(),
+        onPress: () => setPromptOpen(kind, !picker.promptOpen[kind]),
+      },
+      search: picker.promptSearch[kind],
+      searchPlaceholder: labels[kind].search,
+      clearLabel: "Clear search",
+      items: promptControlItems(kind),
+      listClass: "max-h-[244px] overflow-y-auto",
+      searchRef: setPromptSearchRef(kind),
+      onOpenChange: (open) => setPromptOpen(kind, open),
+      onSearchInput: (value) => setPicker("promptSearch", kind, value),
+      onSearchClear: () => {
+        setPicker("promptSearch", kind, "")
+        requestAnimationFrame(() => promptSearchInput(kind)?.focus())
+      },
+    }
   }
 
   const renderEditorWithCursor = (parts: Prompt) => {
@@ -1112,6 +1331,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     imageAttachments,
     commentCount,
     autoAccept: () => accepting(),
+    metadata: () => picker.promptMetadata,
     mode: () => store.mode,
     working,
     editor: () => editorRef,
@@ -1568,6 +1788,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   <Show when={newSession() && !selectedProject()}>
                     <ComposerPickerTrigger state={newProjectTriggerState()} />
                   </Show>
+                  <Show when={store.mode !== "shell"}>
+                    <For each={promptPickerKinds}>{(kind) => <ComposerPicker state={promptControlState(kind)} />}</For>
+                  </Show>
                   <ComposerModelControl state={modelControlState()} />
                 </div>
                 <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
@@ -1812,6 +2035,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                         </TooltipKeybind>
                       </div>
                     </Show>
+                    <Show when={store.mode !== "shell"}>
+                      <For each={promptPickerKinds}>{(kind) => <ComposerPicker state={promptControlState(kind)} />}</For>
+                    </Show>
                     <Show when={!providersLoading()}>
                       <Show when={store.mode !== "shell"}>
                         <div
@@ -1934,6 +2160,7 @@ type ComposerPickerItemState = {
   icon: IconProps["name"]
   label: string
   selected?: boolean
+  disabled?: boolean
   onSelect: () => void
 }
 
@@ -1953,7 +2180,7 @@ type ComposerPickerState = {
   searchPlaceholder: string
   clearLabel: string
   items: ComposerPickerItemState[]
-  action: ComposerPickerItemState
+  action?: ComposerPickerItemState
   listClass?: string
   searchRef: (el: HTMLInputElement) => void
   onOpenChange: (open: boolean) => void
@@ -2007,10 +2234,22 @@ function ComposerPickerMenuItem(props: { state: ComposerPickerItemState }) {
   return (
     <button
       type="button"
-      class="flex h-7 w-full items-center gap-2 rounded px-3 text-left text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-base hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
-      onClick={props.state.onSelect}
+      disabled={props.state.disabled}
+      class={`flex h-7 w-full items-center gap-2 rounded px-3 text-left text-[13px] font-[440] leading-5 tracking-[-0.04px] focus-visible:outline-none ${
+        props.state.disabled
+          ? "cursor-default text-v2-text-text-faint"
+          : "text-v2-text-text-base hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover"
+      }`}
+      onClick={() => {
+        if (props.state.disabled) return
+        props.state.onSelect()
+      }}
     >
-      <Icon name={props.state.icon} size="small" class="shrink-0 text-v2-icon-icon-base" />
+      <Icon
+        name={props.state.icon}
+        size="small"
+        class={`shrink-0 ${props.state.disabled ? "text-v2-icon-icon-muted" : "text-v2-icon-icon-base"}`}
+      />
       <span class="min-w-0 flex-1 truncate leading-5">{props.state.label}</span>
       <Show when={props.state.selected}>
         <Icon name="check-small" size="small" class="shrink-0 text-v2-icon-icon-base" />
@@ -2031,7 +2270,7 @@ function ComposerPicker(props: { state: ComposerPickerState }) {
       <KobaltePopover.Trigger as={ComposerPickerTrigger} state={props.state.trigger} />
       <KobaltePopover.Portal>
         <KobaltePopover.Content
-          class="w-[243px] overflow-hidden rounded-md bg-v2-background-bg-layer-01 shadow-[var(--v2-elevation-floating)] focus:outline-none"
+          class="z-50 w-[243px] overflow-hidden rounded-md bg-v2-background-bg-layer-01 shadow-[var(--v2-elevation-floating)] focus:outline-none"
           onOpenAutoFocus={(event) => event.preventDefault()}
         >
           <div class={`flex flex-col p-0.5 ${props.state.listClass ?? ""}`}>
@@ -2057,10 +2296,16 @@ function ComposerPicker(props: { state: ComposerPickerState }) {
             </div>
             <For each={props.state.items}>{(item) => <ComposerPickerMenuItem state={item} />}</For>
           </div>
-          <div class="h-px bg-v2-border-border-muted" />
-          <div class="flex flex-col p-0.5">
-            <ComposerPickerMenuItem state={props.state.action} />
-          </div>
+          <Show when={props.state.action}>
+            {(action) => (
+              <>
+                <div class="h-px bg-v2-border-border-muted" />
+                <div class="flex flex-col p-0.5">
+                  <ComposerPickerMenuItem state={action()} />
+                </div>
+              </>
+            )}
+          </Show>
         </KobaltePopover.Content>
       </KobaltePopover.Portal>
     </KobaltePopover>

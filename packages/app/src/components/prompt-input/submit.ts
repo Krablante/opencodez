@@ -175,6 +175,7 @@ type PromptSubmitInput = {
   imageAttachments: Accessor<ImageAttachmentPart[]>
   commentCount: Accessor<number>
   autoAccept: Accessor<boolean>
+  metadata?: Accessor<Record<string, unknown> | undefined>
   mode: Accessor<"normal" | "shell">
   working: Accessor<boolean>
   editor: () => HTMLDivElement | undefined
@@ -362,8 +363,10 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     let session = input.info()
     if (!session && isNewSession) {
+      const metadata = input.metadata?.()
+      const createInput = metadata && Object.keys(metadata).length > 0 ? { metadata } : undefined
       const created = await client.session
-        .create()
+        .create(createInput)
         .then((x) => x.data ?? undefined)
         .catch((err) => {
           showToast({

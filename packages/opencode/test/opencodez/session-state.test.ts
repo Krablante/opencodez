@@ -192,6 +192,25 @@ describe("OpenCodez session-bound state", () => {
     })
   })
 
+  test("reports concrete prompt ids from draft metadata without touching pending state", () => {
+    OpenCodezSession.resetPending({})
+
+    const metadata = OpenCodezSession.metadataWithSelection(undefined, {
+      system: "draft-system",
+      tone: "draft-tone",
+      systemManual: true,
+      toneManual: true,
+    })
+
+    expect(OpenCodezSession.indicatorFromMetadata({ metadata })).toEqual({
+      system: "draft-system",
+      tone: "draft-tone",
+      systemManual: true,
+      toneManual: true,
+    })
+    expect(OpenCodezSession.pendingMetadata()).toEqual({})
+  })
+
   test("reflects manual System and Tone choices in the TUI indicator", () => {
     const model = {
       id: "deepseek-chat",

@@ -102,6 +102,14 @@ import type {
   McpRemoteConfig,
   McpStatusErrors,
   McpStatusResponses,
+  OpenCodezPromptKind,
+  OpencodezPromptListErrors,
+  OpencodezPromptListResponses,
+  OpenCodezPromptModel,
+  OpencodezPromptSelectErrors,
+  OpencodezPromptSelectResponses,
+  OpencodezPromptStateErrors,
+  OpencodezPromptStateResponses,
   OutputFormat,
   Part as Part2,
   PartDeleteErrors,
@@ -125,7 +133,7 @@ import type {
   ProjectListResponses,
   ProjectUpdateErrors,
   ProjectUpdateResponses,
-  Prompt,
+  Prompt as Prompt2,
   ProviderAuthErrors,
   ProviderAuthResponses,
   ProviderListErrors,
@@ -2231,6 +2239,145 @@ export class Mcp extends HeyApiClient {
   }
 }
 
+export class Prompt extends HeyApiClient {
+  /**
+   * List OpenCodez prompts
+   *
+   * List OpenCodez System, Tone, or Template prompt entries for the web composer.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      kind: OpenCodezPromptKind
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "kind" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<OpencodezPromptListResponses, OpencodezPromptListErrors, ThrowOnError>({
+      url: "/opencodez/prompts",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get OpenCodez prompt state
+   *
+   * Return the effective OpenCodez System and Tone for a session or draft metadata.
+   */
+  public state<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      sessionID?: string
+      metadata?: {
+        [key: string]: unknown
+      }
+      model?: OpenCodezPromptModel
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "sessionID" },
+            { in: "body", key: "metadata" },
+            { in: "body", key: "model" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      OpencodezPromptStateResponses,
+      OpencodezPromptStateErrors,
+      ThrowOnError
+    >({
+      url: "/opencodez/prompts/state",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Select OpenCodez prompt
+   *
+   * Select a System or Tone prompt, or apply a Template as a System and Tone pair.
+   */
+  public select<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      sessionID?: string
+      metadata?: {
+        [key: string]: unknown
+      }
+      model?: OpenCodezPromptModel
+      kind?: OpenCodezPromptKind
+      name?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "sessionID" },
+            { in: "body", key: "metadata" },
+            { in: "body", key: "model" },
+            { in: "body", key: "kind" },
+            { in: "body", key: "name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      OpencodezPromptSelectResponses,
+      OpencodezPromptSelectErrors,
+      ThrowOnError
+    >({
+      url: "/opencodez/prompts/select",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Opencodez extends HeyApiClient {
+  private _prompt?: Prompt
+  get prompt(): Prompt {
+    return (this._prompt ??= new Prompt({ client: this.client }))
+  }
+}
+
 export class Project extends HeyApiClient {
   /**
    * List all projects
@@ -4310,7 +4457,7 @@ export class Session3 extends HeyApiClient {
       sessionID: string
       directory?: string
       workspace?: string
-      prompt?: Prompt
+      prompt?: Prompt2
       delivery?: SessionDelivery
     },
     options?: Options<never, ThrowOnError>,
@@ -5112,6 +5259,11 @@ export class OpencodeClient extends HeyApiClient {
   private _mcp?: Mcp
   get mcp(): Mcp {
     return (this._mcp ??= new Mcp({ client: this.client }))
+  }
+
+  private _opencodez?: Opencodez
+  get opencodez(): Opencodez {
+    return (this._opencodez ??= new Opencodez({ client: this.client }))
   }
 
   private _project?: Project

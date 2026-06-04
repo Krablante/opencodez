@@ -74,17 +74,8 @@ export function effective(input: {
   metadata?: Record<string, unknown>
 }) {
   const model = input.model ?? input.modelID
-  const defaults = {
-    system: OpenCodezSettings.defaultSystem(input.config, model),
-    tone: OpenCodezSettings.defaultTone(input.config, model),
-  }
   const state = input.sessionID ? selectionForSession(input.sessionID, input.metadata) : pendingSelection
-  return {
-    system: state.systemManual && state.system ? state.system : defaults.system,
-    tone: state.toneManual && state.tone ? state.tone : defaults.tone,
-    systemManual: state.systemManual === true,
-    toneManual: state.toneManual === true,
-  }
+  return effectiveForSelection(input.config, model, state)
 }
 
 export function indicator(input: {
@@ -95,6 +86,23 @@ export function indicator(input: {
   metadata?: Record<string, unknown>
 }) {
   const result = effective(input)
+  return {
+    ...result,
+    system: result.system ?? upstreamSystemPromptID(input.model ?? input.modelID),
+  }
+}
+
+export function indicatorFromMetadata(input: {
+  config?: OpenCodezSettings.ConfigLike
+  model?: OpenCodezSettings.ModelLike
+  modelID?: string
+  metadata?: Record<string, unknown>
+}) {
+  const result = effectiveForSelection(
+    input.config,
+    input.model ?? input.modelID,
+    fromMetadata(input.metadata).selection ?? {},
+  )
   return {
     ...result,
     system: result.system ?? upstreamSystemPromptID(input.model ?? input.modelID),
@@ -155,6 +163,14 @@ export function metadataWithSessionState(metadata: Record<string, unknown> | und
   })
 }
 
+export function metadataWithSelection(metadata: Record<string, unknown> | undefined, selection: Selection) {
+  const state = fromMetadata(metadata)
+  return withState(metadata, {
+    ...state,
+    selection: cleanSelection(merge(state.selection ?? {}, selection)),
+  })
+}
+
 export function fromMetadata(metadata?: Record<string, unknown>): PersistedState {
   const raw = metadata?.[metadataKey]
   if (!isRecord(raw)) return {}
@@ -184,6 +200,23 @@ function merge(current: Selection, next: Selection): Selection {
     tone: next.tone ?? current.tone,
     systemManual: next.systemManual ?? current.systemManual,
     toneManual: next.toneManual ?? current.toneManual,
+  }
+}
+
+function effectiveForSelection(
+  config: OpenCodezSettings.ConfigLike | undefined,
+  model: OpenCodezSettings.ModelLike | undefined,
+  state: Selection,
+) {
+  const defaults = {
+    system: OpenCodezSettings.defaultSystem(config, model),
+    tone: OpenCodezSettings.defaultTone(config, model),
+  }
+  return {
+    system: state.systemManual && state.system ? state.system : defaults.system,
+    tone: state.toneManual && state.tone ? state.tone : defaults.tone,
+    systemManual: state.systemManual === true,
+    toneManual: state.toneManual === true,
   }
 }
 
