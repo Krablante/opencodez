@@ -305,7 +305,12 @@ export async function bootstrapDirectory(input: {
           }),
         ),
       () => Promise.resolve(input.loadSessions(input.directory)),
-      input.mcp && (() => input.queryClient.fetchQuery(loadMcpQuery(input.directory, input.sdk))),
+      input.mcp &&
+        (() =>
+          input.queryClient.fetchQuery(loadMcpQuery(input.directory, input.sdk)).then((data) => {
+            input.setStore("mcp", data)
+            input.setStore("mcp_ready", true)
+          })),
       () =>
         input.queryClient.fetchQuery(loadProvidersQuery(input.directory, input.sdk)).catch((err) => {
           const project = getFilename(input.directory)

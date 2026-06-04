@@ -222,12 +222,8 @@ export function createChildStoreManager(input: {
             todo: {},
             permission: {},
             question: {},
-            get mcp_ready() {
-              return !mcpQuery.isLoading
-            },
-            get mcp() {
-              return mcpQuery.isLoading ? {} : (mcpQuery.data ?? {})
-            },
+            mcp_ready: false,
+            mcp: {},
             get lsp_ready() {
               return !lspQuery.isLoading
             },
