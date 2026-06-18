@@ -66,6 +66,10 @@ jobs:
             echo "release_version must be semver-like, for example 1.17.8+opencodez.2" >&2
             exit 1
           fi
+          if [[ "$release_version" != *opencodez* ]]; then
+            echo "release_version must be OpenCodez-specific, for example 1.17.8+opencodez.2" >&2
+            exit 1
+          fi
           if [[ ! "$binary_version" =~ $semver ]]; then
             echo "binary_version must be semver-like, for example 1.17.8" >&2
             exit 1

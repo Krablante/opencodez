@@ -98,7 +98,8 @@ CLI with `OPENCODEZ_BUILD=1`, packages the `opencodez-*` archives expected by
 the installer and updater, verifies those assets, uploads them to GitHub
 Releases, and then publishes the release. It does not publish npm packages,
 desktop apps, AUR packages, Homebrew formulae, Docker images, or upstream
-`opencode-*` release assets.
+`opencode-*` release assets. Release versions must include `opencodez`, for
+example `1.17.8+opencodez.2`, so plain upstream-looking tags are rejected.
 
 For local dogfooding of unreleased changes, build and install a local OpenCodez
 binary, then test the installed `opencodez` command in the live TUI. Checking
