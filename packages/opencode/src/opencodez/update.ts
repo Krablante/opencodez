@@ -2,6 +2,7 @@ import { z } from "zod"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
+import semver from "semver"
 
 const RELEASE_REPOSITORY = process.env["OPENCODEZ_UPDATE_REPOSITORY"] ?? "Krablante/opencodez"
 const RELEASES_API = `https://api.github.com/repos/${RELEASE_REPOSITORY}/releases/latest`
@@ -48,10 +49,10 @@ export async function run(input: { check: boolean; current?: string }): Promise<
   }
 
   const current = input.current
-  if (current && normalizeVersion(current) === normalizeVersion(release.tag_name)) {
+  if (current && isCurrentOrNewer(current, release.tag_name)) {
     return {
       status: "current",
-      message: `OpenCodez is already current (${release.tag_name}).`,
+      message: `OpenCodez is already current (installed ${current}, latest release ${release.tag_name}).`,
     }
   }
 
@@ -111,6 +112,17 @@ export async function run(input: { check: boolean; current?: string }): Promise<
 
 function normalizeVersion(value: string) {
   return value.replace(/^v/, "")
+}
+
+function isCurrentOrNewer(current: string, latest: string) {
+  const currentVersion = parseVersion(current)
+  const latestVersion = parseVersion(latest)
+  if (!currentVersion || !latestVersion) return normalizeVersion(current) === normalizeVersion(latest)
+  return semver.gte(currentVersion, latestVersion)
+}
+
+function parseVersion(value: string) {
+  return semver.valid(normalizeVersion(value))
 }
 
 function selectAsset(assets: Array<z.infer<typeof Asset>>) {

@@ -88,7 +88,9 @@ opencodez update --check
 ```
 
 These commands download ready-made release artifacts, not a source checkout.
-They use the public release channel, not the local dogfooding path.
+They use the public release channel, not the local dogfooding path. If a local
+binary is newer than the latest published GitHub Release, `opencodez update`
+does not downgrade it.
 
 For local dogfooding of unreleased changes, build and install a local OpenCodez
 binary, then test the installed `opencodez` command in the live TUI. Checking

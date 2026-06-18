@@ -86,6 +86,7 @@ opencodez update --check
 ```
 
 The update path is intentionally simple: GitHub Releases are the source of truth, the installer downloads the right release artifact for the current OS and architecture, and `opencodez update` uses the same release channel from inside the app.
+If the installed binary is newer than the latest published release, `opencodez update` treats it as current instead of downgrading it.
 
 ## Run From Source
 
