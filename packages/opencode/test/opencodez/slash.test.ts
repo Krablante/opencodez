@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { OpenCodezSession } from "../../src/opencodez/session"
-import { OpenCodezSlash } from "../../src/opencodez/slash"
+import { OpenCodezSession } from "@opencode-ai/core/opencodez/session"
+import { OpenCodezSlash } from "@opencode-ai/core/opencodez/slash"
 
 describe("OpenCodezSlash", () => {
   test("parses /new system and tone flags", () => {

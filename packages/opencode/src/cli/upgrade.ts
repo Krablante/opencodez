@@ -4,7 +4,7 @@ import { Flag } from "@opencode-ai/core/flag/flag"
 import { Installation } from "@/installation"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { GlobalBus } from "@/bus/global"
-import { OpenCodezIdentity } from "@/opencodez/identity"
+import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 
 export async function upgrade() {
   if (OpenCodezIdentity.enabled) return

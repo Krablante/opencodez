@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { OpenCodezSession } from "../../src/opencodez/session"
+import { OpenCodezSession } from "@opencode-ai/core/opencodez/session"
 
 const config = {
   opencodez: {

@@ -6,21 +6,23 @@ import { spawn } from "child_process"
 import { fileURLToPath } from "url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const packageDir = path.join(__dirname, "..")
 
 process.env.OPENCODE_APP_NAME ||= "opencodez"
 process.env.OPENCODE_CLI_NAME ||= "opencodez"
 process.env.OPENCODEZ ||= "1"
 process.env.OPENCODE_DISABLE_AUTOUPDATE ||= "1"
 
-const sourceEntry = path.join(__dirname, "..", "src", "index.ts")
+const sourceEntry = path.join(packageDir, "src", "index.ts")
 const args =
   !process.env.OPENCODE_BIN_PATH && fs.existsSync(sourceEntry)
-    ? ["bun", ["run", "--conditions=browser", sourceEntry, ...process.argv.slice(2)]]
+    ? ["bun", ["--jsx-import-source", "@opentui/solid", "--conditions=browser", sourceEntry, ...process.argv.slice(2)]]
     : [process.execPath, [path.join(__dirname, "opencode"), ...process.argv.slice(2)]]
 
 const child = spawn(args[0], args[1], {
   stdio: "inherit",
   env: process.env,
+  cwd: !process.env.OPENCODE_BIN_PATH && fs.existsSync(sourceEntry) ? packageDir : undefined,
 })
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

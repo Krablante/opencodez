@@ -1,6 +1,6 @@
 import { Config } from "@/config/config"
 import { OpenCodezPromptLibrary } from "@/opencodez/prompt-library"
-import { OpenCodezSession } from "@/opencodez/session"
+import { OpenCodezSession } from "@opencode-ai/core/opencodez/session"
 import { Session } from "@/session/session"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"

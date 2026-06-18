@@ -23,36 +23,6 @@ if (process.env.OPENCODEZ_BUILD === "1") {
 
 const { Script } = await import("@opencode-ai/script")
 
-// Load migrations from migration directories
-const migrationDirs = (
-  await fs.promises.readdir(path.join(dir, "migration"), {
-    withFileTypes: true,
-  })
-)
-  .filter((entry) => entry.isDirectory() && /^\d{4}\d{2}\d{2}\d{2}\d{2}\d{2}/.test(entry.name))
-  .map((entry) => entry.name)
-  .sort()
-
-const migrations = await Promise.all(
-  migrationDirs.map(async (name) => {
-    const file = path.join(dir, "migration", name, "migration.sql")
-    const sql = await Bun.file(file).text()
-    const match = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/.exec(name)
-    const timestamp = match
-      ? Date.UTC(
-          Number(match[1]),
-          Number(match[2]) - 1,
-          Number(match[3]),
-          Number(match[4]),
-          Number(match[5]),
-          Number(match[6]),
-        )
-      : 0
-    return { sql, timestamp, name }
-  }),
-)
-console.log(`Loaded ${migrations.length} migrations`)
-
 const singleFlag = process.argv.includes("--single")
 const baselineFlag = process.argv.includes("--baseline")
 const skipInstall = process.argv.includes("--skip-install")
@@ -178,6 +148,7 @@ const executableName = artifactName === "opencodez" ? "opencodez" : "opencode"
 if (!skipInstall) {
   await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]}`
   await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
+  await $`bun install --os="*" --cpu="*" @ff-labs/fff-bun@${pkg.dependencies["@ff-labs/fff-bun"]}`
 }
 for (const item of targets) {
   const name = [
@@ -196,14 +167,14 @@ for (const item of targets) {
   const localPath = path.resolve(dir, "node_modules/@opentui/core/parser.worker.js")
   const rootPath = path.resolve(dir, "../../node_modules/@opentui/core/parser.worker.js")
   const parserWorker = fs.realpathSync(fs.existsSync(localPath) ? localPath : rootPath)
-  const workerPath = "./src/cli/cmd/tui/worker.ts"
+  const workerPath = "./src/cli/tui/worker.ts"
 
   // Use platform-specific bunfs root path based on target OS
   const bunfsRoot = item.os === "win32" ? "B:/~BUN/root/" : "/$bunfs/root/"
   const workerRelativePath = path.relative(dir, parserWorker).replaceAll("\\", "/")
 
   await Bun.build({
-    conditions: ["browser"],
+    conditions: ["bun", "node"],
     tsconfig: "./tsconfig.json",
     plugins: [plugin],
     external: ["node-gyp"],
@@ -224,13 +195,14 @@ for (const item of targets) {
     files: embeddedFileMap ? { "opencode-web-ui.gen.ts": embeddedFileMap } : {},
     entrypoints: ["./src/index.ts", parserWorker, workerPath, ...(embeddedFileMap ? ["opencode-web-ui.gen.ts"] : [])],
     define: {
+      FFF_LIBC: JSON.stringify(item.abi === "musl" ? "musl" : "gnu"),
       OPENCODE_VERSION: `'${Script.version}'`,
-      OPENCODE_MIGRATIONS: JSON.stringify(migrations),
       OPENCODE_MODELS_DEV: generated.modelsData,
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
       OPENCODE_WORKER_PATH: workerPath,
       OPENCODE_CHANNEL: `'${Script.channel}'`,
       OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
+      ...(item.os === "linux" ? { "process.env.OPENTUI_LIBC": JSON.stringify(item.abi ?? "glibc") } : {}),
     },
   })
 
@@ -256,6 +228,7 @@ for (const item of targets) {
         preferUnplugged: true,
         os: [item.os],
         cpu: [item.arch],
+        ...(item.abi ? { libc: [item.abi] } : {}),
       },
       null,
       2,

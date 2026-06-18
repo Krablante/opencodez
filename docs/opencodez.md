@@ -472,22 +472,32 @@ They do not rewrite `opencode.jsonc`.
 These paths are useful when maintaining the feature. They are waypoints, not a
 reason to broadly rewrite upstream code.
 
+OpenCodez currently follows the upstream package split introduced after the
+older `packages/opencode`-only TUI layout. Fork-specific shared state that must
+be used by both the server and TUI lives in core. File-backed prompt loading
+stays in the opencode server package, and the web/TUI surfaces select prompts
+through the OpenCodez HTTP API instead of reading prompt files directly.
+
 Bundled prompt assets:
 
 ```text
 packages/opencode/src/opencodez/default-prompts/
 ```
 
-OpenCodez prompt library and defaults:
+OpenCodez prompt library and request-time prompt loading:
 
 ```text
 packages/opencode/src/opencodez/prompt-library.ts
-packages/opencode/src/opencodez/settings.ts
-packages/opencode/src/opencodez/session.ts
-packages/opencode/src/config/opencodez.ts
 ```
 
-Upstream System prompt integration:
+OpenCodez shared identity, config defaults, session state, and slash parsing:
+
+```text
+packages/core/src/opencodez/
+packages/core/src/v1/config/opencodez.ts
+```
+
+Upstream System prompt integration still belongs to the opencode server package:
 
 ```text
 packages/opencode/src/session/system.ts
@@ -503,9 +513,9 @@ packages/opencode/src/session/llm/context-prune.ts
 TUI command and selector surface:
 
 ```text
-packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx
-packages/opencode/src/cli/cmd/tui/component/opencodez-dialogs.tsx
-packages/opencode/src/cli/cmd/tui/app.tsx
+packages/tui/src/component/prompt/index.tsx
+packages/tui/src/component/opencodez-dialogs.tsx
+packages/tui/src/app.tsx
 ```
 
 Web composer and prompt API surface:
@@ -530,11 +540,11 @@ For docs-only changes, check links and search for stale prompt names.
 For implementation changes, prefer a narrow test first and then broaden:
 
 ```bash
-cd packages/opencode
-bun test test/opencodez/*.test.ts
-bun run typecheck
-cd ../..
-bun run typecheck
+bun test packages/opencode/test/opencodez/*.test.ts
+bun run --cwd packages/core typecheck
+bun run --cwd packages/opencode typecheck
+bun run --cwd packages/tui typecheck
+bun run --cwd packages/app typecheck
 ```
 
 Before telling a user the product is ready to dogfood, install a fresh local
