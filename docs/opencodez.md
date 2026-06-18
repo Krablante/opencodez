@@ -92,10 +92,31 @@ They use the public release channel, not the local dogfooding path. If a local
 binary is newer than the latest published GitHub Release, `opencodez update`
 does not downgrade it.
 
+Public OpenCodez releases should be created through the `publish` GitHub
+Actions workflow. The workflow is intentionally small: it builds the OpenCodez
+CLI with `OPENCODEZ_BUILD=1`, packages the `opencodez-*` archives expected by
+the installer and updater, verifies those assets, uploads them to GitHub
+Releases, and then publishes the release. It does not publish npm packages,
+desktop apps, AUR packages, Homebrew formulae, Docker images, or upstream
+`opencode-*` release assets.
+
 For local dogfooding of unreleased changes, build and install a local OpenCodez
 binary, then test the installed `opencodez` command in the live TUI. Checking
 only `--help` or `--version` is not enough because those commands do not render
 the TUI.
+
+Example release inputs:
+
+```text
+release_version: 1.17.8+opencodez.2
+binary_version:  1.17.8
+draft:           false
+```
+
+If `binary_version` is omitted, the workflow uses the part of
+`release_version` before `+metadata`. That keeps the GitHub Release tag
+OpenCodez-specific while keeping the embedded binary version simple for
+`opencodez update`.
 
 ## Prompt Library
 

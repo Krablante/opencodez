@@ -98,6 +98,7 @@ For local development, run the source-checkout launcher directly:
 ```
 
 Release builds should set `OPENCODEZ_BUILD=1` so the build script emits `opencodez-*` artifacts with an `opencodez` binary inside.
+Normal public releases should use the `publish` GitHub Actions workflow. Give it an OpenCodez release version such as `1.17.8+opencodez.2`; by default it embeds the upstream-compatible binary version before the `+metadata`, builds the `opencodez-*` assets, verifies their names and archive contents, uploads them to GitHub Releases, and publishes the release unless `draft` is enabled.
 
 ## Side-by-Side With OpenCode
 
