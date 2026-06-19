@@ -12,6 +12,66 @@ export const csp = (hash = "") =>
   `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src * data:`
 export const DEFAULT_CSP = csp()
 
+const WEB_SERVERS_SCRIPT_PATH = "/opencode-web-servers.js"
+
+function configuredWebServers() {
+  const raw =
+    process.env.OPENCODE_WEB_SERVERS_JSON ||
+    (process.env.OPENCODE_WEB_SERVERS_JSON_B64
+      ? Buffer.from(process.env.OPENCODE_WEB_SERVERS_JSON_B64, "base64").toString("utf8")
+      : "")
+  if (!raw) return []
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((server) => {
+      if (server && server.type === "http" && typeof server.displayName === "string" && typeof server.http?.url === "string") {
+        return [{ type: "http", displayName: server.displayName, http: { url: server.http.url } }]
+      }
+      if (server && typeof server.name === "string" && typeof server.url === "string") {
+        return [{ type: "http", displayName: server.name, http: { url: server.url } }]
+      }
+      return []
+    })
+  } catch {
+    return []
+  }
+}
+
+function webServersScript() {
+  const servers = configuredWebServers()
+  if (servers.length === 0) return ""
+  return `(() => {
+  try {
+    const key = "opencode.global.dat:server";
+    const seed = ${JSON.stringify(servers)};
+    const raw = localStorage.getItem(key);
+    const state = raw ? JSON.parse(raw) : {};
+    const byUrl = new Map();
+    for (const item of state.list || []) {
+      if (item && item.http && item.http.url) byUrl.set(item.http.url, item);
+    }
+    for (const item of seed) {
+      byUrl.set(item.http.url, { ...byUrl.get(item.http.url), ...item });
+    }
+    state.list = Array.from(byUrl.values());
+    state.projects = state.projects || {};
+    state.lastProject = state.lastProject || {};
+    localStorage.setItem(key, JSON.stringify(state));
+  } catch (error) {
+    console.warn("failed to apply configured OpenCode web servers", error);
+  }
+})();`
+}
+
+function injectWebServersScript(body: string) {
+  if (configuredWebServers().length === 0 || body.includes(WEB_SERVERS_SCRIPT_PATH)) return body
+  const script = `<script src="${WEB_SERVERS_SCRIPT_PATH}"></script>`
+  if (body.includes("</head>")) return body.replace("</head>", `${script}</head>`)
+  return `${script}${body}`
+}
+
 export function themePreloadHash(body: string) {
   return body.match(/<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(['"])oc-theme-preload-script\1[^>]*>([\s\S]*?)<\/script>/i)
 }
@@ -56,7 +116,9 @@ function embeddedUIResponse(file: string, body: Uint8Array) {
   const mime = FSUtil.mimeType(file)
   const headers = new Headers({ "content-type": mime })
   if (mime.startsWith("text/html")) {
-    headers.set("content-security-policy", cspForHtml(new TextDecoder().decode(body)))
+    const text = injectWebServersScript(new TextDecoder().decode(body))
+    headers.set("content-security-policy", cspForHtml(text))
+    return HttpServerResponse.text(text, { headers })
   }
   return HttpServerResponse.raw(body, { headers })
 }
@@ -83,6 +145,12 @@ export function serveUIEffect(
     const embeddedWebUI = yield* Effect.promise(() => embeddedUI(services.disableEmbeddedWebUi))
     const path = new URL(request.url, "http://localhost").pathname
 
+    if (path === WEB_SERVERS_SCRIPT_PATH) {
+      return HttpServerResponse.text(webServersScript(), {
+        headers: new Headers({ "content-type": "text/javascript; charset=utf-8" }),
+      })
+    }
+
     if (embeddedWebUI) return yield* serveEmbeddedUIEffect(path, services.fs, embeddedWebUI)
 
     const response = yield* services.client.execute(
@@ -94,7 +162,7 @@ export function serveUIEffect(
     const headers = proxyResponseHeaders(response.headers)
 
     if (response.headers["content-type"]?.includes("text/html")) {
-      const body = yield* response.text
+      const body = injectWebServersScript(yield* response.text)
       headers.set("Content-Security-Policy", cspForHtml(body))
       return HttpServerResponse.text(body, { status: response.status, headers })
     }

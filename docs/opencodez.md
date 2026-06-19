@@ -399,6 +399,48 @@ For existing sessions, web prompt choices are written to session metadata. For a
 new session before the first message, the choice stays in composer draft
 metadata and is sent when the session is created.
 
+## Web Default Servers
+
+OpenCodez Web can seed its Settings -> Servers list from environment config.
+This is a generic OpenCodez feature for multiserver setups; it is not tied to
+Politia, BURO, or any private host names.
+
+The server process accepts either plain JSON or base64-encoded JSON:
+
+```text
+OPENCODE_WEB_SERVERS_JSON
+OPENCODE_WEB_SERVERS_JSON_B64
+```
+
+The JSON value is an array of entries. Two shapes are accepted:
+
+```json
+[
+  { "name": "ser", "url": "http://192.168.1.215:4096" }
+]
+```
+
+or the internal OpenCode Web connection shape:
+
+```json
+[
+  {
+    "type": "http",
+    "displayName": "ser",
+    "http": { "url": "http://192.168.1.215:4096" }
+  }
+]
+```
+
+On page load, OpenCodez merges these entries into the browser's normal server
+storage by URL. Existing user entries are preserved unless a configured entry
+uses the same URL, in which case the configured display name wins. The UI still
+uses its normal health checks and project selection behavior after seeding.
+
+When multiple web origins are used, the remote `opencodez serve` processes also
+need matching `--cors` origins so browser health checks and API calls can reach
+the selected server.
+
 ## Compact Indicator
 
 The TUI shows the active System and Tone while the user works.
