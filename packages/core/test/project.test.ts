@@ -1,6 +1,7 @@
 import { describe, expect } from "bun:test"
 import { $ } from "bun"
 import fs from "fs/promises"
+import os from "os"
 import path from "path"
 import { Effect, Layer, Schema } from "effect"
 import { ProjectV2 } from "@opencode-ai/core/project"
@@ -55,7 +56,7 @@ async function rootCommit(dir: string) {
 }
 
 describe("ProjectV2.resolve", () => {
-  it.live("returns global for non-git directory", () =>
+  it.live("returns global for non-git directory without widening to filesystem root", () =>
     Effect.gen(function* () {
       const tmp = yield* Effect.acquireRelease(
         Effect.promise(() => tmpdir()),
@@ -66,7 +67,20 @@ describe("ProjectV2.resolve", () => {
       const result = yield* project.resolve(abs(tmp.path))
 
       expect(result.id).toBe(ProjectV2.ID.make("global"))
-      expect(path.resolve(result.directory)).toBe(path.parse(tmp.path).root)
+      expect(result.directory).toBe(abs(tmp.path))
+      expect(result.previous).toBeUndefined()
+      expect(result.vcs).toBeUndefined()
+    }),
+  )
+
+  it.live("clamps explicit filesystem root to home for the global project", () =>
+    Effect.gen(function* () {
+      const project = yield* ProjectV2.Service
+
+      const result = yield* project.resolve(abs(path.parse(os.homedir()).root))
+
+      expect(result.id).toBe(ProjectV2.ID.make("global"))
+      expect(result.directory).toBe(abs(os.homedir()))
       expect(result.previous).toBeUndefined()
       expect(result.vcs).toBeUndefined()
     }),
