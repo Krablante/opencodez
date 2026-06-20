@@ -34,7 +34,7 @@ export const compressionLayer = HttpRouter.middleware<{ handles: unknown }>()((e
     const request = yield* HttpServerRequest.HttpServerRequest
 
     if (request.method === "HEAD") return response
-    if (response.headers["content-encoding"]) return response
+    if (response.headers["content-encoding"]) return varyAcceptEncoding(response)
     if (response.headers["transfer-encoding"]) return response
 
     const body = response.body
@@ -55,10 +55,19 @@ export const compressionLayer = HttpRouter.middleware<{ handles: unknown }>()((e
     if (!encoding) return response
 
     const compressed = encoding === "gzip" ? gzipSync(body.body) : deflateSync(body.body)
-    return HttpServerResponse.setHeader(
-      HttpServerResponse.setBody(response, HttpBody.uint8Array(compressed, contentType)),
-      "content-encoding",
-      encoding,
+    return varyAcceptEncoding(
+      HttpServerResponse.setHeader(
+        HttpServerResponse.setBody(response, HttpBody.uint8Array(compressed, contentType)),
+        "content-encoding",
+        encoding,
+      ),
     )
   }),
 ).layer
+
+function varyAcceptEncoding(response: HttpServerResponse.HttpServerResponse) {
+  const vary = response.headers["vary"]
+  const tokens = vary?.split(",").map((s) => s.trim().toLowerCase()) ?? []
+  if (tokens.includes("*") || tokens.includes("accept-encoding")) return response
+  return HttpServerResponse.setHeader(response, "vary", [vary, "Accept-Encoding"].filter(Boolean).join(", "))
+}
