@@ -320,14 +320,14 @@ Example:
         "gpt-5.3-codex-spark": "codex_gpt_5_3_codex",
         "gpt-5.4": "codex_gpt_5_4",
         "gpt-5.4-mini": "codex_gpt_5_4_mini",
-        "deepseek": "default"
+        "deepseek": "default",
       },
       "tone": {
         "default": "codex_pragmatic",
-        "anthropic": "codex_friendly"
-      }
-    }
-  }
+        "anthropic": "codex_friendly",
+      },
+    },
+  },
 }
 ```
 
@@ -415,9 +415,7 @@ OPENCODE_WEB_SERVERS_JSON_B64
 The JSON value is an array of entries. Two shapes are accepted:
 
 ```json
-[
-  { "name": "ser", "url": "http://192.168.1.215:4096" }
-]
+[{ "name": "ser", "url": "http://192.168.1.215:4096" }]
 ```
 
 or the internal OpenCode Web connection shape:
@@ -440,6 +438,23 @@ uses its normal health checks and project selection behavior after seeding.
 When multiple web origins are used, the remote `opencodez serve` processes also
 need matching `--cors` origins so browser health checks and API calls can reach
 the selected server.
+
+## Web Asset Delivery
+
+OpenCodez serves the embedded web UI with caching and compression enabled by
+default for hashed static assets. This keeps remote private links and mobile VPN
+loads from downloading the same JavaScript and CSS repeatedly.
+
+The runtime files stay uncached: `index.html`, `opencode-web-servers.js`, API
+responses, and event streams are not treated as immutable assets.
+
+Operators can turn the behavior off without changing code:
+
+```text
+OPENCODE_UI_ASSET_CACHE=0
+OPENCODE_UI_ASSET_COMPRESSION=0
+OPENCODE_UI_ASSET_CACHE_MAX_AGE=31536000
+```
 
 ## Compact Indicator
 
@@ -488,11 +503,11 @@ Config lives in `~/.config/opencodez/opencode.jsonc` under:
       "pruning_size": 20000,
       "prune": {
         "reasoning": true,
-        "tool": true
+        "tool": true,
       },
-      "preserve_tools": []
-    }
-  }
+      "preserve_tools": [],
+    },
+  },
 }
 ```
 

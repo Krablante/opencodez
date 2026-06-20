@@ -2,6 +2,7 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Effect, Stream } from "effect"
 import { HttpBody, HttpClient, HttpClientRequest, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { createHash } from "node:crypto"
+import { brotliCompressSync, gzipSync } from "node:zlib"
 import { ProxyUtil } from "../proxy-util"
 
 let embeddedUIPromise: Promise<Record<string, string> | null> | undefined
@@ -13,6 +14,51 @@ export const csp = (hash = "") =>
 export const DEFAULT_CSP = csp()
 
 const WEB_SERVERS_SCRIPT_PATH = "/opencode-web-servers.js"
+const DEFAULT_UI_ASSET_CACHE_MAX_AGE_SECONDS = 31_536_000
+
+type UIAssetSettings = {
+  cache: boolean
+  compression: boolean
+  cacheMaxAge: number
+}
+
+export function uiAssetSettings(env: NodeJS.ProcessEnv = process.env): UIAssetSettings {
+  return {
+    cache: envBool(env.OPENCODE_UI_ASSET_CACHE, true),
+    compression: envBool(env.OPENCODE_UI_ASSET_COMPRESSION, true),
+    cacheMaxAge: envPositiveInt(env.OPENCODE_UI_ASSET_CACHE_MAX_AGE, DEFAULT_UI_ASSET_CACHE_MAX_AGE_SECONDS),
+  }
+}
+
+export function uiAssetHeaders(requestPath: string, mime: string, settings = uiAssetSettings()) {
+  const headers = new Headers({ "content-type": mime })
+  if (!settings.cache) return headers
+
+  if (mime.startsWith("text/html") || requestPath === WEB_SERVERS_SCRIPT_PATH) {
+    headers.set("cache-control", "no-cache")
+    return headers
+  }
+
+  if (isImmutableUIAsset(requestPath)) {
+    headers.set("cache-control", `public, max-age=${settings.cacheMaxAge}, immutable`)
+  }
+
+  return headers
+}
+
+export function compressUIAsset(
+  requestPath: string,
+  mime: string,
+  body: Uint8Array,
+  acceptEncoding = "",
+  settings = uiAssetSettings(),
+) {
+  if (!settings.compression || !isCompressibleUIAsset(requestPath, mime, body)) return { body, encoding: undefined }
+
+  if (acceptsEncoding(acceptEncoding, "br")) return { body: brotliCompressSync(body), encoding: "br" }
+  if (acceptsEncoding(acceptEncoding, "gzip")) return { body: gzipSync(body), encoding: "gzip" }
+  return { body, encoding: undefined }
+}
 
 function configuredWebServers() {
   const raw =
@@ -26,7 +72,12 @@ function configuredWebServers() {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
     return parsed.flatMap((server) => {
-      if (server && server.type === "http" && typeof server.displayName === "string" && typeof server.http?.url === "string") {
+      if (
+        server &&
+        server.type === "http" &&
+        typeof server.displayName === "string" &&
+        typeof server.http?.url === "string"
+      ) {
         return [{ type: "http", displayName: server.displayName, http: { url: server.http.url } }]
       }
       if (server && typeof server.name === "string" && typeof server.url === "string") {
@@ -112,27 +163,34 @@ function notFound() {
   return HttpServerResponse.jsonUnsafe({ error: "Not Found" }, { status: 404 })
 }
 
-function embeddedUIResponse(file: string, body: Uint8Array) {
+function embeddedUIResponse(requestPath: string, file: string, body: Uint8Array, acceptEncoding = "") {
   const mime = FSUtil.mimeType(file)
-  const headers = new Headers({ "content-type": mime })
+  const headers = uiAssetHeaders(requestPath, mime)
   if (mime.startsWith("text/html")) {
     const text = injectWebServersScript(new TextDecoder().decode(body))
     headers.set("content-security-policy", cspForHtml(text))
     return HttpServerResponse.text(text, { headers })
   }
-  return HttpServerResponse.raw(body, { headers })
+  const compressed = compressUIAsset(requestPath, mime, body, acceptEncoding)
+  if (compressed.encoding) {
+    headers.set("content-encoding", compressed.encoding)
+    headers.set("vary", "Accept-Encoding")
+    headers.set("content-length", String(compressed.body.byteLength))
+  }
+  return HttpServerResponse.raw(compressed.body, { headers })
 }
 
 export function serveEmbeddedUIEffect(
   requestPath: string,
   fs: FSUtil.Interface,
   embeddedWebUI: Record<string, string>,
+  acceptEncoding = "",
 ) {
   const file = embeddedWebUI[requestPath.replace(/^\//, "")] ?? embeddedWebUI["index.html"] ?? null
   if (!file) return Effect.succeed(notFound())
 
   return fs.readFile(file).pipe(
-    Effect.map((body) => embeddedUIResponse(file, body)),
+    Effect.map((body) => embeddedUIResponse(requestPath, file, body, acceptEncoding)),
     Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(notFound())),
   )
 }
@@ -147,11 +205,12 @@ export function serveUIEffect(
 
     if (path === WEB_SERVERS_SCRIPT_PATH) {
       return HttpServerResponse.text(webServersScript(), {
-        headers: new Headers({ "content-type": "text/javascript; charset=utf-8" }),
+        headers: uiAssetHeaders(WEB_SERVERS_SCRIPT_PATH, "text/javascript; charset=utf-8"),
       })
     }
 
-    if (embeddedWebUI) return yield* serveEmbeddedUIEffect(path, services.fs, embeddedWebUI)
+    if (embeddedWebUI)
+      return yield* serveEmbeddedUIEffect(path, services.fs, embeddedWebUI, request.headers["accept-encoding"])
 
     const response = yield* services.client.execute(
       HttpClientRequest.make(request.method)(upstreamURL(path), {
@@ -173,4 +232,42 @@ export function serveUIEffect(
       headers,
     })
   })
+}
+
+function isImmutableUIAsset(requestPath: string) {
+  return requestPath.startsWith("/assets/")
+}
+
+function isCompressibleUIAsset(requestPath: string, mime: string, body: Uint8Array) {
+  if (!isImmutableUIAsset(requestPath) || body.byteLength < 1024) return false
+  if (mime.startsWith("text/")) return true
+  return [
+    "application/javascript",
+    "text/javascript",
+    "application/json",
+    "application/wasm",
+    "image/svg+xml",
+    "font/ttf",
+    "font/otf",
+    "font/woff",
+    "font/woff2",
+  ].some((type) => mime.includes(type))
+}
+
+function acceptsEncoding(acceptEncoding: string, encoding: "br" | "gzip") {
+  return acceptEncoding
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .some((item) => item === encoding || item.startsWith(`${encoding};`))
+}
+
+function envBool(value: string | undefined, fallback: boolean) {
+  if (value === undefined || value === "") return fallback
+  return !["0", "false", "no", "off", "disabled"].includes(value.toLowerCase())
+}
+
+function envPositiveInt(value: string | undefined, fallback: number) {
+  if (!value) return fallback
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback
 }
