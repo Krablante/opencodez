@@ -22,6 +22,7 @@ This page explains only what OpenCodez adds or changes:
 - model-aware prompt defaults;
 - session persistence for manual prompt choices;
 - project discovery and indexing safety defaults;
+- visible progress for release downloads in `opencodez update`;
 - OpenCodez config roots, install, and update behavior;
 - maintenance rules that keep the fork small.
 
@@ -119,6 +120,21 @@ If `binary_version` is omitted, the workflow uses the part of
 `release_version` before `+metadata`. That keeps the GitHub Release tag
 OpenCodez-specific while keeping the embedded binary version simple for
 `opencodez update`.
+
+## Update Download Progress
+
+`opencodez update` emits visible progress while it checks GitHub Releases,
+downloads the selected release asset, and begins installation. This avoids the
+silent wait that can happen on weak connections when a large asset is read into
+memory.
+
+During asset downloads, OpenCodez reads the response body as a stream. If GitHub
+provides `Content-Length`, the CLI prints downloaded MB, total MB, and percent.
+If the header is absent, the CLI prints downloaded MB only.
+
+Progress is emitted as typed update events from `OpenCodezUpdate.run()` and
+rendered by the CLI command. The update helper stays UI-agnostic so future UIs
+can reuse the same stages without depending on terminal output.
 
 ## Project Discovery and Indexing Safety
 
@@ -633,6 +649,14 @@ packages/app/src/components/prompt-input.tsx
 packages/opencode/src/server/routes/instance/httpapi/groups/opencodez.ts
 packages/opencode/src/server/routes/instance/httpapi/handlers/opencodez.ts
 packages/sdk/js/src/v2/gen/
+```
+
+Release update progress:
+
+```text
+packages/opencode/src/opencodez/update.ts
+packages/opencode/src/cli/cmd/opencodez-update.ts
+packages/opencode/test/opencodez/update.test.ts
 ```
 
 Focused tests:

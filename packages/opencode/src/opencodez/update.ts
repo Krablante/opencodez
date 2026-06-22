@@ -25,9 +25,21 @@ export interface Result {
   message: string
 }
 
-export async function run(input: { check: boolean; current?: string }): Promise<Result> {
+export type UpdateEvent =
+  | { type: "checking" }
+  | { type: "latest"; tag: string; url: string }
+  | { type: "download-start"; asset: string; totalBytes?: number }
+  | { type: "download-progress"; asset: string; downloadedBytes: number; totalBytes?: number }
+  | { type: "installing"; asset: string; target: string }
+
+export async function run(input: {
+  check: boolean
+  current?: string
+  onEvent?: (event: UpdateEvent) => void
+}): Promise<Result> {
   let release: z.infer<typeof Release>
   try {
+    emit(input.onEvent, { type: "checking" })
     const response = await fetch(RELEASES_API, {
       headers: {
         Accept: "application/vnd.github+json",
@@ -41,6 +53,7 @@ export async function run(input: { check: boolean; current?: string }): Promise<
       }
     }
     release = Release.parse(await response.json())
+    emit(input.onEvent, { type: "latest", tag: release.tag_name, url: release.html_url })
   } catch (error) {
     return {
       status: "error",
@@ -96,7 +109,8 @@ export async function run(input: { check: boolean; current?: string }): Promise<
         message: `Unable to download ${asset.name}: ${response.status} ${response.statusText}`,
       }
     }
-    const bytes = new Uint8Array(await response.arrayBuffer())
+    const bytes = await downloadAsset(response, { asset: asset.name, onEvent: input.onEvent })
+    emit(input.onEvent, { type: "installing", asset: asset.name, target })
     await installAsset({ name: asset.name, bytes, target })
     return {
       status: "updated",
@@ -108,6 +122,62 @@ export async function run(input: { check: boolean; current?: string }): Promise<
       message: `Unable to update OpenCodez: ${error instanceof Error ? error.message : String(error)}`,
     }
   }
+}
+
+function emit(onEvent: ((event: UpdateEvent) => void) | undefined, event: UpdateEvent) {
+  onEvent?.(event)
+}
+
+async function downloadAsset(
+  response: Response,
+  input: { asset: string; onEvent?: (event: UpdateEvent) => void },
+): Promise<Uint8Array> {
+  const totalBytes = parseContentLength(response.headers.get("content-length"))
+  emit(input.onEvent, { type: "download-start", asset: input.asset, totalBytes })
+
+  if (!response.body) {
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    emit(input.onEvent, {
+      type: "download-progress",
+      asset: input.asset,
+      downloadedBytes: bytes.byteLength,
+      totalBytes,
+    })
+    return bytes
+  }
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let downloadedBytes = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value)
+      chunks.push(chunk)
+      downloadedBytes += chunk.byteLength
+      emit(input.onEvent, { type: "download-progress", asset: input.asset, downloadedBytes, totalBytes })
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  if (chunks.length === 1) return chunks[0]
+  const bytes = new Uint8Array(downloadedBytes)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
+}
+
+function parseContentLength(value: string | null) {
+  if (!value) return undefined
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) return undefined
+  return parsed
 }
 
 function normalizeVersion(value: string) {

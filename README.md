@@ -54,6 +54,8 @@ OpenCodez keeps the normal OpenCode shape, but adds a few practical controls:
 - Tool calls stay readable while tool result and reasoning payloads can be replaced with deterministic placeholders.
 - Non-git projects stay scoped to the selected directory, explicit filesystem
   roots clamp to `$HOME`, and FFF indexing is disabled by default.
+- `opencodez update` prints GitHub release, download progress, and install
+  stages instead of staying silent during large asset downloads.
 
 OpenCodez is meant to be a small fork, not a full rebrand. Upstream internals, docs, workflows, integrations, and package surfaces should stay as close to OpenCode as practical unless a fork-specific change is genuinely needed.
 
@@ -88,6 +90,9 @@ opencodez update --check
 ```
 
 The update path is intentionally simple: GitHub Releases are the source of truth, the installer downloads the right release artifact for the current OS and architecture, and `opencodez update` uses the same release channel from inside the app.
+During the download, `opencodez update` prints progress to stderr. When GitHub
+provides `Content-Length`, progress includes total MB and percent; otherwise it
+prints downloaded MB only.
 If the installed binary is newer than the latest published release, `opencodez update` treats it as current instead of downgrading it.
 
 ## Run From Source
