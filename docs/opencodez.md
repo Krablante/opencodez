@@ -4,8 +4,8 @@ This page is the public source of truth for OpenCodez-specific behavior.
 
 OpenCodez is a small, maintainable fork of upstream OpenCode. It keeps the
 normal OpenCode product shape, but adds explicit prompt control, bundled
-Codex-style prompt presets, session-local prompt selection, and safer context
-pruning.
+Codex-style prompt presets, session-local prompt selection, safer context
+pruning, and bounded project discovery defaults.
 
 The goal is not to turn OpenCodez into a separate product with renamed internals.
 OpenCodez should stay easy to compare with upstream OpenCode, easy to rebase,
@@ -21,6 +21,7 @@ This page explains only what OpenCodez adds or changes:
 - `/system`, `/tone`, `/template`, `/prompts`, and `/pruning`;
 - model-aware prompt defaults;
 - session persistence for manual prompt choices;
+- project discovery and indexing safety defaults;
 - OpenCodez config roots, install, and update behavior;
 - maintenance rules that keep the fork small.
 
@@ -118,6 +119,23 @@ If `binary_version` is omitted, the workflow uses the part of
 `release_version` before `+metadata`. That keeps the GitHub Release tag
 OpenCodez-specific while keeping the embedded binary version simple for
 `opencodez update`.
+
+## Project Discovery and Indexing Safety
+
+OpenCodez keeps global projects scoped to the directory the user selected.
+When project resolution starts from a directory outside a git checkout,
+OpenCodez returns the global project for that directory instead of widening the
+project directory to the filesystem root.
+
+If the selected directory is the filesystem root itself, OpenCodez clamps the
+global project directory to the user's home directory. This prevents web and
+other project-aware surfaces from treating `/` as the project root and walking
+the whole host filesystem.
+
+OpenCodez also disables the native FFF file finder integration by default via
+`OPENCODE_DISABLE_FFF`. Users can still opt into upstream-style FFF behavior by
+setting `OPENCODE_DISABLE_FFF=false` or `OPENCODE_DISABLE_FFF=0`, but the fork
+default favors bounded indexing over root-wide discovery.
 
 ## Prompt Library
 
@@ -576,6 +594,15 @@ OpenCodez shared identity, config defaults, session state, and slash parsing:
 ```text
 packages/core/src/opencodez/
 packages/core/src/v1/config/opencodez.ts
+```
+
+Project discovery and bounded indexing defaults live in upstream-shaped core
+paths, not in an isolated OpenCodez adapter:
+
+```text
+packages/core/src/project.ts
+packages/core/src/flag/flag.ts
+packages/core/test/project.test.ts
 ```
 
 Upstream System prompt integration still belongs to the opencode server package:

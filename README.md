@@ -52,6 +52,8 @@ OpenCodez keeps the normal OpenCode shape, but adds a few practical controls:
 - The TUI shows the concrete active System prompt id and Tone preset while you work.
 - `/pruning` lets you view and change session-local pruning settings.
 - Tool calls stay readable while tool result and reasoning payloads can be replaced with deterministic placeholders.
+- Non-git projects stay scoped to the selected directory, explicit filesystem
+  roots clamp to `$HOME`, and FFF indexing is disabled by default.
 
 OpenCodez is meant to be a small fork, not a full rebrand. Upstream internals, docs, workflows, integrations, and package surfaces should stay as close to OpenCode as practical unless a fork-specific change is genuinely needed.
 

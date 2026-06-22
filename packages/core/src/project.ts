@@ -112,6 +112,7 @@ export const layer = Layer.effect(
       const repo = yield* git.find(input)
       if (!repo) {
         const filesystemRoot = AbsolutePath.make(path.parse(input).root)
+        // OpenCodez: keep non-git projects bounded.
         const directory = input === filesystemRoot ? AbsolutePath.make(os.homedir()) : input
         return { id: ID.global, directory, vcs: undefined }
       }
