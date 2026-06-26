@@ -101,7 +101,7 @@ the installer and updater, verifies those assets, uploads them to GitHub
 Releases, and then publishes the release. It does not publish npm packages,
 desktop apps, AUR packages, Homebrew formulae, Docker images, or upstream
 `opencode-*` release assets. Release versions must include `opencodez`, for
-example `1.17.8+opencodez.2`, so plain upstream-looking tags are rejected.
+example `1.17.11+opencodez.4`, so plain upstream-looking tags are rejected.
 
 For local dogfooding of unreleased changes, build and install a local OpenCodez
 binary, then test the installed `opencodez` command in the live TUI. Checking
@@ -111,8 +111,8 @@ the TUI.
 Example release inputs:
 
 ```text
-release_version: 1.17.8+opencodez.2
-binary_version:  1.17.8
+release_version: 1.17.11+opencodez.4
+binary_version:  1.17.11+opencodez.4
 draft:           false
 ```
 
