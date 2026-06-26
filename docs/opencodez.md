@@ -116,10 +116,77 @@ binary_version:  1.17.11+opencodez.4
 draft:           false
 ```
 
-If `binary_version` is omitted, the workflow uses the part of
-`release_version` before `+metadata`. That keeps the GitHub Release tag
-OpenCodez-specific while keeping the embedded binary version simple for
-`opencodez update`.
+For normal OpenCodez operator and user releases, set `binary_version` to the same
+value as `release_version` so the installed CLI reports the OpenCodez build
+metadata. Omitting `binary_version` intentionally embeds the plain upstream
+compatible version before `+metadata`; use that only when a release should look
+like the upstream base from inside the binary.
+
+## Public Release Cycle
+
+OpenCodez release work is not finished when the code compiles. The public GitHub
+repository, release assets, installed binaries, running multihost services, and
+operator documentation must all agree before a release is considered done.
+
+Start by fetching upstream tags and releases, identifying the latest upstream
+OpenCode release, and inventorying the OpenCodez custom diff against that tag.
+Preserve fork-specific behavior unless upstream has clearly replaced it with a
+better universal implementation. Protected custom behavior includes the
+OpenCodez identity and binary naming, GitHub release/update flow, web server
+seeding, prompt controls, and project discovery/indexing safety guards.
+
+After merging upstream, resolve conflicts by reading the local and upstream
+intent, not by blindly choosing one side. Run focused package checks first, then
+broaden to the affected package typechecks and tests. Build a local release
+artifact with `OPENCODEZ_BUILD=1` and an explicit `OPENCODE_VERSION`, and verify
+the built binary before publishing.
+
+```bash
+OPENCODEZ_BUILD=1 OPENCODE_VERSION=1.17.11+opencodez.4 bun --cwd packages/opencode run build
+packages/opencode/dist/opencodez-linux-x64/bin/opencodez --version
+packages/opencode/dist/opencodez-linux-x64/bin/opencodez update --check
+```
+
+Publish with the `publish` workflow after the local artifact has the expected
+name and version. Use matching release and binary versions for normal OpenCodez
+releases:
+
+```text
+release_version: 1.17.11+opencodez.4
+binary_version:  1.17.11+opencodez.4
+draft:           false
+```
+
+Once the GitHub release exists, verify that it is the latest release, has the
+expected assets, has release notes that explain the upstream bump and preserved
+custom layer, and has no superseded broken release siblings. Release tags should
+point at the commit used to build the published assets; do not move a published
+binary tag just to include a docs-only follow-up.
+
+Politia multihost rollout has two distinct steps. First install or update the
+`/usr/local/bin/opencodez` binary on each host from the GitHub release. Then use
+the harness to restart/configure the services. The harness deploys runtime
+configuration and restarts `opencodez-serve.service`; it does not install a new
+binary by itself.
+
+After rollout, verify the full public and operator surface:
+
+```bash
+/home/bloob/politia/services/harness/opencodez/health.sh
+opencodez update --check
+```
+
+The final live pass should confirm installed and running versions on `nuc`,
+`ser`, `dima`, `toma`, and `rtx`; health for every backend; browser CORS across
+the LAN origins; web HTML and asset delivery; `/opencode-web-servers.js` seed
+contents; basic session create/get/delete; updater current state; and recent
+service logs without startup, plugin, BURO, or opencodebot errors.
+
+Finish by cleaning up GitHub state. Merge or fast-forward the public `main`
+branch, make sure the local checkout tracks it, remove merged release branches,
+cancel stale queued runs, keep PR title/body/checks readable, and update release
+notes if the automatically generated text is too thin. GitHub hygiene is part of
+the release cycle, not a separate afterthought.
 
 ## Update Download Progress
 
