@@ -656,13 +656,15 @@ Release update progress:
 ```text
 packages/opencode/src/opencodez/update.ts
 packages/opencode/src/cli/cmd/opencodez-update.ts
-packages/opencode/test/opencodez/update.test.ts
+packages/core/src/opencodez/version.ts
+packages/core/test/opencodez-version.test.ts
 ```
 
 Focused tests:
 
 ```text
 packages/opencode/test/opencodez/
+packages/core/test/opencodez-version.test.ts
 ```
 
 ## Verification Expectations
@@ -673,6 +675,7 @@ For implementation changes, prefer a narrow test first and then broaden:
 
 ```bash
 bun test packages/opencode/test/opencodez/*.test.ts
+bun test packages/core/test/opencodez-version.test.ts
 bun run --cwd packages/core typecheck
 bun run --cwd packages/opencode typecheck
 bun run --cwd packages/tui typecheck
