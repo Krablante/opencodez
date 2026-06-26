@@ -71,8 +71,8 @@ export const layer = Layer.effect(
       )
     })
 
-    const remote = Effect.fnUntraced(function* (repo: Git.Repo) {
-      const origin = yield* git.remote(repo)
+    const remote = Effect.fnUntraced(function* (repo: Git.Repository) {
+      const origin = yield* git.remote.get(repo)
       if (!origin) return undefined
       const normalized = url(origin)
       if (!normalized) return undefined
@@ -103,26 +103,27 @@ export const layer = Layer.effect(
       return `${host.toLowerCase()}/${pathname}`
     }
 
-    const root = Effect.fnUntraced(function* (repo: Git.Repo) {
-      const root = (yield* git.roots(repo))[0]
+    const root = Effect.fnUntraced(function* (repo: Git.Repository) {
+      const root = (yield* git.history.rootCommits(repo))[0]
       return root ? ID.make(root) : undefined
     })
 
     const resolve = Effect.fn("Project.resolve")(function* (input: AbsolutePath) {
-      const repo = yield* git.find(input)
+      const repo = yield* git.repo.discover(input)
       if (!repo) {
         const filesystemRoot = AbsolutePath.make(path.parse(input).root)
+        // OpenCodez: keep non-git projects bounded.
         const directory = input === filesystemRoot ? AbsolutePath.make(os.homedir()) : input
         return { id: ID.global, directory, vcs: undefined }
       }
 
-      const previous = yield* cached(repo.store)
+      const previous = yield* cached(repo.commonDirectory)
       const id = (yield* remote(repo)) ?? previous ?? (yield* root(repo))
       return {
         previous,
         id: id ?? ID.global,
-        directory: repo.directory,
-        vcs: { type: "git" as const, store: repo.store },
+        directory: repo.worktree,
+        vcs: { type: "git" as const, store: repo.commonDirectory },
       }
     })
 

@@ -4,8 +4,8 @@ This page is the public source of truth for OpenCodez-specific behavior.
 
 OpenCodez is a small, maintainable fork of upstream OpenCode. It keeps the
 normal OpenCode product shape, but adds explicit prompt control, bundled
-Codex-style prompt presets, session-local prompt selection, and safer context
-pruning.
+Codex-style prompt presets, session-local prompt selection, safer context
+pruning, and bounded project discovery defaults.
 
 The goal is not to turn OpenCodez into a separate product with renamed internals.
 OpenCodez should stay easy to compare with upstream OpenCode, easy to rebase,
@@ -21,6 +21,8 @@ This page explains only what OpenCodez adds or changes:
 - `/system`, `/tone`, `/template`, `/prompts`, and `/pruning`;
 - model-aware prompt defaults;
 - session persistence for manual prompt choices;
+- project discovery and indexing safety defaults;
+- visible progress for release downloads in `opencodez update`;
 - OpenCodez config roots, install, and update behavior;
 - maintenance rules that keep the fork small.
 
@@ -99,7 +101,7 @@ the installer and updater, verifies those assets, uploads them to GitHub
 Releases, and then publishes the release. It does not publish npm packages,
 desktop apps, AUR packages, Homebrew formulae, Docker images, or upstream
 `opencode-*` release assets. Release versions must include `opencodez`, for
-example `1.17.8+opencodez.2`, so plain upstream-looking tags are rejected.
+example `1.17.11+opencodez.4`, so plain upstream-looking tags are rejected.
 
 For local dogfooding of unreleased changes, build and install a local OpenCodez
 binary, then test the installed `opencodez` command in the live TUI. Checking
@@ -109,8 +111,8 @@ the TUI.
 Example release inputs:
 
 ```text
-release_version: 1.17.8+opencodez.2
-binary_version:  1.17.8
+release_version: 1.17.11+opencodez.4
+binary_version:  1.17.11+opencodez.4
 draft:           false
 ```
 
@@ -118,6 +120,38 @@ If `binary_version` is omitted, the workflow uses the part of
 `release_version` before `+metadata`. That keeps the GitHub Release tag
 OpenCodez-specific while keeping the embedded binary version simple for
 `opencodez update`.
+
+## Update Download Progress
+
+`opencodez update` emits visible progress while it checks GitHub Releases,
+downloads the selected release asset, and begins installation. This avoids the
+silent wait that can happen on weak connections when a large asset is read into
+memory.
+
+During asset downloads, OpenCodez reads the response body as a stream. If GitHub
+provides `Content-Length`, the CLI prints downloaded MB, total MB, and percent.
+If the header is absent, the CLI prints downloaded MB only.
+
+Progress is emitted as typed update events from `OpenCodezUpdate.run()` and
+rendered by the CLI command. The update helper stays UI-agnostic so future UIs
+can reuse the same stages without depending on terminal output.
+
+## Project Discovery and Indexing Safety
+
+OpenCodez keeps global projects scoped to the directory the user selected.
+When project resolution starts from a directory outside a git checkout,
+OpenCodez returns the global project for that directory instead of widening the
+project directory to the filesystem root.
+
+If the selected directory is the filesystem root itself, OpenCodez clamps the
+global project directory to the user's home directory. This prevents web and
+other project-aware surfaces from treating `/` as the project root and walking
+the whole host filesystem.
+
+OpenCodez also disables the native FFF file finder integration by default via
+`OPENCODE_DISABLE_FFF`. Users can still opt into upstream-style FFF behavior by
+setting `OPENCODE_DISABLE_FFF=false` or `OPENCODE_DISABLE_FFF=0`, but the fork
+default favors bounded indexing over root-wide discovery.
 
 ## Prompt Library
 
@@ -578,6 +612,15 @@ packages/core/src/opencodez/
 packages/core/src/v1/config/opencodez.ts
 ```
 
+Project discovery and bounded indexing defaults live in upstream-shaped core
+paths, not in an isolated OpenCodez adapter:
+
+```text
+packages/core/src/project.ts
+packages/core/src/flag/flag.ts
+packages/core/test/project.test.ts
+```
+
 Upstream System prompt integration still belongs to the opencode server package:
 
 ```text
@@ -606,6 +649,14 @@ packages/app/src/components/prompt-input.tsx
 packages/opencode/src/server/routes/instance/httpapi/groups/opencodez.ts
 packages/opencode/src/server/routes/instance/httpapi/handlers/opencodez.ts
 packages/sdk/js/src/v2/gen/
+```
+
+Release update progress:
+
+```text
+packages/opencode/src/opencodez/update.ts
+packages/opencode/src/cli/cmd/opencodez-update.ts
+packages/opencode/test/opencodez/update.test.ts
 ```
 
 Focused tests:

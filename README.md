@@ -52,6 +52,10 @@ OpenCodez keeps the normal OpenCode shape, but adds a few practical controls:
 - The TUI shows the concrete active System prompt id and Tone preset while you work.
 - `/pruning` lets you view and change session-local pruning settings.
 - Tool calls stay readable while tool result and reasoning payloads can be replaced with deterministic placeholders.
+- Non-git projects stay scoped to the selected directory, explicit filesystem
+  roots clamp to `$HOME`, and FFF indexing is disabled by default.
+- `opencodez update` prints GitHub release, download progress, and install
+  stages instead of staying silent during large asset downloads.
 
 OpenCodez is meant to be a small fork, not a full rebrand. Upstream internals, docs, workflows, integrations, and package surfaces should stay as close to OpenCode as practical unless a fork-specific change is genuinely needed.
 
@@ -86,6 +90,9 @@ opencodez update --check
 ```
 
 The update path is intentionally simple: GitHub Releases are the source of truth, the installer downloads the right release artifact for the current OS and architecture, and `opencodez update` uses the same release channel from inside the app.
+During the download, `opencodez update` prints progress to stderr. When GitHub
+provides `Content-Length`, progress includes total MB and percent; otherwise it
+prints downloaded MB only.
 If the installed binary is newer than the latest published release, `opencodez update` treats it as current instead of downgrading it.
 
 ## Run From Source
@@ -98,7 +105,7 @@ For local development, run the source-checkout launcher directly:
 ```
 
 Release builds should set `OPENCODEZ_BUILD=1` so the build script emits `opencodez-*` artifacts with an `opencodez` binary inside.
-Normal public releases should use the `publish` GitHub Actions workflow. Give it an OpenCodez release version such as `1.17.8+opencodez.2`; the release version must include `opencodez` so accidental upstream-looking tags are rejected. By default it embeds the upstream-compatible binary version before the `+metadata`, builds the `opencodez-*` assets, verifies their names and archive contents, uploads them to GitHub Releases, and publishes the release unless `draft` is enabled.
+Normal public releases should use the `publish` GitHub Actions workflow. Give it an OpenCodez release version such as `1.17.11+opencodez.4`; the release version must include `opencodez` so accidental upstream-looking tags are rejected. Use the same OpenCodez version for the embedded binary version when the installed CLI should report the OpenCodez metadata. The workflow builds the `opencodez-*` assets, verifies their names and archive contents, uploads them to GitHub Releases, and publishes the release unless `draft` is enabled.
 
 ## Side-by-Side With OpenCode
 

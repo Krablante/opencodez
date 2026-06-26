@@ -2,7 +2,7 @@ import { z } from "zod"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import semver from "semver"
+import { isCurrentOrNewerOpenCodezVersion } from "@opencode-ai/core/opencodez/version"
 
 const RELEASE_REPOSITORY = process.env["OPENCODEZ_UPDATE_REPOSITORY"] ?? "Krablante/opencodez"
 const RELEASES_API = `https://api.github.com/repos/${RELEASE_REPOSITORY}/releases/latest`
@@ -25,9 +25,21 @@ export interface Result {
   message: string
 }
 
-export async function run(input: { check: boolean; current?: string }): Promise<Result> {
+export type UpdateEvent =
+  | { type: "checking" }
+  | { type: "latest"; tag: string; url: string }
+  | { type: "download-start"; asset: string; totalBytes?: number }
+  | { type: "download-progress"; asset: string; downloadedBytes: number; totalBytes?: number }
+  | { type: "installing"; asset: string; target: string }
+
+export async function run(input: {
+  check: boolean
+  current?: string
+  onEvent?: (event: UpdateEvent) => void
+}): Promise<Result> {
   let release: z.infer<typeof Release>
   try {
+    emit(input.onEvent, { type: "checking" })
     const response = await fetch(RELEASES_API, {
       headers: {
         Accept: "application/vnd.github+json",
@@ -41,6 +53,7 @@ export async function run(input: { check: boolean; current?: string }): Promise<
       }
     }
     release = Release.parse(await response.json())
+    emit(input.onEvent, { type: "latest", tag: release.tag_name, url: release.html_url })
   } catch (error) {
     return {
       status: "error",
@@ -49,7 +62,7 @@ export async function run(input: { check: boolean; current?: string }): Promise<
   }
 
   const current = input.current
-  if (current && isCurrentOrNewer(current, release.tag_name)) {
+  if (current && isCurrentOrNewerOpenCodezVersion(current, release.tag_name)) {
     return {
       status: "current",
       message: `OpenCodez is already current (installed ${current}, latest release ${release.tag_name}).`,
@@ -96,7 +109,8 @@ export async function run(input: { check: boolean; current?: string }): Promise<
         message: `Unable to download ${asset.name}: ${response.status} ${response.statusText}`,
       }
     }
-    const bytes = new Uint8Array(await response.arrayBuffer())
+    const bytes = await downloadAsset(response, { asset: asset.name, onEvent: input.onEvent })
+    emit(input.onEvent, { type: "installing", asset: asset.name, target })
     await installAsset({ name: asset.name, bytes, target })
     return {
       status: "updated",
@@ -110,19 +124,60 @@ export async function run(input: { check: boolean; current?: string }): Promise<
   }
 }
 
-function normalizeVersion(value: string) {
-  return value.replace(/^v/, "")
+function emit(onEvent: ((event: UpdateEvent) => void) | undefined, event: UpdateEvent) {
+  onEvent?.(event)
 }
 
-function isCurrentOrNewer(current: string, latest: string) {
-  const currentVersion = parseVersion(current)
-  const latestVersion = parseVersion(latest)
-  if (!currentVersion || !latestVersion) return normalizeVersion(current) === normalizeVersion(latest)
-  return semver.gte(currentVersion, latestVersion)
+async function downloadAsset(
+  response: Response,
+  input: { asset: string; onEvent?: (event: UpdateEvent) => void },
+): Promise<Uint8Array> {
+  const totalBytes = parseContentLength(response.headers.get("content-length"))
+  emit(input.onEvent, { type: "download-start", asset: input.asset, totalBytes })
+
+  if (!response.body) {
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    emit(input.onEvent, {
+      type: "download-progress",
+      asset: input.asset,
+      downloadedBytes: bytes.byteLength,
+      totalBytes,
+    })
+    return bytes
+  }
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let downloadedBytes = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value)
+      chunks.push(chunk)
+      downloadedBytes += chunk.byteLength
+      emit(input.onEvent, { type: "download-progress", asset: input.asset, downloadedBytes, totalBytes })
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  if (chunks.length === 1) return chunks[0]
+  const bytes = new Uint8Array(downloadedBytes)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
 }
 
-function parseVersion(value: string) {
-  return semver.valid(normalizeVersion(value))
+function parseContentLength(value: string | null) {
+  if (!value) return undefined
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) return undefined
+  return parsed
 }
 
 function selectAsset(assets: Array<z.infer<typeof Asset>>) {

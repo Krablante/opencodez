@@ -31,6 +31,7 @@ export const Flag = {
   OPENCODE_FAKE_VCS: process.env["OPENCODE_FAKE_VCS"],
   OPENCODE_SERVER_PASSWORD: process.env["OPENCODE_SERVER_PASSWORD"],
   OPENCODE_SERVER_USERNAME: process.env["OPENCODE_SERVER_USERNAME"],
+  // OpenCodez: default FFF off to avoid broad indexing.
   OPENCODE_DISABLE_FFF: fff === undefined ? true : truthy("OPENCODE_DISABLE_FFF"),
 
   // Experimental
