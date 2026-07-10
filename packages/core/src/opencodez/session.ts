@@ -240,9 +240,7 @@ function pruningForSession(sessionID: string, metadata?: Record<string, unknown>
 
 function upstreamSystemPromptID(model: OpenCodezSettings.ModelLike | undefined) {
   const id =
-    typeof model === "string"
-      ? (model.includes("/") ? model.split("/").at(-1) : model)
-      : (model?.api?.id ?? model?.id)
+    typeof model === "string" ? (model.includes("/") ? model.split("/").at(-1) : model) : (model?.api?.id ?? model?.id)
   if (!id) return "default"
   return providerNameFromID(id)
 }

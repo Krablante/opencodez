@@ -11,7 +11,7 @@ export const OpenCodezUpdateCommand: CommandModule<Record<string, unknown>, { ch
       type: "boolean",
       describe: "check for an available OpenCodez release without installing it",
       default: false,
-  }),
+    }),
   handler: async (args: { check?: boolean }) => {
     const check = args.check === true
     const progress = createProgressReporter()

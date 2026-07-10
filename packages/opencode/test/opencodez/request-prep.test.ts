@@ -108,6 +108,9 @@ const defaultSystemCases = [
   { modelID: "gpt-5.4", prompt: corePrompts.codex_gpt_5_4 },
   { modelID: "gpt-5.4-mini", prompt: corePrompts.codex_gpt_5_4_mini },
   { modelID: "gpt-5.5", prompt: corePrompts.codex_gpt_5_5 },
+  { modelID: "gpt-5.6-luna", prompt: corePrompts.codex_gpt_5_5 },
+  { modelID: "gpt-5.6-terra", prompt: corePrompts.codex_gpt_5_5 },
+  { modelID: "gpt-5.6-sol", prompt: corePrompts.codex_gpt_5_5 },
 ] as const
 
 describe("LLMRequestPrep OpenCodez integration", () => {

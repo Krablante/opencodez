@@ -18,8 +18,6 @@ import { createSessionTabs } from "@/pages/session/helpers"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { UserMessage } from "@opencode-ai/sdk/v2"
 import { useSessionLayout } from "@/pages/session/session-layout"
-import { useTabs } from "@/context/tabs"
-import { requireServerKey } from "@/utils/session-route"
 import { createSessionOwnership } from "./session-ownership"
 
 export type SessionCommandContext = {
@@ -27,6 +25,7 @@ export type SessionCommandContext = {
   setActiveMessage: (message: UserMessage | undefined) => void
   focusInput: () => void
   review?: () => boolean
+  fileBrowser?: () => boolean
 }
 
 const withCategory = (category: string) => {
@@ -48,7 +47,6 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const settings = useSettings()
   const sync = useSync()
   const terminal = useTerminal()
-  const sessionTabs = useTabs()
   const layout = useLayout()
   const navigate = useNavigate()
   const { params, sessionKey, tabs, view } = useSessionLayout()
@@ -86,6 +84,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     normalizeTab,
     review: actions.review,
     hasReview,
+    fileBrowser: actions.fileBrowser,
   })
   const activeFileTab = tabState.activeFileTab
   const closableTab = tabState.closableTab
@@ -136,9 +135,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const contextCommand = withCategory(language.t("command.category.context"))
   const viewCommand = withCategory(language.t("command.category.view"))
   const terminalCommand = withCategory(language.t("command.category.terminal"))
-  const modelCommand = withCategory(language.t("command.category.model"))
   const mcpCommand = withCategory(language.t("command.category.mcp"))
-  const agentCommand = withCategory(language.t("command.category.agent"))
   const permissionsCommand = withCategory(language.t("command.category.permissions"))
 
   const isAutoAcceptActive = () => {
@@ -271,11 +268,12 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     view().terminal.open()
   }
 
-  const chooseModel = () => {
-    void openDialog(
-      () => import("@/components/dialog-select-model"),
-      (x) => dialog.show(() => <x.DialogSelectModel model={local.model} />),
-    )
+  const closeTerminal = () => {
+    const id = terminal.active()
+    if (!id) return
+    const last = terminal.all().length === 1
+    void terminal.close(id)
+    if (last) view().terminal.close()
   }
 
   const chooseMcp = () => {
@@ -420,9 +418,9 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       title: language.t("command.session.new"),
       keybind: "mod+shift+s",
       slash: "new",
-      onSelect: () => {
-        if (params.serverKey) {
-          sessionTabs.newDraft({ server: requireServerKey(params.serverKey), directory: sdk().directory })
+      onSelect: (source) => {
+        if (settings.general.newLayoutDesigns()) {
+          command.trigger("tab.new", source)
           return
         }
         navigate(`/${params.dir}/session`)
@@ -528,6 +526,14 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
 
   const terminalCmds = () => [
     terminalCommand({
+      id: "terminal.close",
+      title: language.t("terminal.close"),
+      keybind: "mod+w",
+      hidden: true,
+      when: (event) => event.target instanceof Element && !!event.target.closest('[data-component="terminal"]'),
+      onSelect: closeTerminal,
+    }),
+    terminalCommand({
       id: "terminal.new",
       title: language.t("command.terminal.new"),
       description: language.t("command.terminal.new.description"),
@@ -555,24 +561,6 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     }),
   ]
 
-  const modelCmds = () => [
-    modelCommand({
-      id: "model.choose",
-      title: language.t("command.model.choose"),
-      description: language.t("command.model.choose.description"),
-      keybind: "mod+'",
-      slash: "model",
-      onSelect: chooseModel,
-    }),
-    modelCommand({
-      id: "model.variant.cycle",
-      title: language.t("command.model.variant.cycle"),
-      description: language.t("command.model.variant.cycle.description"),
-      keybind: "shift+mod+d",
-      onSelect: () => local.model.variant.cycle(),
-    }),
-  ]
-
   const mcpCmds = () => [
     mcpCommand({
       id: "mcp.toggle",
@@ -581,26 +569,6 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       keybind: "mod+;",
       slash: "mcp",
       onSelect: chooseMcp,
-    }),
-  ]
-
-  const agentCmds = () => [
-    agentCommand({
-      id: "agent.cycle",
-      title: language.t("command.agent.cycle"),
-      description: language.t("command.agent.cycle.description"),
-      keybind: "mod+.",
-      slash: "agent",
-      disabled: !settings.visibility.customAgents(),
-      onSelect: () => local.agent.move(1),
-    }),
-    agentCommand({
-      id: "agent.cycle.reverse",
-      title: language.t("command.agent.cycle.reverse"),
-      description: language.t("command.agent.cycle.reverse.description"),
-      keybind: "shift+mod+.",
-      disabled: !settings.visibility.customAgents(),
-      onSelect: () => local.agent.move(-1),
     }),
   ]
 
@@ -624,9 +592,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     ...viewCmds(),
     ...terminalCmds(),
     ...messageCmds(),
-    ...modelCmds(),
     ...mcpCmds(),
-    ...agentCmds(),
     ...permissionsCmds(),
   ])
 }
