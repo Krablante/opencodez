@@ -40,6 +40,9 @@ export const defaults = {
     "gpt-5.4": "codex_gpt_5_4",
     "gpt-5.4-mini": "codex_gpt_5_4_mini",
     "gpt-5.5": "codex_gpt_5_5",
+    "gpt-5.6-luna": "codex_gpt_5_5",
+    "gpt-5.6-terra": "codex_gpt_5_5",
+    "gpt-5.6-sol": "codex_gpt_5_5",
   },
   tone: "codex_pragmatic",
   pruning: {

@@ -5,7 +5,11 @@ import { createHash } from "node:crypto"
 import { brotliCompressSync, gzipSync } from "node:zlib"
 import { ProxyUtil } from "../proxy-util"
 
-let embeddedUIPromise: Promise<Record<string, string> | null> | undefined
+type EmbeddedUIAsset = string | Uint8Array
+type EmbeddedUIAssets = Record<string, EmbeddedUIAsset>
+type EmbeddedUIPackEntry = [path: string, offset: number, length: number]
+
+let embeddedUIPromise: Promise<EmbeddedUIAssets | null> | undefined
 
 export const UI_UPSTREAM = new URL("https://app.opencode.ai")
 
@@ -156,7 +160,32 @@ export function embeddedUI(disableEmbeddedWebUi: boolean) {
   if (disableEmbeddedWebUi) return Promise.resolve(null)
   return (embeddedUIPromise ??=
     // @ts-expect-error - generated file at build time
-    import("opencode-web-ui.gen.ts").then((module) => module.default as Record<string, string>).catch(() => null))
+    import("opencode-web-ui.gen.ts")
+      .then(async (module) => {
+        const embedded = module.default as string | EmbeddedUIAssets
+        return typeof embedded === "string" ? unpackEmbeddedUIPack(embedded) : embedded
+      })
+      .catch(() => null))
+}
+
+export async function unpackEmbeddedUIPack(file: string) {
+  const packed = new Uint8Array(await Bun.file(file).arrayBuffer())
+  if (packed.byteLength < 4) throw new Error("Embedded web UI pack is truncated")
+
+  const manifestLength = new DataView(packed.buffer, packed.byteOffset, packed.byteLength).getUint32(0, true)
+  const payloadOffset = 4 + manifestLength
+  if (payloadOffset > packed.byteLength) throw new Error("Embedded web UI manifest is truncated")
+
+  const entries = JSON.parse(new TextDecoder().decode(packed.subarray(4, payloadOffset))) as EmbeddedUIPackEntry[]
+  const result: EmbeddedUIAssets = {}
+  for (const [path, offset, length] of entries) {
+    if (!path || path.startsWith("/") || path.split("/").includes("..")) throw new Error("Invalid embedded web UI path")
+    const start = payloadOffset + offset
+    const end = start + length
+    if (offset < 0 || length < 0 || end > packed.byteLength) throw new Error("Invalid embedded web UI range")
+    result[path] = packed.slice(start, end)
+  }
+  return result
 }
 
 function notFound() {
@@ -183,14 +212,17 @@ function embeddedUIResponse(requestPath: string, file: string, body: Uint8Array,
 export function serveEmbeddedUIEffect(
   requestPath: string,
   fs: FSUtil.Interface,
-  embeddedWebUI: Record<string, string>,
+  embeddedWebUI: EmbeddedUIAssets,
   acceptEncoding = "",
 ) {
-  const file = embeddedWebUI[requestPath.replace(/^\//, "")] ?? embeddedWebUI["index.html"] ?? null
-  if (!file) return Effect.succeed(notFound())
+  const requestKey = requestPath.replace(/^\//, "")
+  const key = embeddedWebUI[requestKey] ? requestKey : embeddedWebUI["index.html"] ? "index.html" : null
+  if (!key) return Effect.succeed(notFound())
+  const file = embeddedWebUI[key]
+  const body = typeof file === "string" ? fs.readFile(file) : Effect.succeed(file)
 
-  return fs.readFile(file).pipe(
-    Effect.map((body) => embeddedUIResponse(requestPath, file, body, acceptEncoding)),
+  return body.pipe(
+    Effect.map((body) => embeddedUIResponse(requestPath, typeof file === "string" ? file : key, body, acceptEncoding)),
     Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(notFound())),
   )
 }

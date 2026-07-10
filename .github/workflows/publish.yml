@@ -5,11 +5,11 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: "Release version, without leading v. Example: 1.17.11+opencodez.4"
+        description: "Release version, without leading v. Example: 1.17.18+opencodez.1"
         required: true
         type: string
       binary_version:
-        description: "Version embedded in the binary. Defaults to release_version without +metadata."
+        description: "Version embedded in the binary. Defaults to the complete release_version."
         required: false
         type: string
       draft:
@@ -19,7 +19,7 @@ on:
         type: boolean
   push:
     tags:
-      - "v*"
+      - "v*+opencodez.*"
 
 concurrency: publish-${{ github.ref }}-${{ inputs.release_version || github.ref_name }}
 
@@ -57,21 +57,21 @@ jobs:
 
           release_version="${release_version#v}"
           if [[ -z "$binary_version" ]]; then
-            binary_version="${release_version%%+*}"
+            binary_version="$release_version"
           fi
           binary_version="${binary_version#v}"
 
           semver='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
           if [[ ! "$release_version" =~ $semver ]]; then
-            echo "release_version must be semver-like, for example 1.17.11+opencodez.4" >&2
+            echo "release_version must be semver-like, for example 1.17.18+opencodez.1" >&2
             exit 1
           fi
           if [[ "$release_version" != *opencodez* ]]; then
-            echo "release_version must be OpenCodez-specific, for example 1.17.11+opencodez.4" >&2
+            echo "release_version must be OpenCodez-specific, for example 1.17.18+opencodez.1" >&2
             exit 1
           fi
           if [[ ! "$binary_version" =~ $semver ]]; then
-            echo "binary_version must be semver-like, for example 1.17.11+opencodez.4" >&2
+            echo "binary_version must be semver-like, for example 1.17.18+opencodez.1" >&2
             exit 1
           fi
 
@@ -82,8 +82,41 @@ jobs:
             echo "draft=$draft"
           } >> "$GITHUB_OUTPUT"
 
-  build-and-publish:
+  validate:
     needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: |
+          (cd packages/core && bun run typecheck)
+          (cd packages/opencode && bun run typecheck)
+          (cd packages/app && bun run typecheck)
+          (cd packages/tui && bun run typecheck)
+          (cd packages/sdk/js && bun run typecheck)
+
+      - name: Test OpenCodez integration
+        run: |
+          cd packages/opencode
+          for test_file in test/opencodez/*.test.ts; do
+            bun test "$test_file"
+          done
+          bun test test/session/llm-native.test.ts
+          cd ../core
+          bun test test/project.test.ts
+
+      - name: Check Unix installer syntax
+        run: bash -n install
+
+  build-and-publish:
+    needs: [prepare, validate]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:

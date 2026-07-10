@@ -27,6 +27,9 @@ const mappedDefaults = [
   { modelID: "gpt-5.4", system: "codex_gpt_5_4" },
   { modelID: "gpt-5.4-mini", system: "codex_gpt_5_4_mini" },
   { modelID: "gpt-5.5", system: "codex_gpt_5_5" },
+  { modelID: "gpt-5.6-luna", system: "codex_gpt_5_5" },
+  { modelID: "gpt-5.6-terra", system: "codex_gpt_5_5" },
+  { modelID: "gpt-5.6-sol", system: "codex_gpt_5_5" },
 ] as const
 
 describe("OpenCodez session-bound state", () => {
@@ -209,6 +212,34 @@ describe("OpenCodez session-bound state", () => {
       toneManual: true,
     })
     expect(OpenCodezSession.pendingMetadata()).toEqual({})
+  })
+
+  test("keeps manual tone while GPT-5.6 inherited system follows the shared GPT-5.5 prompt", () => {
+    const inheritedConfig = {}
+    const metadata = OpenCodezSession.metadataWithSelection(undefined, {
+      tone: "manual-tone",
+      toneManual: true,
+    })
+
+    for (const modelID of ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]) {
+      expect(
+        OpenCodezSession.effective({
+          config: inheritedConfig,
+          model: {
+            id: modelID,
+            providerID: "openai",
+            api: { id: modelID, npm: "@ai-sdk/openai" },
+          },
+          metadata,
+          sessionID: "ses_gpt56",
+        }),
+      ).toMatchObject({
+        system: "codex_gpt_5_5",
+        tone: "manual-tone",
+        systemManual: false,
+        toneManual: true,
+      })
+    }
   })
 
   test("persists explicit None as prompt disable state", () => {

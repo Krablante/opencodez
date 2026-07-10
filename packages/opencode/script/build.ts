@@ -29,6 +29,7 @@ const skipInstall = process.argv.includes("--skip-install")
 const sourcemapsFlag = process.argv.includes("--sourcemaps")
 const plugin = createSolidTransformPlugin()
 const skipEmbedWebUi = process.argv.includes("--skip-embed-web-ui")
+const embeddedWebUIPackName = "opencode-web-ui.pack"
 
 const createEmbeddedWebUIBundle = async () => {
   console.log(`Building Web UI to embed in the binary`)
@@ -39,19 +40,33 @@ const createEmbeddedWebUIBundle = async () => {
     .map((file) => file.replaceAll("\\", "/"))
     .filter((file) => !file.endsWith(".map"))
     .sort()
-  const imports = files.map((file, i) => {
-    const spec = path.relative(dir, path.join(dist, file)).replaceAll("\\", "/")
-    return `import file_${i} from ${JSON.stringify(spec.startsWith(".") ? spec : `./${spec}`)} with { type: "file" };`
-  })
-  const entries = files.map((file, i) => `  ${JSON.stringify(file)}: file_${i},`)
-  return [
-    `// Import all files as file_$i with type: "file"`,
-    ...imports,
-    `// Export with original mappings`,
-    `export default {`,
-    ...entries,
-    `}`,
-  ].join("\n")
+  const entries: Array<[path: string, offset: number, length: number]> = []
+  const chunks: Uint8Array[] = []
+  let offset = 0
+
+  for (const file of files) {
+    const chunk = new Uint8Array(await Bun.file(path.join(dist, file)).arrayBuffer())
+    chunks.push(chunk)
+    entries.push([file, offset, chunk.byteLength])
+    offset += chunk.byteLength
+  }
+
+  const manifest = new TextEncoder().encode(JSON.stringify(entries))
+  const pack = new Uint8Array(4 + manifest.byteLength + offset)
+  new DataView(pack.buffer).setUint32(0, manifest.byteLength, true)
+  pack.set(manifest, 4)
+  let cursor = 4 + manifest.byteLength
+  for (const chunk of chunks) {
+    pack.set(chunk, cursor)
+    cursor += chunk.byteLength
+  }
+
+  const packPath = path.join(dist, embeddedWebUIPackName)
+  await Bun.write(packPath, pack)
+  return {
+    packPath,
+    source: `import pack from ${JSON.stringify(packPath)} with { type: "file" };\nexport default pack;\n`,
+  }
 }
 
 const embeddedFileMap = skipEmbedWebUi ? null : await createEmbeddedWebUIBundle()
@@ -192,7 +207,7 @@ for (const item of targets) {
       execArgv: [`--user-agent=opencode/${Script.version}`, "--use-system-ca", "--"],
       windows: {},
     },
-    files: embeddedFileMap ? { "opencode-web-ui.gen.ts": embeddedFileMap } : {},
+    files: embeddedFileMap ? { "opencode-web-ui.gen.ts": embeddedFileMap.source } : {},
     entrypoints: ["./src/index.ts", parserWorker, workerPath, ...(embeddedFileMap ? ["opencode-web-ui.gen.ts"] : [])],
     define: {
       FFF_LIBC: JSON.stringify(item.abi === "musl" ? "musl" : "gnu"),

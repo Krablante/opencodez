@@ -17,12 +17,10 @@ export const opencodezHandlers = HttpApiBuilder.group(InstanceHttpApi, "opencode
     const session = yield* Session.Service
     const config = yield* Config.Service
 
-    const respond = Effect.fn("OpenCodezHttpApi.respond")(function* (
-      input: {
-        metadata: Record<string, unknown>
-        model?: typeof OpenCodezPromptStatePayload.Type.model
-      },
-    ) {
+    const respond = Effect.fn("OpenCodezHttpApi.respond")(function* (input: {
+      metadata: Record<string, unknown>
+      model?: typeof OpenCodezPromptStatePayload.Type.model
+    }) {
       const result = OpenCodezSession.indicatorFromMetadata({
         config: yield* config.get(),
         model: input.model,

@@ -10,7 +10,7 @@ import {
 } from "@opentui/core"
 import type { CommandContext } from "@opentui/keymap"
 import { createEffect, createMemo, onMount, createSignal, onCleanup, on, Show, Switch, Match } from "solid-js"
-import "opentui-spinner/solid"
+import { registerOpencodeSpinner } from "../register-spinner"
 import path from "path"
 import { fileURLToPath } from "url"
 import { useLocal } from "../../context/local"
@@ -60,6 +60,8 @@ import { useTuiConfig } from "../../config"
 import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
+
+registerOpencodeSpinner()
 
 export type PromptProps = {
   sessionID?: string
@@ -612,6 +614,7 @@ export function Prompt(props: PromptProps) {
       "prompt.stash",
       "prompt.stash.pop",
       "prompt.stash.list",
+      "prompt.skills",
       "session.interrupt",
       "workspace.set",
       "session.move",
@@ -1002,7 +1005,11 @@ export function Prompt(props: PromptProps) {
       .then((x) => x.data ?? undefined)
       .catch(() => undefined)
     if (!result) {
-      toast.show({ message: `Nothing found for "${input.name}". Try another name.`, variant: "warning", duration: 3500 })
+      toast.show({
+        message: `Nothing found for "${input.name}". Try another name.`,
+        variant: "warning",
+        duration: 3500,
+      })
       return
     }
     syncOpenCodezMetadata(input.sessionID, result.metadata)
@@ -1054,7 +1061,7 @@ export function Prompt(props: PromptProps) {
           sessionID={sessionID}
           metadata={currentOpenCodezMetadata()}
           config={sync.data.config}
-          model={kind === "template" ? undefined : currentOpenCodezModel() ?? selectedModel?.modelID}
+          model={kind === "template" ? undefined : (currentOpenCodezModel() ?? selectedModel?.modelID)}
         />
       ))
       return true
@@ -1674,6 +1681,9 @@ export function Prompt(props: PromptProps) {
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
                         {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
                       </text>
+                      <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
+                        <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
+                      </Show>
                       <Show when={store.mode === "normal"}>
                         <box flexDirection="row" gap={1}>
                           <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
@@ -1701,7 +1711,12 @@ export function Prompt(props: PromptProps) {
               <Show when={hasRightContent()}>
                 <box flexDirection="row" gap={1} alignItems="center" minWidth={0}>
                   <Show when={OpenCodezIdentity.enabled && store.mode === "normal"}>
-                    <text flexShrink={1} wrapMode="none" overflow="hidden" fg={fadeColor(theme.textMuted, modelMetaAlpha())}>
+                    <text
+                      flexShrink={1}
+                      wrapMode="none"
+                      overflow="hidden"
+                      fg={fadeColor(theme.textMuted, modelMetaAlpha())}
+                    >
                       {openCodezIndicator()}
                     </text>
                   </Show>

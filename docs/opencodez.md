@@ -101,7 +101,7 @@ the installer and updater, verifies those assets, uploads them to GitHub
 Releases, and then publishes the release. It does not publish npm packages,
 desktop apps, AUR packages, Homebrew formulae, Docker images, or upstream
 `opencode-*` release assets. Release versions must include `opencodez`, for
-example `1.17.11+opencodez.4`, so plain upstream-looking tags are rejected.
+example `1.17.18+opencodez.1`, so plain upstream-looking tags are rejected.
 
 For local dogfooding of unreleased changes, build and install a local OpenCodez
 binary, then test the installed `opencodez` command in the live TUI. Checking
@@ -111,16 +111,14 @@ the TUI.
 Example release inputs:
 
 ```text
-release_version: 1.17.11+opencodez.4
-binary_version:  1.17.11+opencodez.4
+release_version: 1.17.18+opencodez.1
+binary_version:  1.17.18+opencodez.1
 draft:           false
 ```
 
-For normal OpenCodez operator and user releases, set `binary_version` to the same
-value as `release_version` so the installed CLI reports the OpenCodez build
-metadata. Omitting `binary_version` intentionally embeds the plain upstream
-compatible version before `+metadata`; use that only when a release should look
-like the upstream base from inside the binary.
+For normal OpenCodez operator and user releases, omit `binary_version` or set it
+to the same value as `release_version`. Both paths embed the complete OpenCodez
+version, including build metadata, so the release tag and installed CLI agree.
 
 ## Public Release Cycle
 
@@ -142,7 +140,7 @@ artifact with `OPENCODEZ_BUILD=1` and an explicit `OPENCODE_VERSION`, and verify
 the built binary before publishing.
 
 ```bash
-OPENCODEZ_BUILD=1 OPENCODE_VERSION=1.17.11+opencodez.4 bun --cwd packages/opencode run build
+OPENCODEZ_BUILD=1 OPENCODE_VERSION=1.17.18+opencodez.1 bun --cwd packages/opencode run build
 packages/opencode/dist/opencodez-linux-x64/bin/opencodez --version
 packages/opencode/dist/opencodez-linux-x64/bin/opencodez update --check
 ```
@@ -152,8 +150,8 @@ name and version. Use matching release and binary versions for normal OpenCodez
 releases:
 
 ```text
-release_version: 1.17.11+opencodez.4
-binary_version:  1.17.11+opencodez.4
+release_version: 1.17.18+opencodez.1
+binary_version:  1.17.18+opencodez.1
 draft:           false
 ```
 
@@ -387,10 +385,16 @@ gpt-5.3-codex-spark -> codex_gpt_5_3_codex
 gpt-5.4 -> codex_gpt_5_4
 gpt-5.4-mini -> codex_gpt_5_4_mini
 gpt-5.5 -> codex_gpt_5_5
+gpt-5.6-luna -> codex_gpt_5_5
+gpt-5.6-terra -> codex_gpt_5_5
+gpt-5.6-sol -> codex_gpt_5_5
 ```
 
 `gpt-5.3-codex-spark` intentionally reuses `codex_gpt_5_3_codex` unless a
 separate spark prompt is added later.
+
+The GPT 5.6 Luna, Terra, and Sol ChatGPT variants intentionally reuse the GPT
+5.5 system prompt and the same Tone/personality behavior.
 
 The built-in default Tone for those GPT models is:
 
