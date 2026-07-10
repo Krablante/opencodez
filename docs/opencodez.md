@@ -101,7 +101,7 @@ the installer and updater, verifies those assets, uploads them to GitHub
 Releases, and then publishes the release. It does not publish npm packages,
 desktop apps, AUR packages, Homebrew formulae, Docker images, or upstream
 `opencode-*` release assets. Release versions must include `opencodez`, for
-example `1.17.18+opencodez.1`, so plain upstream-looking tags are rejected.
+example `1.17.18+opencodez.2`, so plain upstream-looking tags are rejected.
 
 For local dogfooding of unreleased changes, build and install a local OpenCodez
 binary, then test the installed `opencodez` command in the live TUI. Checking
@@ -111,8 +111,8 @@ the TUI.
 Example release inputs:
 
 ```text
-release_version: 1.17.18+opencodez.1
-binary_version:  1.17.18+opencodez.1
+release_version: 1.17.18+opencodez.2
+binary_version:  1.17.18+opencodez.2
 draft:           false
 ```
 
@@ -140,7 +140,7 @@ artifact with `OPENCODEZ_BUILD=1` and an explicit `OPENCODE_VERSION`, and verify
 the built binary before publishing.
 
 ```bash
-OPENCODEZ_BUILD=1 OPENCODE_VERSION=1.17.18+opencodez.1 bun --cwd packages/opencode run build
+OPENCODEZ_BUILD=1 OPENCODE_VERSION=1.17.18+opencodez.2 bun --cwd packages/opencode run build
 packages/opencode/dist/opencodez-linux-x64/bin/opencodez --version
 packages/opencode/dist/opencodez-linux-x64/bin/opencodez update --check
 ```
@@ -150,8 +150,8 @@ name and version. Use matching release and binary versions for normal OpenCodez
 releases:
 
 ```text
-release_version: 1.17.18+opencodez.1
-binary_version:  1.17.18+opencodez.1
+release_version: 1.17.18+opencodez.2
+binary_version:  1.17.18+opencodez.2
 draft:           false
 ```
 

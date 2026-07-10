@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.17.18+opencodez.2
+
+Fixed self-update when the download workspace and installed binary are on different filesystems. The updater now copies into a temporary file beside the target before the atomic replacement.
+
 ## 1.17.18+opencodez.1
 
 Merged upstream OpenCode `1.17.18` into OpenCodez.

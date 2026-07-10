@@ -202,6 +202,7 @@ function installTarget() {
 
 async function installAsset(input: { name: string; bytes: Uint8Array; target: string }) {
   const work = await fs.mkdtemp(path.join(os.tmpdir(), "opencodez-update-"))
+  const tmp = path.join(path.dirname(input.target), `.${path.basename(input.target)}.${process.pid}.${Date.now()}.tmp`)
   try {
     const archive = path.join(work, "asset")
     const binary = path.join(work, process.platform === "win32" ? "opencodez.exe" : "opencodez")
@@ -215,14 +216,12 @@ async function installAsset(input: { name: string; bytes: Uint8Array; target: st
     } else {
       await fs.rename(archive, binary)
     }
-    const tmp = path.join(
-      path.dirname(input.target),
-      `.${path.basename(input.target)}.${process.pid}.${Date.now()}.tmp`,
-    )
     await fs.chmod(binary, 0o755)
-    await fs.rename(binary, tmp)
+    await fs.copyFile(binary, tmp)
+    await fs.chmod(tmp, 0o755)
     await fs.rename(tmp, input.target)
   } finally {
+    await fs.rm(tmp, { force: true })
     await fs.rm(work, { recursive: true, force: true })
   }
 }
