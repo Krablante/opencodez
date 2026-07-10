@@ -17,4 +17,6 @@ if (process.versions.bun !== expectedBunVersion) {
   console.warn(`Warning: Bun version ${process.versions.bun} differs from expected ${expectedBunVersion}`);
 }
 '
-bun typecheck
+for package in core opencode app tui sdk/js; do
+  (cd "packages/$package" && bun run typecheck)
+done
