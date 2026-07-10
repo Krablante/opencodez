@@ -140,6 +140,10 @@ jobs:
             esac
           done
 
+          for archive in opencodez-*.tar.gz opencodez-*.zip; do
+            sha256sum "$archive" > "$archive.sha256"
+          done
+
       - name: Verify release archives
         shell: bash
         run: |
@@ -163,6 +167,8 @@ jobs:
 
           for file in "${expected[@]}"; do
             test -s "$file"
+            test -s "$file.sha256"
+            sha256sum -c "$file.sha256"
           done
 
           actual_count="$(find . -maxdepth 1 -type f \( -name 'opencodez-*.tar.gz' -o -name 'opencodez-*.zip' \) | wc -l | tr -d ' ')"
@@ -210,7 +216,7 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
-          mapfile -t files < <(find packages/opencode/dist -maxdepth 1 -type f \( -name 'opencodez-*.tar.gz' -o -name 'opencodez-*.zip' \) | sort)
+          mapfile -t files < <(find packages/opencode/dist -maxdepth 1 -type f \( -name 'opencodez-*.tar.gz' -o -name 'opencodez-*.zip' -o -name 'opencodez-*.sha256' \) | sort)
           gh release upload "$TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: Verify uploaded assets
@@ -220,7 +226,7 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
-          expected=(
+          archives=(
             opencodez-darwin-arm64.zip
             opencodez-darwin-x64.zip
             opencodez-darwin-x64-baseline.zip
@@ -234,6 +240,10 @@ jobs:
             opencodez-windows-x64.zip
             opencodez-windows-x64-baseline.zip
           )
+          expected=()
+          for archive in "${archives[@]}"; do
+            expected+=("$archive" "$archive.sha256")
+          done
           mapfile -t actual < <(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | sort)
 
           if [[ "${#actual[@]}" != "${#expected[@]}" ]]; then
