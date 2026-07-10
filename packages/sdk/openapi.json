@@ -3619,14 +3619,6 @@
               "type": "string"
             },
             "required": false
-          },
-          {
-            "name": "kind",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/OpenCodezPromptKind"
-            },
-            "required": true
           }
         ],
         "responses": {
@@ -3662,7 +3654,7 @@
             }
           }
         },
-        "description": "List OpenCodez System, Tone, or Template prompt entries for the web composer.",
+        "description": "List OpenCodez System prompt entries for the web composer.",
         "summary": "List OpenCodez prompts",
         "x-codeSamples": [
           {
@@ -3733,7 +3725,7 @@
             }
           }
         },
-        "description": "Return the effective OpenCodez System and Tone for a session or draft metadata.",
+        "description": "Return the effective OpenCodez System prompt for a session or draft metadata.",
         "summary": "Get OpenCodez prompt state",
         "requestBody": {
           "content": {
@@ -3826,7 +3818,7 @@
             }
           }
         },
-        "description": "Select a System or Tone prompt, or apply a Template as a System and Tone pair.",
+        "description": "Select an OpenCodez System prompt.",
         "summary": "Select OpenCodez prompt",
         "requestBody": {
           "content": {
@@ -3844,14 +3836,11 @@
                   "model": {
                     "$ref": "#/components/schemas/OpenCodezPromptModel"
                   },
-                  "kind": {
-                    "$ref": "#/components/schemas/OpenCodezPromptKind"
-                  },
                   "name": {
                     "type": "string"
                   }
                 },
-                "required": ["kind", "name"],
+                "required": ["name"],
                 "additionalProperties": false
               }
             }
@@ -21526,19 +21515,6 @@
                         }
                       }
                     ]
-                  },
-                  "tone": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "string"
-                        }
-                      }
-                    ]
                   }
                 },
                 "additionalProperties": false
@@ -23024,25 +23000,18 @@
         "required": ["_tag", "name", "message"],
         "additionalProperties": false
       },
-      "OpenCodezPromptKind": {
-        "type": "string",
-        "enum": ["system", "tone", "template"]
-      },
       "OpenCodezPromptEntry": {
         "type": "object",
         "properties": {
           "name": {
             "type": "string"
           },
-          "kind": {
-            "$ref": "#/components/schemas/OpenCodezPromptKind"
-          },
           "source": {
             "type": "string",
             "enum": ["builtin", "library"]
           }
         },
-        "required": ["name", "kind", "source"],
+        "required": ["name", "source"],
         "additionalProperties": false
       },
       "OpenCodezPromptModel": {
@@ -23077,12 +23046,9 @@
         "properties": {
           "system": {
             "type": "string"
-          },
-          "tone": {
-            "type": "string"
           }
         },
-        "required": ["system", "tone"],
+        "required": ["system"],
         "additionalProperties": false
       },
       "OpenCodezPromptStateResult": {

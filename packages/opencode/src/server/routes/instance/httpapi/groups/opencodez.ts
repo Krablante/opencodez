@@ -4,22 +4,14 @@ import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
-import {
-  WorkspaceRoutingMiddleware,
-  WorkspaceRoutingQuery,
-  WorkspaceRoutingQueryFields,
-} from "../middleware/workspace-routing"
+import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
 import { ApiNotFoundError } from "../errors"
 import { described } from "./metadata"
 
 const root = "/opencodez/prompts"
 
-export const OpenCodezPromptKind = Schema.Literals(["system", "tone", "template"]).annotate({
-  identifier: "OpenCodezPromptKind",
-})
 export const OpenCodezPromptEntry = Schema.Struct({
   name: Schema.String,
-  kind: OpenCodezPromptKind,
   source: Schema.Literals(["builtin", "library"]),
 }).annotate({ identifier: "OpenCodezPromptEntry" })
 export const OpenCodezPromptModel = Schema.Struct({
@@ -40,16 +32,10 @@ export const OpenCodezPromptStatePayload = Schema.Struct({
 })
 export const OpenCodezPromptSelectPayload = Schema.Struct({
   ...OpenCodezPromptStatePayload.fields,
-  kind: OpenCodezPromptKind,
   name: Schema.String,
-})
-export const OpenCodezPromptListQuery = Schema.Struct({
-  ...WorkspaceRoutingQueryFields,
-  kind: OpenCodezPromptKind,
 })
 export const OpenCodezPromptState = Schema.Struct({
   system: Schema.String,
-  tone: Schema.String,
 }).annotate({ identifier: "OpenCodezPromptState" })
 export const OpenCodezPromptStateResult = Schema.Struct({
   state: OpenCodezPromptState,
@@ -66,14 +52,14 @@ export const OpenCodezApi = HttpApi.make("opencodez").add(
   HttpApiGroup.make("opencodez")
     .add(
       HttpApiEndpoint.get("promptList", OpenCodezPromptPaths.list, {
-        query: OpenCodezPromptListQuery,
+        query: WorkspaceRoutingQuery,
         success: described(Schema.Array(OpenCodezPromptEntry), "List OpenCodez prompts"),
         error: HttpApiError.BadRequest,
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "opencodez.prompt.list",
           summary: "List OpenCodez prompts",
-          description: "List OpenCodez System, Tone, or Template prompt entries for the web composer.",
+          description: "List OpenCodez System prompt entries for the web composer.",
         }),
       ),
       HttpApiEndpoint.post("promptState", OpenCodezPromptPaths.state, {
@@ -85,7 +71,7 @@ export const OpenCodezApi = HttpApi.make("opencodez").add(
         OpenApi.annotations({
           identifier: "opencodez.prompt.state",
           summary: "Get OpenCodez prompt state",
-          description: "Return the effective OpenCodez System and Tone for a session or draft metadata.",
+          description: "Return the effective OpenCodez System prompt for a session or draft metadata.",
         }),
       ),
       HttpApiEndpoint.post("promptSelect", OpenCodezPromptPaths.select, {
@@ -97,7 +83,7 @@ export const OpenCodezApi = HttpApi.make("opencodez").add(
         OpenApi.annotations({
           identifier: "opencodez.prompt.select",
           summary: "Select OpenCodez prompt",
-          description: "Select a System or Tone prompt, or apply a Template as a System and Tone pair.",
+          description: "Select an OpenCodez System prompt.",
         }),
       ),
     )

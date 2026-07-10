@@ -52,7 +52,7 @@ import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { useArgs } from "../../context/args"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
-import { OpenCodezPromptSelector, OpenCodezPromptsHelpDialog, OpenCodezPruningStatusDialog } from "../opencodez-dialogs"
+import { OpenCodezPromptSelector, OpenCodezPruningStatusDialog } from "../opencodez-dialogs"
 import { OpenCodezSession } from "@opencode-ai/core/opencodez/session"
 import { OpenCodezSlash } from "@opencode-ai/core/opencodez/slash"
 import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
@@ -246,9 +246,8 @@ export function Prompt(props: PromptProps) {
   })
   const openCodezIndicator = createMemo(() => {
     const selection = openCodezSelection()
-    const tone = selection.tone ?? "none"
-    const label = `S: ${selection.system} · T: ${tone}`
-    const compactLabel = label.length > 35 ? `S:${selection.system}·T:${tone}` : label
+    const label = `S: ${selection.system}`
+    const compactLabel = label.length > 35 ? `S:${selection.system}` : label
     const width = Math.max(18, Math.min(56, Math.floor(dimensions().width / 3)))
     return Locale.truncateMiddle(compactLabel, width)
   })
@@ -989,7 +988,6 @@ export function Prompt(props: PromptProps) {
   }
 
   async function selectOpenCodezPrompt(input: {
-    kind: "system" | "tone" | "template"
     name: string
     sessionID?: string
     metadata?: Record<string, unknown>
@@ -998,8 +996,7 @@ export function Prompt(props: PromptProps) {
       .select({
         sessionID: input.sessionID,
         metadata: input.sessionID ? undefined : (input.metadata ?? currentOpenCodezMetadata()),
-        model: input.kind === "template" ? undefined : currentOpenCodezModel(),
-        kind: input.kind,
+        model: currentOpenCodezModel(),
         name: input.name,
       })
       .then((x) => x.data ?? undefined)
@@ -1016,22 +1013,14 @@ export function Prompt(props: PromptProps) {
     return result
   }
 
-  async function applyNamedPrompt(kind: "system" | "tone", name: string, sessionID: string | undefined) {
-    const result = await selectOpenCodezPrompt({ kind, name, sessionID })
+  async function applyNamedPrompt(name: string, sessionID: string | undefined) {
+    const result = await selectOpenCodezPrompt({ name, sessionID })
     if (!result) return false
-    const label = kind === "system" ? "System" : "Tone"
     toast.show({
-      message: `${label} set to ${OpenCodezSession.isNone(name) ? "None" : name}`,
+      message: `System set to ${OpenCodezSession.isNone(name) ? "None" : name}`,
       variant: "info",
       duration: 2500,
     })
-    return true
-  }
-
-  async function applyTemplate(name: string, sessionID: string | undefined) {
-    const result = await selectOpenCodezPrompt({ kind: "template", name, sessionID })
-    if (!result) return false
-    toast.show({ message: `Template set to ${name}`, variant: "info", duration: 2500 })
     return true
   }
 
@@ -1050,18 +1039,17 @@ export function Prompt(props: PromptProps) {
     }
   }
 
-  async function openOpenCodezPromptSelector(kind: "system" | "tone" | "template", sessionID: string | undefined) {
+  async function openOpenCodezPromptSelector(sessionID: string | undefined) {
     try {
       const selectedModel = local.model.current()
-      const entries = await sdk.client.opencodez.prompt.list({ kind }).then((x) => x.data ?? [])
+      const entries = await sdk.client.opencodez.prompt.list().then((x) => x.data ?? [])
       dialog.replace(() => (
         <OpenCodezPromptSelector
-          kind={kind}
           entries={entries}
           sessionID={sessionID}
           metadata={currentOpenCodezMetadata()}
           config={sync.data.config}
-          model={kind === "template" ? undefined : (currentOpenCodezModel() ?? selectedModel?.modelID)}
+          model={currentOpenCodezModel() ?? selectedModel?.modelID}
         />
       ))
       return true
@@ -1075,30 +1063,10 @@ export function Prompt(props: PromptProps) {
     const sessionID = props.sessionID
     if (command.type === "system") {
       if (!command.name) {
-        if (!(await openOpenCodezPromptSelector("system", sessionID))) return true
+        if (!(await openOpenCodezPromptSelector(sessionID))) return true
         return clearCommandInput()
       }
-      if (!(await applyNamedPrompt("system", command.name, sessionID))) return true
-      return clearCommandInput()
-    }
-    if (command.type === "tone") {
-      if (!command.name) {
-        if (!(await openOpenCodezPromptSelector("tone", sessionID))) return true
-        return clearCommandInput()
-      }
-      if (!(await applyNamedPrompt("tone", command.name, sessionID))) return true
-      return clearCommandInput()
-    }
-    if (command.type === "template") {
-      if (!command.name) {
-        if (!(await openOpenCodezPromptSelector("template", sessionID))) return true
-        return clearCommandInput()
-      }
-      if (!(await applyTemplate(command.name, sessionID))) return true
-      return clearCommandInput()
-    }
-    if (command.type === "prompts") {
-      dialog.replace(() => <OpenCodezPromptsHelpDialog />)
+      if (!(await applyNamedPrompt(command.name, sessionID))) return true
       return clearCommandInput()
     }
     if (command.type === "pruning") {
@@ -1123,32 +1091,6 @@ export function Prompt(props: PromptProps) {
         OpenCodezSession.setPruning(sessionID, { pruning_size: command.size }, currentOpenCodezMetadata())
       await persistOpenCodezState(sessionID)
       toast.show({ message: "Pruning settings updated for this session", variant: "info", duration: 2500 })
-      return clearCommandInput()
-    }
-    if (command.type === "new") {
-      if (command.error) {
-        toast.show({ message: command.error, variant: "warning", duration: 3500 })
-        return true
-      }
-      let metadata: Record<string, unknown> = {}
-      const selectDraft = async (kind: "system" | "tone" | "template", name: string) => {
-        const result = await selectOpenCodezPrompt({ kind, name, metadata })
-        if (!result) return false
-        metadata = result.metadata
-        return true
-      }
-      if (command.template) {
-        if (!(await selectDraft("template", command.template))) return true
-      }
-      if (command.system) {
-        if (!(await selectDraft("system", command.system))) return true
-      }
-      if (command.tone) {
-        if (!(await selectDraft("tone", command.tone))) return true
-      }
-      syncOpenCodezMetadata(undefined, metadata)
-      route.navigate({ type: "home" })
-      dialog.clear()
       return clearCommandInput()
     }
   }

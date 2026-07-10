@@ -5,11 +5,7 @@ import { Session } from "@/session/session"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
-import {
-  OpenCodezPromptListQuery,
-  OpenCodezPromptSelectPayload,
-  OpenCodezPromptStatePayload,
-} from "../groups/opencodez"
+import { OpenCodezPromptSelectPayload, OpenCodezPromptStatePayload } from "../groups/opencodez"
 import * as SessionError from "./session-errors"
 
 export const opencodezHandlers = HttpApiBuilder.group(InstanceHttpApi, "opencodez", (handlers) =>
@@ -29,7 +25,6 @@ export const opencodezHandlers = HttpApiBuilder.group(InstanceHttpApi, "opencode
       return {
         state: {
           system: result.system,
-          tone: result.tone ?? "none",
         },
         metadata: input.metadata,
       }
@@ -44,15 +39,11 @@ export const opencodezHandlers = HttpApiBuilder.group(InstanceHttpApi, "opencode
       return OpenCodezSession.metadataWithSessionState(current.metadata, input.sessionID)
     })
 
-    const list = Effect.fn("OpenCodezHttpApi.promptList")(function* (ctx: {
-      query: typeof OpenCodezPromptListQuery.Type
-    }) {
-      const kind = ctx.query.kind === "system" ? "core" : ctx.query.kind === "tone" ? "tone" : "templates"
-      return yield* Effect.promise(() => OpenCodezPromptLibrary.list(kind)).pipe(
+    const list = Effect.fn("OpenCodezHttpApi.promptList")(function* () {
+      return yield* Effect.promise(() => OpenCodezPromptLibrary.list()).pipe(
         Effect.map((entries) =>
           entries.map((entry) => ({
             name: entry.name,
-            kind: ctx.query.kind,
             source: entry.source,
           })),
         ),
@@ -92,27 +83,9 @@ export const opencodezHandlers = HttpApiBuilder.group(InstanceHttpApi, "opencode
 
 function selectionFor(input: typeof OpenCodezPromptSelectPayload.Type) {
   return Effect.gen(function* () {
-    if (input.kind === "system") {
-      if (OpenCodezSession.isNone(input.name)) return OpenCodezSession.disable("system")
-      const entry = yield* Effect.promise(() => OpenCodezPromptLibrary.get("core", input.name))
-      if (!entry) return yield* new HttpApiError.BadRequest({})
-      return { system: input.name, systemManual: true }
-    }
-
-    if (input.kind === "tone") {
-      if (OpenCodezSession.isNone(input.name)) return OpenCodezSession.disable("tone")
-      const entry = yield* Effect.promise(() => OpenCodezPromptLibrary.get("tone", input.name))
-      if (!entry) return yield* new HttpApiError.BadRequest({})
-      return { tone: input.name, toneManual: true }
-    }
-
-    const template = yield* Effect.promise(() => OpenCodezPromptLibrary.readTemplate(input.name))
-    if (!template) return yield* new HttpApiError.BadRequest({})
-    return {
-      system: template.system,
-      tone: template.tone,
-      systemManual: true,
-      toneManual: true,
-    }
+    if (OpenCodezSession.isNone(input.name)) return OpenCodezSession.disable()
+    const entry = yield* Effect.promise(() => OpenCodezPromptLibrary.get(input.name))
+    if (!entry) return yield* new HttpApiError.BadRequest({})
+    return { system: input.name, systemManual: true }
   })
 }

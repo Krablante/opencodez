@@ -60,6 +60,8 @@ export type Prepared = {
 const mergeOptions = (target: Record<string, any>, source: Record<string, any> | undefined): Record<string, any> =>
   mergeDeep(target, source ?? {}) as Record<string, any>
 
+const withoutLegacyPersonality = (prompt: string) => prompt.replaceAll(/\{\{\s*personality\s*\}\}/g, "").trim()
+
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
   const opencodezPrompts = OpenCodezIdentity.enabled
@@ -74,17 +76,15 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         return {
           systemDisabled: opencodez.systemManual && !opencodez.system,
           system: opencodez.system
-            ? await OpenCodezPromptLibrary.readPrompt("core", opencodez.system).catch(() => undefined)
-            : undefined,
-          tone: opencodez.tone
-            ? await OpenCodezPromptLibrary.readPrompt("tone", opencodez.tone).catch(() => undefined)
+            ? await OpenCodezPromptLibrary.readPrompt(opencodez.system)
+                .then((prompt) => (prompt ? withoutLegacyPersonality(prompt) : undefined))
+                .catch(() => undefined)
             : undefined,
         }
       })
     : {
         systemDisabled: false,
         system: undefined,
-        tone: undefined,
       }
   const baseSystem = [
     ...(OpenCodezIdentity.enabled && opencodezPrompts.system
@@ -97,12 +97,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
           ? [input.agent.prompt]
           : SystemPrompt.provider(input.model)),
   ]
-  const systemContent = [
-    ...baseSystem,
-    ...(opencodezPrompts.tone ? [opencodezPrompts.tone] : []),
-    ...input.system,
-    ...(input.user.system ? [input.user.system] : []),
-  ]
+  const systemContent = [...baseSystem, ...input.system, ...(input.user.system ? [input.user.system] : [])]
     .filter((x) => x)
     .join("\n")
   const system = systemContent ? [systemContent] : []

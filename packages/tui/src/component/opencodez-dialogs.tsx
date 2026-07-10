@@ -1,4 +1,3 @@
-import { Global } from "@opencode-ai/core/global"
 import { OpenCodezSession } from "@opencode-ai/core/opencodez/session"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 import type { Config, OpenCodezPromptEntry } from "@opencode-ai/sdk/v2"
@@ -10,7 +9,6 @@ import { useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
 
 export function OpenCodezPromptSelector(props: {
-  kind: "system" | "tone" | "template"
   entries: OpenCodezPromptEntry[]
   sessionID?: string
   metadata?: Record<string, unknown>
@@ -27,9 +25,7 @@ export function OpenCodezPromptSelector(props: {
       sessionID: props.sessionID,
       metadata: props.metadata,
     })
-    if (props.kind === "system") return indicator.system
-    if (props.kind === "tone") return indicator.tone ?? OpenCodezSession.noneID
-    return undefined
+    return indicator.system
   })
   const options = createMemo(() => {
     const prompts = props.entries.map((item) => ({
@@ -37,12 +33,11 @@ export function OpenCodezPromptSelector(props: {
       value: item.name,
       description: item.source,
     }))
-    if (props.kind === "template") return prompts
     return [
       {
         title: "None",
         value: OpenCodezSession.noneID,
-        description: `Disable ${props.kind === "system" ? "System" : "Tone"} prompt for this session`,
+        description: "Disable System prompt for this session",
       },
       ...prompts,
     ]
@@ -50,13 +45,13 @@ export function OpenCodezPromptSelector(props: {
 
   return (
     <DialogSelect
-      title={props.kind === "system" ? "Select System" : props.kind === "tone" ? "Select Tone" : "Select Template"}
+      title="Select System"
       placeholder="Type to filter"
       current={current()}
       flat
       options={options()}
       onSelect={(option) => {
-        void applySelection(sdk.client, props.kind, option.value, props.sessionID, props.metadata, props.model)
+        void applySelection(sdk.client, option.value, props.sessionID, props.metadata, props.model)
           .then((label) => {
             toast.show({ message: label, variant: "info", duration: 2500 })
             dialog.clear()
@@ -69,28 +64,6 @@ export function OpenCodezPromptSelector(props: {
             })
           })
       }}
-    />
-  )
-}
-
-export function OpenCodezPromptsHelpDialog() {
-  const root = `${Global.Path.config}/prompts`
-  return (
-    <DialogAlert
-      title="Prompt library"
-      message={[
-        "Core prompts:",
-        `  ${root}/core/`,
-        "",
-        "Tone presets:",
-        `  ${root}/tone/`,
-        "",
-        "Templates:",
-        `  ${root}/templates/`,
-        "",
-        "Model defaults:",
-        `  ${Global.Path.config}/opencode.jsonc`,
-      ].join("\n")}
     />
   )
 }
@@ -117,7 +90,6 @@ export function OpenCodezPruningStatusDialog(props: {
 
 async function applySelection(
   client: ReturnType<typeof useSDK>["client"],
-  kind: "system" | "tone" | "template",
   name: string,
   sessionID: string | undefined,
   metadata: Record<string, unknown> | undefined,
@@ -126,8 +98,7 @@ async function applySelection(
   const result = await client.opencodez.prompt.select({
     sessionID,
     metadata: sessionID ? undefined : metadata,
-    model: kind === "template" ? undefined : modelPayload(model),
-    kind,
+    model: modelPayload(model),
     name,
   })
   if (result.error || !result.data) throw new Error(`Nothing found for "${name}". Try another name.`)
@@ -137,9 +108,7 @@ async function applySelection(
     OpenCodezSession.resetPending(state.selection ?? {}, state.pruning ?? {})
   }
 
-  if (kind === "system") return `System set to ${OpenCodezSession.isNone(name) ? "None" : name}`
-  if (kind === "tone") return `Tone set to ${OpenCodezSession.isNone(name) ? "None" : name}`
-  return `Template set to ${name}`
+  return `System set to ${OpenCodezSession.isNone(name) ? "None" : name}`
 }
 
 function modelPayload(model: OpenCodezSettings.ModelLike | undefined) {

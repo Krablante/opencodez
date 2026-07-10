@@ -4,7 +4,6 @@ export type ConfigLike = Record<string, unknown> & {
   opencodez?: {
     responses?: {
       system?: string | Record<string, string>
-      tone?: string | Record<string, string>
     }
     pruning?: {
       enabled?: boolean
@@ -40,11 +39,10 @@ export const defaults = {
     "gpt-5.4": "codex_gpt_5_4",
     "gpt-5.4-mini": "codex_gpt_5_4_mini",
     "gpt-5.5": "codex_gpt_5_5",
-    "gpt-5.6-luna": "codex_gpt_5_5",
-    "gpt-5.6-terra": "codex_gpt_5_5",
-    "gpt-5.6-sol": "codex_gpt_5_5",
+    "gpt-5.6-luna": "codex_gpt_5_6_luna_terra",
+    "gpt-5.6-terra": "codex_gpt_5_6_luna_terra",
+    "gpt-5.6-sol": "codex_gpt_5_6_sol",
   },
-  tone: "codex_pragmatic",
   pruning: {
     enabled: true,
     pruning_size: 20_000,
@@ -62,14 +60,6 @@ export function defaultSystem(config: ConfigLike | undefined, model: ModelLike |
   if (configured) return resolveModelMapping(configured, model)
   if (!isOpenAIResponsesGPT(model)) return undefined
   return resolveModelMapping(defaults.system, model) ?? defaults.system.default
-}
-
-export function defaultTone(config: ConfigLike | undefined, model: ModelLike | undefined) {
-  const configured = config?.opencodez?.responses?.tone
-  if (typeof configured === "string") return configured
-  if (configured) return resolveModelMapping(configured, model)
-  if (!isOpenAIResponsesGPT(model)) return undefined
-  return defaults.tone
 }
 
 export function pruning(config: ConfigLike | undefined) {

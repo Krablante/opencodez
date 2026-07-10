@@ -81,11 +81,7 @@ import {
 
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
-import {
-  OpenCodezPromptSelector,
-  OpenCodezPromptsHelpDialog,
-  OpenCodezPruningStatusDialog,
-} from "./component/opencodez-dialogs"
+import { OpenCodezPromptSelector, OpenCodezPruningStatusDialog } from "./component/opencodez-dialogs"
 import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import { createTuiAttention } from "./attention"
 import * as TuiAudio from "./audio"
@@ -570,17 +566,16 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     const sessionID = openCodezSessionID()
     return sessionID ? (sync.session.get(sessionID)?.metadata as Record<string, unknown> | undefined) : undefined
   }
-  const openCodezPromptSelector = async (kind: "system" | "tone" | "template") => {
+  const openCodezPromptSelector = async () => {
     try {
-      const entries = await sdk.client.opencodez.prompt.list({ kind }).then((x) => x.data ?? [])
+      const entries = await sdk.client.opencodez.prompt.list().then((x) => x.data ?? [])
       dialog.replace(() => (
         <OpenCodezPromptSelector
-          kind={kind}
           entries={entries}
           sessionID={openCodezSessionID()}
           metadata={openCodezMetadata()}
           config={sync.data.config}
-          model={kind === "template" ? undefined : openCodezModel()}
+          model={openCodezModel()}
         />
       ))
     } catch (error) {
@@ -638,34 +633,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
               category: "OpenCodez",
               slashName: "system",
               run: () => {
-                void openCodezPromptSelector("system")
-              },
-            },
-            {
-              name: "opencodez.tone",
-              title: "Select Tone",
-              category: "OpenCodez",
-              slashName: "tone",
-              run: () => {
-                void openCodezPromptSelector("tone")
-              },
-            },
-            {
-              name: "opencodez.template",
-              title: "Select Template",
-              category: "OpenCodez",
-              slashName: "template",
-              run: () => {
-                void openCodezPromptSelector("template")
-              },
-            },
-            {
-              name: "opencodez.prompts",
-              title: "Show prompt library paths",
-              category: "OpenCodez",
-              slashName: "prompts",
-              run: () => {
-                dialog.replace(() => <OpenCodezPromptsHelpDialog />)
+                void openCodezPromptSelector()
               },
             },
             {

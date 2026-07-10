@@ -1930,11 +1930,6 @@ export type Config = {
         | {
             [key: string]: string
           }
-      tone?:
-        | string
-        | {
-            [key: string]: string
-          }
     }
     pruning?: {
       enabled?: boolean
@@ -2439,11 +2434,8 @@ export type McpServerNotFoundError = {
   message: string
 }
 
-export type OpenCodezPromptKind = "system" | "tone" | "template"
-
 export type OpenCodezPromptEntry = {
   name: string
-  kind: OpenCodezPromptKind
   source: "builtin" | "library"
 }
 
@@ -2459,7 +2451,6 @@ export type OpenCodezPromptModel = {
 
 export type OpenCodezPromptState = {
   system: string
-  tone: string
 }
 
 export type OpenCodezPromptStateResult = {
@@ -8753,10 +8744,9 @@ export type McpDisconnectResponse = McpDisconnectResponses[keyof McpDisconnectRe
 export type OpencodezPromptListData = {
   body?: never
   path?: never
-  query: {
+  query?: {
     directory?: string
     workspace?: string
-    kind: OpenCodezPromptKind
   }
   url: "/opencodez/prompts"
 }
@@ -8824,7 +8814,6 @@ export type OpencodezPromptSelectData = {
       [key: string]: unknown
     }
     model?: OpenCodezPromptModel
-    kind: OpenCodezPromptKind
     name: string
   }
   path?: never

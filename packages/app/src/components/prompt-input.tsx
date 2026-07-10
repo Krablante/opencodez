@@ -80,7 +80,6 @@ import { pathKey } from "@/utils/path-key"
 import { displayName } from "@/pages/layout/helpers"
 import type {
   OpenCodezPromptEntry,
-  OpenCodezPromptKind,
   OpenCodezPromptModel,
   OpenCodezPromptState,
   ReferenceInfo,
@@ -213,10 +212,6 @@ const EXAMPLES = [
   "prompt.example.25",
 ] as const
 
-type PromptPickerRecord<T> = Record<OpenCodezPromptKind, T>
-
-const promptPickerKinds = ["system", "tone", "template"] as const satisfies readonly OpenCodezPromptKind[]
-
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
 
@@ -237,8 +232,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   let slashPopoverRef!: HTMLDivElement
   let projectSearchRef: HTMLInputElement | undefined
   let systemSearchRef: HTMLInputElement | undefined
-  let toneSearchRef: HTMLInputElement | undefined
-  let templateSearchRef: HTMLInputElement | undefined
   let restoreEndOnFocus = true
   let savedCursor: number | null = null
 
@@ -371,23 +364,23 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const [picker, setPicker] = createStore<{
     projectOpen: boolean
     projectSearch: string
-    promptOpen: PromptPickerRecord<boolean>
-    promptSearch: PromptPickerRecord<string>
-    promptEntries: PromptPickerRecord<OpenCodezPromptEntry[]>
-    promptLoading: PromptPickerRecord<boolean>
-    promptLoaded: PromptPickerRecord<boolean>
-    promptError: PromptPickerRecord<string | undefined>
+    promptOpen: boolean
+    promptSearch: string
+    promptEntries: OpenCodezPromptEntry[]
+    promptLoading: boolean
+    promptLoaded: boolean
+    promptError?: string
     promptMetadata: Record<string, unknown>
     promptState?: OpenCodezPromptState
   }>({
     projectOpen: false,
     projectSearch: "",
-    promptOpen: { system: false, tone: false, template: false },
-    promptSearch: { system: "", tone: "", template: "" },
-    promptEntries: { system: [], tone: [], template: [] },
-    promptLoading: { system: false, tone: false, template: false },
-    promptLoaded: { system: false, tone: false, template: false },
-    promptError: { system: undefined, tone: undefined, template: undefined },
+    promptOpen: false,
+    promptSearch: "",
+    promptEntries: [],
+    promptLoading: false,
+    promptLoaded: false,
+    promptError: undefined,
     promptMetadata: {},
     promptState: undefined,
   })
@@ -643,16 +636,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   }
 
-  const promptSearchInput = (kind: OpenCodezPromptKind) => {
-    if (kind === "system") return systemSearchRef
-    if (kind === "tone") return toneSearchRef
-    return templateSearchRef
-  }
-
-  const setPromptSearchRef = (kind: OpenCodezPromptKind) => (el: HTMLInputElement) => {
-    if (kind === "system") systemSearchRef = el
-    if (kind === "tone") toneSearchRef = el
-    if (kind === "template") templateSearchRef = el
+  const setPromptSearchRef = (el: HTMLInputElement) => {
+    systemSearchRef = el
   }
 
   const openCodezSessionID = () => props.controls.session.id
@@ -711,47 +696,42 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     ),
   )
 
-  const loadPromptEntries = async (kind: OpenCodezPromptKind) => {
-    if (picker.promptLoaded[kind] || picker.promptLoading[kind]) return
-    setPicker("promptLoading", kind, true)
-    setPicker("promptError", kind, undefined)
+  const loadPromptEntries = async () => {
+    if (picker.promptLoaded || picker.promptLoading) return
+    setPicker("promptLoading", true)
+    setPicker("promptError", undefined)
     const entries = await sdk()
-      .client.opencodez.prompt.list({ kind })
+      .client.opencodez.prompt.list()
       .then((x) => x.data ?? undefined)
       .catch(() => undefined)
-    setPicker("promptLoading", kind, false)
+    setPicker("promptLoading", false)
     if (!entries) {
-      setPicker("promptError", kind, language.t("common.requestFailed"))
+      setPicker("promptError", language.t("common.requestFailed"))
       return
     }
-    setPicker("promptEntries", kind, entries)
-    setPicker("promptLoaded", kind, true)
+    setPicker("promptEntries", entries)
+    setPicker("promptLoaded", true)
   }
 
-  const promptKindIcon = (kind: OpenCodezPromptKind): IconProps["name"] => {
-    if (kind === "system") return "prompt"
-    if (kind === "tone") return "sliders"
-    return "models"
-  }
+  const promptIcon: IconProps["name"] = "prompt"
 
-  const setPromptOpen = (kind: OpenCodezPromptKind, open: boolean) => {
-    setPicker("promptOpen", kind, open)
+  const setPromptOpen = (open: boolean) => {
+    setPicker("promptOpen", open)
     if (open) {
-      void loadPromptEntries(kind)
-      requestAnimationFrame(() => promptSearchInput(kind)?.focus())
+      void loadPromptEntries()
+      requestAnimationFrame(() => systemSearchRef?.focus())
       return
     }
     restoreFocus()
   }
 
-  const selectPrompt = async (kind: OpenCodezPromptKind, name: string) => {
+  const selectPrompt = async (name: string) => {
     const sessionID = openCodezSessionID()
     const result = await sdk()
       .client.opencodez.prompt.select({
         sessionID,
         metadata: sessionID ? undefined : picker.promptMetadata,
         model: openCodezModel(),
-        kind,
         name,
       })
       .then((x) => x.data ?? undefined)
@@ -759,90 +739,60 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     if (!result) return
     setPicker("promptState", result.state)
     if (!sessionID) setPicker("promptMetadata", result.metadata)
-    setPicker("promptOpen", kind, false)
-    setPicker("promptSearch", kind, "")
+    setPicker("promptOpen", false)
+    setPicker("promptSearch", "")
     restoreFocus()
   }
 
-  const promptControlItems = (kind: OpenCodezPromptKind): ComposerPickerItemState[] => {
-    if (picker.promptLoading[kind]) {
-      return [{ icon: promptKindIcon(kind), label: "Loading...", disabled: true, onSelect: () => {} }]
+  const promptControlItems = (): ComposerPickerItemState[] => {
+    if (picker.promptLoading) {
+      return [{ icon: promptIcon, label: "Loading...", disabled: true, onSelect: () => {} }]
     }
-    const error = picker.promptError[kind]
+    const error = picker.promptError
     if (error) {
-      return [{ icon: promptKindIcon(kind), label: error, disabled: true, onSelect: () => {} }]
+      return [{ icon: promptIcon, label: error, disabled: true, onSelect: () => {} }]
     }
 
-    const search = picker.promptSearch[kind].trim().toLowerCase()
-    const selected =
-      kind === "system" ? picker.promptState?.system : kind === "tone" ? picker.promptState?.tone : undefined
-    const entries = [
-      ...(kind === "template"
-        ? []
-        : [
-            {
-              name: "none",
-              kind,
-              source: "builtin" as const,
-            },
-          ]),
-      ...picker.promptEntries[kind],
-    ]
+    const search = picker.promptSearch.trim().toLowerCase()
+    const selected = picker.promptState?.system
+    const entries = [{ name: "none", source: "builtin" as const }, ...picker.promptEntries]
     const items = entries.filter((entry) => {
-      const label = entry.name === "none" && kind !== "template" ? "None" : entry.name
+      const label = entry.name === "none" ? "None" : entry.name
       if (!search) return true
       return label.toLowerCase().includes(search)
     })
     if (items.length === 0) {
-      return [{ icon: promptKindIcon(kind), label: "No prompts found", disabled: true, onSelect: () => {} }]
+      return [{ icon: promptIcon, label: "No prompts found", disabled: true, onSelect: () => {} }]
     }
     return items.map((entry) => ({
-      icon: promptKindIcon(kind),
-      label: entry.name === "none" && kind !== "template" ? "None" : entry.name,
-      selected: kind !== "template" && entry.name === selected,
-      onSelect: () => void selectPrompt(kind, entry.name),
+      icon: promptIcon,
+      label: entry.name === "none" ? "None" : entry.name,
+      selected: entry.name === selected,
+      onSelect: () => void selectPrompt(entry.name),
     }))
   }
 
-  const promptControlState = (kind: OpenCodezPromptKind): ComposerPickerState => {
-    const labels = {
-      system: {
-        action: "prompt-system",
-        label: `S: ${picker.promptState?.system ?? "default"}`,
-        search: "Search system prompts...",
-      },
-      tone: {
-        action: "prompt-tone",
-        label: `T: ${picker.promptState?.tone ?? "none"}`,
-        search: "Search tone prompts...",
-      },
-      template: {
-        action: "prompt-template",
-        label: "Template",
-        search: "Search templates...",
-      },
-    } satisfies PromptPickerRecord<{ action: string; label: string; search: string }>
-
+  const promptControlState = (): ComposerPickerState => {
     return {
-      open: picker.promptOpen[kind],
+      open: picker.promptOpen,
       trigger: {
-        action: labels[kind].action,
-        icon: promptKindIcon(kind),
-        label: labels[kind].label,
+        action: "prompt-system",
+        icon: promptIcon,
+        label: `S: ${picker.promptState?.system ?? "default"}`,
         style: control(),
-        onPress: () => setPromptOpen(kind, !picker.promptOpen[kind]),
+        onPress: () => setPromptOpen(!picker.promptOpen),
       },
-      search: picker.promptSearch[kind],
-      searchPlaceholder: labels[kind].search,
+      search: picker.promptSearch,
+      searchPlaceholder: "Search system prompts...",
       clearLabel: "Clear search",
-      items: promptControlItems(kind),
+      items: promptControlItems(),
       listClass: "max-h-[244px] overflow-y-auto",
-      searchRef: setPromptSearchRef(kind),
-      onOpenChange: (open) => setPromptOpen(kind, open),
-      onSearchInput: (value) => setPicker("promptSearch", kind, value),
+      searchRef: setPromptSearchRef,
+      onOpenChange: (open) => setPromptOpen(open),
+      onSearchInput: (value) => setPicker("promptSearch", value),
       onSearchClear: () => {
-        setPicker("promptSearch", kind, "")
-        requestAnimationFrame(() => promptSearchInput(kind)?.focus())
+        setPicker("promptSearch", "")
+        requestAnimationFrame(() => systemSearchRef?.focus())
       },
     }
   }
@@ -1991,7 +1941,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   {props.toolbar}
                   <ComposerModelControl state={modelControlState()} />
                   <Show when={store.mode !== "shell"}>
-                    <For each={promptPickerKinds}>{(kind) => <ComposerPicker state={promptControlState(kind)} />}</For>
+                    <ComposerPicker state={promptControlState()} />
                   </Show>
                   <Show when={!providersLoading() && store.mode !== "shell" && showVariantControl()}>
                     <div
@@ -2401,9 +2351,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       </Show>
                     </Show>
                     <Show when={store.mode !== "shell"}>
-                      <For each={promptPickerKinds}>
-                        {(kind) => <ComposerPicker state={promptControlState(kind)} />}
-                      </For>
+                      <ComposerPicker state={promptControlState()} />
                     </Show>
                   </div>
                 </div>

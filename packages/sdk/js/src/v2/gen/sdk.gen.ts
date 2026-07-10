@@ -113,7 +113,6 @@ import type {
   McpStatusResponses,
   ModelRef,
   MoveSessionDestination,
-  OpenCodezPromptKind,
   OpencodezPromptListErrors,
   OpencodezPromptListResponses,
   OpenCodezPromptModel,
@@ -2539,13 +2538,12 @@ export class Prompt extends HeyApiClient {
   /**
    * List OpenCodez prompts
    *
-   * List OpenCodez System, Tone, or Template prompt entries for the web composer.
+   * List OpenCodez System prompt entries for the web composer.
    */
   public list<ThrowOnError extends boolean = false>(
-    parameters: {
+    parameters?: {
       directory?: string
       workspace?: string
-      kind: OpenCodezPromptKind
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2556,7 +2554,6 @@ export class Prompt extends HeyApiClient {
           args: [
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
-            { in: "query", key: "kind" },
           ],
         },
       ],
@@ -2571,7 +2568,7 @@ export class Prompt extends HeyApiClient {
   /**
    * Get OpenCodez prompt state
    *
-   * Return the effective OpenCodez System and Tone for a session or draft metadata.
+   * Return the effective OpenCodez System prompt for a session or draft metadata.
    */
   public state<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -2618,7 +2615,7 @@ export class Prompt extends HeyApiClient {
   /**
    * Select OpenCodez prompt
    *
-   * Select a System or Tone prompt, or apply a Template as a System and Tone pair.
+   * Select an OpenCodez System prompt.
    */
   public select<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -2629,7 +2626,6 @@ export class Prompt extends HeyApiClient {
         [key: string]: unknown
       }
       model?: OpenCodezPromptModel
-      kind?: OpenCodezPromptKind
       name?: string
     },
     options?: Options<never, ThrowOnError>,
@@ -2644,7 +2640,6 @@ export class Prompt extends HeyApiClient {
             { in: "body", key: "sessionID" },
             { in: "body", key: "metadata" },
             { in: "body", key: "model" },
-            { in: "body", key: "kind" },
             { in: "body", key: "name" },
           ],
         },
