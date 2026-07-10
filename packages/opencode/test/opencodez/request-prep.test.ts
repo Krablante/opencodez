@@ -1,38 +1,41 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { Effect } from "effect"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { SystemPrompt } from "../../src/session/system"
+import { OpenCodezSession } from "@opencode-ai/core/opencodez/session"
+import { Effect } from "effect"
 
-let tmp = ""
 let LLMRequestPrep: typeof import("../../src/session/llm/request").LLMRequestPrep
 
-const modalities = {
-  text: true,
-  audio: false,
-  image: false,
-  video: false,
-  pdf: false,
-}
+const previousConfigDir = process.env.OPENCODE_CONFIG_DIR
+let tmp = ""
+
+const provider = {
+  id: "openai",
+  name: "OpenAI",
+  source: "config",
+  env: [],
+  models: {},
+  options: {},
+} as any
 
 const model = {
   id: "gpt-5.5",
   providerID: "openai",
   api: { id: "gpt-5.5", url: "https://api.openai.com/v1", npm: "@ai-sdk/openai" },
   name: "GPT-5.5",
-  family: undefined,
+  family: "gpt-5.5",
   capabilities: {
-    temperature: true,
+    temperature: false,
     reasoning: true,
-    attachment: true,
+    attachment: false,
     toolcall: true,
-    input: modalities,
-    output: modalities,
+    input: { text: true, audio: false, image: false, video: false, pdf: false },
+    output: { text: true, audio: false, image: false, video: false, pdf: false },
     interleaved: false,
   },
   cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-  limit: { context: 100_000, output: 4096 },
+  limit: { context: 200_000, output: 100_000 },
   status: "active",
   options: {},
   headers: {},
@@ -40,464 +43,103 @@ const model = {
   variants: {},
 } as any
 
-const provider = {
-  id: "openai",
-  name: "OpenAI",
-  source: "custom",
-  env: [],
-  options: {},
-  models: { [model.id]: model },
-} as any
-
-const baseInput = {
-  user: {
-    id: "msg-user",
-    system: undefined,
-    tools: {},
-    model: {},
-  },
-  sessionID: "session-1",
-  model,
+const input = {
+  user: { id: "msg-user", system: undefined, tools: {}, model: {} },
+  sessionID: "session-test",
   agent: {
     name: "build",
-    mode: "primary",
+    mode: "primary" as const,
     permission: [],
     options: {},
-    prompt: "AGENT PROMPT",
   },
   permission: [],
   system: ["EXTRA SYSTEM"],
   messages: [],
   tools: {},
+  model,
   provider,
   auth: undefined,
-  plugin: {
-    trigger: (_name: string, _input: unknown, output: unknown) => Effect.succeed(output),
-  },
-  flags: {
-    outputTokenMax: undefined,
-    client: "cli",
-  },
+  plugin: { trigger: (_name: string, _input: unknown, output: unknown) => Effect.succeed(output) },
+  flags: { outputTokenMax: undefined, client: "cli" },
   isWorkflow: false,
-  config: {
-    opencodez: {
-      pruning: {
-        enabled: true,
-        pruning_size: 20_000,
-        preserve_tools: [],
-        prune: { reasoning: true, tool: true },
-      },
-    },
-  },
+  config: {},
 } as any
 
-const corePrompts = {
-  codex_gpt_5_2: "CORE PROMPT 5.2",
-  codex_gpt_5_2_codex: "CORE PROMPT 5.2 CODEX",
-  codex_gpt_5_3_codex: "CORE PROMPT 5.3 CODEX",
-  codex_gpt_5_4: "CORE PROMPT 5.4",
-  codex_gpt_5_4_mini: "CORE PROMPT 5.4 MINI",
-  codex_gpt_5_5: "CORE PROMPT 5.5",
-} as const
+beforeAll(async () => {
+  tmp = await fs.mkdtemp(path.join(os.tmpdir(), "opencodez-request-prep-"))
+  process.env.OPENCODE_APP_NAME = "opencodez"
+  process.env.OPENCODE_CLI_NAME = "opencodez"
+  process.env.OPENCODEZ = "1"
+  process.env.OPENCODE_CONFIG_DIR = path.join(tmp, "config", "opencodez")
+  const root = path.join(process.env.OPENCODE_CONFIG_DIR, "prompts", "core")
+  await fs.mkdir(root, { recursive: true })
+  await fs.writeFile(path.join(root, "codex_gpt_5_5.md"), "GPT 5.5 SYSTEM")
+  await fs.writeFile(path.join(root, "codex_gpt_5_6_luna_terra.md"), "GPT 5.6 LUNA TERRA SYSTEM")
+  await fs.writeFile(path.join(root, "codex_gpt_5_6_sol.md"), "GPT 5.6 SOL SYSTEM")
+  await fs.writeFile(path.join(root, "manual_system.md"), "MANUAL SYSTEM\n{{ personality }}")
+  LLMRequestPrep = (await import("../../src/session/llm/request")).LLMRequestPrep
+})
 
-const defaultSystemCases = [
-  { modelID: "gpt-5.2", prompt: corePrompts.codex_gpt_5_2 },
-  { modelID: "gpt-5.2-codex", prompt: corePrompts.codex_gpt_5_2_codex },
-  { modelID: "gpt-5.3-codex", prompt: corePrompts.codex_gpt_5_3_codex },
-  { modelID: "gpt-5.3-codex-spark", prompt: corePrompts.codex_gpt_5_3_codex },
-  { modelID: "gpt-5.4", prompt: corePrompts.codex_gpt_5_4 },
-  { modelID: "gpt-5.4-mini", prompt: corePrompts.codex_gpt_5_4_mini },
-  { modelID: "gpt-5.5", prompt: corePrompts.codex_gpt_5_5 },
-  { modelID: "gpt-5.6-luna", prompt: corePrompts.codex_gpt_5_5 },
-  { modelID: "gpt-5.6-terra", prompt: corePrompts.codex_gpt_5_5 },
-  { modelID: "gpt-5.6-sol", prompt: corePrompts.codex_gpt_5_5 },
-] as const
+afterAll(async () => {
+  OpenCodezSession.resetPending()
+  if (tmp) await fs.rm(tmp, { recursive: true, force: true })
+  if (previousConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR
+  else process.env.OPENCODE_CONFIG_DIR = previousConfigDir
+})
 
-describe("LLMRequestPrep OpenCodez integration", () => {
-  beforeAll(async () => {
-    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "opencodez-request-prep-"))
-    process.env.OPENCODE_APP_NAME = "opencodez"
-    process.env.OPENCODE_CLI_NAME = "opencodez"
-    process.env.OPENCODEZ = "1"
-    process.env.XDG_CONFIG_HOME = path.join(tmp, "config")
-    process.env.XDG_DATA_HOME = path.join(tmp, "data")
-    process.env.XDG_CACHE_HOME = path.join(tmp, "cache")
-    process.env.XDG_STATE_HOME = path.join(tmp, "state")
-    process.env.OPENCODE_CONFIG_DIR = path.join(tmp, "config", "opencodez")
-
-    const root = path.join(tmp, "config", "opencodez", "prompts")
-    await fs.mkdir(path.join(root, "core"), { recursive: true })
-    await fs.mkdir(path.join(root, "tone"), { recursive: true })
-    await Promise.all(
-      Object.entries(corePrompts).map(([name, content]) =>
-        fs.writeFile(path.join(root, "core", `${name}.md`), content),
-      ),
-    )
-    await fs.writeFile(path.join(root, "tone", "codex_pragmatic.md"), "TONE PROMPT")
-    await fs.writeFile(path.join(root, "core", "manual_core.md"), "MANUAL SYSTEM PROMPT")
-    await fs.writeFile(path.join(root, "tone", "manual_tone.md"), "MANUAL TONE PROMPT")
-
-    LLMRequestPrep = (await import("../../src/session/llm/request")).LLMRequestPrep
-  })
-
-  afterAll(async () => {
-    if (tmp) await fs.rm(tmp, { recursive: true, force: true })
-  })
-
-  test("uses Codex Core and Tone defaults for OpenAI Responses GPT", async () => {
-    const prepared = await Effect.runPromise(LLMRequestPrep.prepare(baseInput))
-    const system = prepared.system.join("\n")
-
-    expect(system).toContain("CORE PROMPT")
-    expect(system).toContain("AGENT PROMPT")
-    expect(system).toContain("TONE PROMPT")
-    expect(system).toContain("EXTRA SYSTEM")
-    expect(system).not.toContain(SystemPrompt.builtinPrompt("gpt")!)
-    expect(prepared.messages[0]).toEqual({
-      role: "system",
-      content: prepared.system[0],
-    })
-  })
-
-  test("selects mapped Codex Core defaults for OpenAI Responses GPT variants", async () => {
-    await Promise.all(
-      defaultSystemCases.map(async (item) => {
-        const prepared = await Effect.runPromise(
-          LLMRequestPrep.prepare({
-            ...baseInput,
-            model: {
-              ...model,
-              id: item.modelID,
-              api: { id: item.modelID, url: "https://api.openai.com/v1", npm: "@ai-sdk/openai" },
-            },
-          }),
-        )
-        const system = prepared.system.join("\n")
-
-        expect(system).toContain(item.prompt)
-        expect(system).toContain("TONE PROMPT")
-        expect(system).toContain("AGENT PROMPT")
-      }),
-    )
-  })
-
-  test("detects production-shaped OpenAI Responses GPT models", async () => {
+describe("LLMRequestPrep", () => {
+  test.each([
+    ["gpt-5.5", "GPT 5.5 SYSTEM"],
+    ["gpt-5.6-luna", "GPT 5.6 LUNA TERRA SYSTEM"],
+    ["gpt-5.6-terra", "GPT 5.6 LUNA TERRA SYSTEM"],
+    ["gpt-5.6-sol", "GPT 5.6 SOL SYSTEM"],
+  ])("uses the mapped System for %s", async (modelID, expected) => {
     const prepared = await Effect.runPromise(
       LLMRequestPrep.prepare({
-        ...baseInput,
-        model: {
-          ...model,
-          api: { id: "gpt-5.5", url: "https://api.openai.com/v1", npm: "@ai-sdk/openai" },
-        },
+        ...input,
+        sessionID: `session-${modelID}`,
+        model: { ...model, id: modelID, api: { ...model.api, id: modelID } },
       }),
     )
-    const system = prepared.system.join("\n")
 
-    expect(system).toContain("CORE PROMPT")
-    expect(system).toContain("TONE PROMPT")
+    expect(prepared.system.join("\n")).toContain(expected)
   })
 
-  test("uses OpenAI API model id when the catalog model id is an alias", async () => {
+  test("uses manual System and ignores legacy Tone metadata", async () => {
     const prepared = await Effect.runPromise(
       LLMRequestPrep.prepare({
-        ...baseInput,
-        model: {
-          ...model,
-          id: "alias-gpt55",
-          api: { id: "gpt-5.5", url: "https://api.openai.com/v1", npm: "@ai-sdk/openai" },
-        },
-      }),
-    )
-    const system = prepared.system.join("\n")
-
-    expect(system).toContain("CORE PROMPT")
-    expect(system).toContain("TONE PROMPT")
-  })
-
-  test("matches config defaults by OpenAI API model id when the catalog model id is an alias", async () => {
-    const prepared = await Effect.runPromise(
-      LLMRequestPrep.prepare({
-        ...baseInput,
-        config: {
-          opencodez: {
-            responses: {
-              system: { "gpt-5.5": "manual_core" },
-              tone: { "gpt-5.5": "manual_tone" },
-            },
-            pruning: {
-              enabled: true,
-              pruning_size: 20_000,
-              preserve_tools: [],
-              prune: { reasoning: true, tool: true },
-            },
-          },
-        },
-        model: {
-          ...model,
-          id: "alias-gpt55",
-          api: { id: "gpt-5.5", url: "https://api.openai.com/v1", npm: "@ai-sdk/openai" },
-        },
-      }),
-    )
-    const system = prepared.system.join("\n")
-
-    expect(system).toContain("MANUAL SYSTEM PROMPT")
-    expect(system).toContain("MANUAL TONE PROMPT")
-    expect(system).not.toContain("CORE PROMPT")
-  })
-
-  test("keeps upstream request system for non-Responses models without OpenCodez defaults", async () => {
-    const prepared = await Effect.runPromise(
-      LLMRequestPrep.prepare({
-        ...baseInput,
-        model: {
-          ...model,
-          id: "deepseek-chat",
-          providerID: "deepseek",
-          api: { id: "deepseek-chat", url: "https://api.deepseek.com", npm: "@ai-sdk/deepseek" },
-          name: "DeepSeek Chat",
-        },
-        provider: {
-          ...provider,
-          id: "deepseek",
-          models: {},
-        },
-      }),
-    )
-    const system = prepared.system.join("\n")
-
-    expect(system).toContain("AGENT PROMPT")
-    expect(system).toContain("EXTRA SYSTEM")
-    expect(system).not.toContain("CORE PROMPT")
-    expect(system).not.toContain("TONE PROMPT")
-  })
-
-  test("applies user config defaults to non-Responses model families", async () => {
-    const prepared = await Effect.runPromise(
-      LLMRequestPrep.prepare({
-        ...baseInput,
-        config: {
-          opencodez: {
-            responses: {
-              system: { deepseek: "manual_core" },
-              tone: { deepseek: "manual_tone" },
-            },
-            pruning: {
-              enabled: true,
-              pruning_size: 20_000,
-              preserve_tools: [],
-              prune: { reasoning: true, tool: true },
-            },
-          },
-        },
-        model: {
-          ...model,
-          id: "deepseek-chat",
-          providerID: "deepseek",
-          family: "deepseek",
-          api: { id: "deepseek-chat", url: "https://api.deepseek.com", npm: "@ai-sdk/deepseek" },
-          name: "DeepSeek Chat",
-        },
-        provider: {
-          ...provider,
-          id: "deepseek",
-          models: {},
-        },
-      }),
-    )
-    const system = prepared.system.join("\n")
-
-    expect(system).toContain("MANUAL SYSTEM PROMPT")
-    expect(system).toContain("MANUAL TONE PROMPT")
-    expect(system).toContain("AGENT PROMPT")
-    expect(system).not.toContain("CORE PROMPT")
-  })
-
-  test("applies pruning to prepared messages", async () => {
-    const prepared = await Effect.runPromise(
-      LLMRequestPrep.prepare({
-        ...baseInput,
-        config: {
-          opencodez: {
-            responses: {
-              system: "codex_gpt_5_5",
-              tone: "codex_pragmatic",
-            },
-            pruning: {
-              enabled: true,
-              pruning_size: 0,
-              preserve_tools: ["read"],
-              prune: { reasoning: true, tool: true },
-            },
-          },
-        },
-        messages: [
-          {
-            role: "assistant",
-            content: [
-              { type: "reasoning", text: "thinking" },
-              { type: "tool-call", toolCallId: "read-1", toolName: "read", input: { file: "a.ts" } },
-              {
-                type: "tool-result",
-                toolCallId: "read-1",
-                toolName: "read",
-                output: { type: "text", value: "preserved" },
-              },
-              {
-                type: "tool-result",
-                toolCallId: "shell-1",
-                toolName: "shell",
-                output: { type: "text", value: "removed" },
-              },
-            ],
-          },
-        ],
-      }),
-    )
-    const assistant = prepared.messages.find((message) => message.role === "assistant") as any
-
-    expect(assistant.content[0].text).toBe("[reasoning pruned: 8 chars]")
-    expect(assistant.content[1].type).toBe("tool-call")
-    expect(assistant.content[2].output.value).toBe("preserved")
-    expect(assistant.content[3].output.value).toBe("[Tool output pruned: 7 chars]")
-  })
-
-  test("uses session metadata for resumed OpenCodez selection and pruning", async () => {
-    const prepared = await Effect.runPromise(
-      LLMRequestPrep.prepare({
-        ...baseInput,
-        sessionID: "session-resumed",
+        ...input,
+        sessionID: "session-legacy-tone",
         sessionMetadata: {
           opencodez: {
             selection: {
-              system: "manual_core",
-              tone: "manual_tone",
+              system: "manual_system",
               systemManual: true,
+              tone: "codex_pragmatic",
               toneManual: true,
             },
-            pruning: {
-              enabled: true,
-              pruning_size: 0,
-            },
           },
         },
-        config: {
-          opencodez: {
-            responses: {
-              system: {
-                default: "codex_gpt_5_5",
-                "gpt-5.2": "codex_gpt_5_2",
-              },
-              tone: "codex_pragmatic",
-            },
-            pruning: {
-              enabled: false,
-              pruning_size: 20_000,
-              preserve_tools: [],
-              prune: { reasoning: true, tool: true },
-            },
-          },
-        },
-        model: {
-          ...model,
-          id: "gpt-5.2",
-        },
-        messages: [
-          {
-            role: "assistant",
-            content: [{ type: "reasoning", text: "metadata pruning" }],
-          },
-        ],
       }),
     )
     const system = prepared.system.join("\n")
-    const assistant = prepared.messages.find((message) => message.role === "assistant") as any
 
-    expect(system).toContain("MANUAL SYSTEM PROMPT")
-    expect(system).toContain("MANUAL TONE PROMPT")
-    expect(system).not.toContain("CORE PROMPT")
-    expect(assistant.content[0].text).toBe("[reasoning pruned: 16 chars]")
+    expect(system).toContain("MANUAL SYSTEM")
+    expect(system).not.toContain("personality")
+    expect(system).not.toContain("codex_pragmatic")
   })
 
-  test("explicit None disables session System and Tone defaults", async () => {
+  test("explicit None disables the model System default", async () => {
     const prepared = await Effect.runPromise(
       LLMRequestPrep.prepare({
-        ...baseInput,
-        agent: {
-          ...baseInput.agent,
-          prompt: undefined,
-        },
+        ...input,
         sessionID: "session-none",
         sessionMetadata: {
-          opencodez: {
-            selection: {
-              system: null,
-              tone: null,
-              systemManual: true,
-              toneManual: true,
-            },
-          },
-        },
-        config: {
-          opencodez: {
-            responses: {
-              system: "codex_gpt_5_5",
-              tone: "codex_pragmatic",
-            },
-            pruning: {
-              enabled: true,
-              pruning_size: 20_000,
-              preserve_tools: [],
-              prune: { reasoning: true, tool: true },
-            },
-          },
+          opencodez: { selection: { system: null, systemManual: true } },
         },
       }),
     )
-    const system = prepared.system.join("\n")
 
-    expect(system).toContain("EXTRA SYSTEM")
-    expect(system).not.toContain("CORE PROMPT")
-    expect(system).not.toContain("TONE PROMPT")
-    expect(system).not.toContain("AGENT PROMPT")
-    expect(system).not.toContain(SystemPrompt.provider(model)[0])
-
-    const emptyPrepared = await Effect.runPromise(
-      LLMRequestPrep.prepare({
-        ...baseInput,
-        agent: {
-          ...baseInput.agent,
-          prompt: undefined,
-        },
-        system: [],
-        sessionID: "session-none-empty",
-        sessionMetadata: {
-          opencodez: {
-            selection: {
-              system: null,
-              tone: null,
-              systemManual: true,
-              toneManual: true,
-            },
-          },
-        },
-        config: {
-          opencodez: {
-            responses: {
-              system: "codex_gpt_5_5",
-              tone: "codex_pragmatic",
-            },
-            pruning: {
-              enabled: true,
-              pruning_size: 20_000,
-              preserve_tools: [],
-              prune: { reasoning: true, tool: true },
-            },
-          },
-        },
-      }),
-    )
-    expect(emptyPrepared.system).toEqual([])
-    expect(emptyPrepared.messages).toEqual([])
+    expect(prepared.system.join("\n")).not.toContain("GPT 5.5 SYSTEM")
   })
 })

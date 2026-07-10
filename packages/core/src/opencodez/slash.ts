@@ -2,10 +2,6 @@ export * as OpenCodezSlash from "./slash"
 
 export type Command =
   | { type: "system"; name?: string }
-  | { type: "tone"; name?: string }
-  | { type: "template"; name?: string }
-  | { type: "prompts" }
-  | { type: "new"; system?: string; tone?: string; template?: string; error?: string }
   | { type: "pruning"; action?: "on" | "off" | "size"; size?: number; error?: string }
 
 export function parse(input: string): Command | undefined {
@@ -17,48 +13,11 @@ export function parse(input: string): Command | undefined {
   switch (head) {
     case "/system":
       return { type: "system", name: rest[0] }
-    case "/tone":
-      return { type: "tone", name: rest[0] }
-    case "/template":
-      return { type: "template", name: rest[0] }
-    case "/prompts":
-      return { type: "prompts" }
-    case "/new":
-      return parseNew(rest)
     case "/pruning":
       return parsePruning(rest)
     default:
       return
   }
-}
-
-function parseNew(args: string[]): Command {
-  let system: string | undefined
-  let tone: string | undefined
-  let template: string | undefined
-  for (let index = 0; index < args.length; index++) {
-    const arg = args[index]
-    const value = args[index + 1]
-    if (arg === "--system" || arg === "-s") {
-      system = value
-      index++
-      continue
-    }
-    if (arg === "--tone" || arg === "-o") {
-      tone = value
-      index++
-      continue
-    }
-    if (arg === "--template" || arg === "-t") {
-      template = value
-      index++
-      continue
-    }
-  }
-  if (template && (system || tone)) {
-    return { type: "new", error: "--template cannot be combined with --system or --tone." }
-  }
-  return { type: "new", system, tone, template }
 }
 
 function parsePruning(args: string[]): Command {

@@ -4,9 +4,8 @@ import CODEX_GPT_5_3_CODEX from "./core/codex_gpt_5_3_codex.md" with { type: "te
 import CODEX_GPT_5_4 from "./core/codex_gpt_5_4.md" with { type: "text" }
 import CODEX_GPT_5_4_MINI from "./core/codex_gpt_5_4_mini.md" with { type: "text" }
 import CODEX_GPT_5_5 from "./core/codex_gpt_5_5.md" with { type: "text" }
-import CODEX_FRIENDLY from "./tone/codex_friendly.md" with { type: "text" }
-import CODEX_PRAGMATIC from "./tone/codex_pragmatic.md" with { type: "text" }
-import GPT55 from "./templates/gpt55.jsonc" with { type: "text" }
+import CODEX_GPT_5_6_LUNA_TERRA from "./core/codex_gpt_5_6_luna_terra.md" with { type: "text" }
+import CODEX_GPT_5_6_SOL from "./core/codex_gpt_5_6_sol.md" with { type: "text" }
 
 export const defaultPromptAssets = {
   core: {
@@ -16,12 +15,7 @@ export const defaultPromptAssets = {
     "codex_gpt_5_4.md": CODEX_GPT_5_4,
     "codex_gpt_5_4_mini.md": CODEX_GPT_5_4_MINI,
     "codex_gpt_5_5.md": CODEX_GPT_5_5,
-  },
-  tone: {
-    "codex_friendly.md": CODEX_FRIENDLY,
-    "codex_pragmatic.md": CODEX_PRAGMATIC,
-  },
-  templates: {
-    "gpt55.jsonc": GPT55,
+    "codex_gpt_5_6_luna_terra.md": CODEX_GPT_5_6_LUNA_TERRA,
+    "codex_gpt_5_6_sol.md": CODEX_GPT_5_6_SOL,
   },
 } as const

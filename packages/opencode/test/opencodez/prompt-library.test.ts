@@ -15,16 +15,16 @@ describe("OpenCodez prompt library", () => {
     else process.env.OPENCODE_CONFIG_DIR = previousConfigDir
   })
 
-  test("lists upstream builtins, Codex presets, and custom Core prompts together", async () => {
+  test("lists upstream builtins, Codex presets, and custom System prompts together", async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "opencodez-prompt-library-"))
     process.env.OPENCODE_CONFIG_DIR = path.join(tmp, "config", "opencodez")
     const { OpenCodezPromptLibrary } = await import("../../src/opencodez/prompt-library")
     const dirs = OpenCodezPromptLibrary.directories()
 
-    await fs.mkdir(dirs.core, { recursive: true })
-    await fs.writeFile(path.join(dirs.core, "custom_core.md"), "CUSTOM CORE")
+    await fs.mkdir(dirs.system, { recursive: true })
+    await fs.writeFile(path.join(dirs.system, "custom_system.md"), "CUSTOM SYSTEM")
 
-    const entries = await OpenCodezPromptLibrary.list("core")
+    const entries = await OpenCodezPromptLibrary.list()
     const names = entries.map((entry) => entry.name)
 
     expect(names).toContain("default")
@@ -36,23 +36,11 @@ describe("OpenCodez prompt library", () => {
     expect(names).toContain("codex_gpt_5_4")
     expect(names).toContain("codex_gpt_5_4_mini")
     expect(names).toContain("codex_gpt_5_5")
-    expect(names).toContain("custom_core")
-    expect(await OpenCodezPromptLibrary.readPrompt("core", "default")).toBe(SystemPrompt.builtinPrompt("default"))
-    expect(await OpenCodezPromptLibrary.readPrompt("core", "custom_core")).toBe("CUSTOM CORE")
-  })
-
-  test("materializes the complete bundled Tone preset set", async () => {
-    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "opencodez-prompt-library-"))
-    process.env.OPENCODE_CONFIG_DIR = path.join(tmp, "config", "opencodez")
-    const { OpenCodezPromptLibrary } = await import("../../src/opencodez/prompt-library")
-
-    const entries = await OpenCodezPromptLibrary.list("tone")
-    const names = entries.map((entry) => entry.name)
-
-    expect(names).toContain("codex_friendly")
-    expect(names).toContain("codex_pragmatic")
-    expect(await OpenCodezPromptLibrary.readPrompt("tone", "codex_friendly")).toContain("supportive teammate")
-    expect(await OpenCodezPromptLibrary.readPrompt("tone", "codex_pragmatic")).toContain("pragmatic")
+    expect(names).toContain("codex_gpt_5_6_luna_terra")
+    expect(names).toContain("codex_gpt_5_6_sol")
+    expect(names).toContain("custom_system")
+    expect(await OpenCodezPromptLibrary.readPrompt("default")).toBe(SystemPrompt.builtinPrompt("default"))
+    expect(await OpenCodezPromptLibrary.readPrompt("custom_system")).toBe("CUSTOM SYSTEM")
   })
 
   test("lets prompt library files override builtin Core prompt names", async () => {
@@ -61,12 +49,12 @@ describe("OpenCodez prompt library", () => {
     const { OpenCodezPromptLibrary } = await import("../../src/opencodez/prompt-library")
     const dirs = OpenCodezPromptLibrary.directories()
 
-    await fs.mkdir(dirs.core, { recursive: true })
-    await fs.writeFile(path.join(dirs.core, "default.md"), "CUSTOM DEFAULT")
+    await fs.mkdir(dirs.system, { recursive: true })
+    await fs.writeFile(path.join(dirs.system, "default.md"), "CUSTOM DEFAULT")
 
-    const entry = await OpenCodezPromptLibrary.get("core", "default")
+    const entry = await OpenCodezPromptLibrary.get("default")
 
     expect(entry?.source).toBe("library")
-    expect(await OpenCodezPromptLibrary.readPrompt("core", "default")).toBe("CUSTOM DEFAULT")
+    expect(await OpenCodezPromptLibrary.readPrompt("default")).toBe("CUSTOM DEFAULT")
   })
 })

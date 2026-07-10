@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.17.18+opencodez.3
+
+Removed Tone and Template as OpenCodez concepts across config, session state, request preparation, TUI, web, API, SDK, bundled assets, and documentation. OpenCodez prompt control now selects only the active System prompt; legacy Tone/Template metadata is ignored safely.
+
+Updated GPT 5.5 to the official Codex system prompt and added the official Codex `0.144.1` system prompts for GPT 5.6 Luna/Terra and Sol. Luna and Terra share one prompt; Sol uses its own prompt with its official embedded Personality section.
+
 ## 1.17.18+opencodez.2
 
 Fixed self-update when the download workspace and installed binary are on different filesystems. The updater now copies into a temporary file beside the target before the atomic replacement.
