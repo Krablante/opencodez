@@ -19,7 +19,7 @@ on:
         type: boolean
   push:
     tags:
-      - "v*+opencodez.*"
+      - 'v*\+opencodez.*'
 
 concurrency: publish-${{ github.ref }}-${{ inputs.release_version || github.ref_name }}
 
