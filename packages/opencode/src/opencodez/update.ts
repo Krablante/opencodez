@@ -217,13 +217,48 @@ async function installAsset(input: { name: string; bytes: Uint8Array; target: st
       await fs.rename(archive, binary)
     }
     await fs.chmod(binary, 0o755)
-    await fs.copyFile(binary, tmp)
-    await fs.chmod(tmp, 0o755)
-    await fs.rename(tmp, input.target)
+    try {
+      await fs.copyFile(binary, tmp)
+      await fs.chmod(tmp, 0o755)
+      await fs.rename(tmp, input.target)
+    } catch (error) {
+      await fs.rm(tmp, { force: true })
+      if (process.platform === "win32" || !isPermissionError(error)) throw error
+      await installWithSudo({ binary, target: input.target, tmp })
+    }
   } finally {
     await fs.rm(tmp, { force: true })
     await fs.rm(work, { recursive: true, force: true })
   }
+}
+
+async function installWithSudo(input: { binary: string; target: string; tmp: string }) {
+  try {
+    await runSudo(["install", "-m", "0755", input.binary, input.tmp])
+    await runSudo(["mv", "-f", input.tmp, input.target])
+  } catch (error) {
+    await runSudo(["rm", "-f", input.tmp]).catch(() => undefined)
+    throw new Error(
+      `Cannot replace protected install target ${input.target}: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
+async function runSudo(args: string[]) {
+  const proc = Bun.spawn(["sudo", "--", ...args], {
+    stdin: "inherit",
+    stdout: "ignore",
+    stderr: "inherit",
+  })
+  const exit = await proc.exited
+  if (exit === 0) return
+  throw new Error(`sudo ${args[0]} failed with exit code ${exit}`)
+}
+
+function isPermissionError(error: unknown) {
+  if (!error || typeof error !== "object" || !("code" in error)) return false
+  const code = String(error.code)
+  return code === "EACCES" || code === "EPERM"
 }
 
 async function extractTarGz(input: { archive: string; work: string; binary: string }) {
