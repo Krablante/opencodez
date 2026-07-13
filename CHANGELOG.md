@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.17.20+opencodez.2
+
+Fixed `opencodez update` for protected system-wide installations such as `/usr/local/bin/opencodez`. User-writable installations still use the existing direct atomic replacement; protected Unix targets now fall back to `sudo` for an atomic install without changing the update command.
+
 ## 1.17.20+opencodez.1
 
 Merged upstream OpenCode `1.17.20` into OpenCodez.
