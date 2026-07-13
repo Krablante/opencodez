@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.17.20+opencodez.1
+
+Merged upstream OpenCode `1.17.20` into OpenCodez.
+
+Preserved the complete OpenCodez custom layer: isolated identity and runtime roots, bundled public Codex system prompts, per-session prompt selection, request-local context pruning, locally packed Web UI, seeded server connections, MCP visibility fixes, fork-specific updater and release assets, non-git project boundaries, and default-disabled FFF indexing. Politia-local prompts remain external to the public repository and release artifacts.
+
+Upstream changes include terminal-only client and TUI fixes, refreshed web and desktop interfaces, provider and reasoning updates, GPT 5.6 model limits, Azure AI Foundry support, safer FFF cache defaults, and removal of the temporary Responses Lite compatibility layer now handled by the backend.
+
 ## 1.17.18+opencodez.3
 
 Removed Tone and Template as OpenCodez concepts across config, session state, request preparation, TUI, web, API, SDK, bundled assets, and documentation. OpenCodez prompt control now selects only the active System prompt; legacy Tone/Template metadata is ignored safely.
