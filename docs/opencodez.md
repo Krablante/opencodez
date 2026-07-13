@@ -24,7 +24,7 @@ variables use the `OPENCODEZ_` prefix.
 Install from the public fork:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install | bash
+curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install.sh | bash
 ```
 
 Update an installed binary from GitHub Releases:
@@ -33,8 +33,13 @@ Update an installed binary from GitHub Releases:
 opencodez update
 ```
 
+On Unix, the updater uses `sudo` only when the current binary is installed in a
+protected system path. Installations older than `1.17.20+opencodez.2` require
+one bootstrap run with `sudo opencodez update`; later releases elevate only the
+atomic replacement step automatically.
+
 Release versions use the upstream base plus OpenCodez build metadata, for
-example `1.17.18+opencodez.3`. The release tag and embedded binary version must
+example `1.17.20+opencodez.2`. The release tag and embedded binary version must
 match exactly.
 
 ## System Prompt Library
