@@ -89,6 +89,10 @@ The update path is intentionally simple: GitHub Releases are the source of truth
 During the download, `opencodez update` prints progress to stderr. When GitHub
 provides `Content-Length`, progress includes total MB and percent; otherwise it
 prints downloaded MB only.
+On Unix, OpenCodez asks for `sudo` only when the installed binary is in a
+protected system path such as `/usr/local/bin`. Installations older than
+`1.17.20+opencodez.2` need one bootstrap update with `sudo opencodez update`;
+later releases handle the protected target automatically.
 If the installed binary is newer than the latest published release, `opencodez update` treats it as current instead of downgrading it.
 
 ## Run From Source
