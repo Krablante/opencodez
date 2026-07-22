@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.18.4+opencodez.1
+
+Merged upstream OpenCode `1.18.4` into OpenCodez.
+
+Preserved the complete OpenCodez custom layer: isolated identity and runtime roots, bundled public Codex system prompts, per-session System selection, request-local pruning, locally packed Web UI, seeded server connections, MCP visibility, fork-specific updater and release assets, non-git project boundaries, and default-disabled FFF indexing. Politia-local prompts remain external to the public repository and release artifacts.
+
+Adapted System selection to the upstream Web/Desktop v2 prompt composer through one shared control used by both composer generations. New-session prompt metadata and existing-session selection remain consistent across both interfaces.
+
+Added an optional managed-host install helper for atomic passwordless replacement of `/usr/local/bin/opencodez`. Ordinary public installations keep the existing interactive sudo fallback, so `opencodez update` remains the only update command.
+
+Upstream changes include the Web/Desktop v2 layout and prompt-input migration, configurable subagent depth, provider reasoning fixes, WSL and desktop reliability improvements, and refreshed SDK/OpenAPI surfaces.
+
 ## 1.17.20+opencodez.2
 
 Fixed `opencodez update` for protected system-wide installations such as `/usr/local/bin/opencodez`. User-writable installations still use the existing direct atomic replacement; protected Unix targets now fall back to `sudo` for an atomic install without changing the update command.

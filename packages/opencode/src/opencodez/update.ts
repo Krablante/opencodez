@@ -6,6 +6,7 @@ import { isCurrentOrNewerOpenCodezVersion } from "@opencode-ai/core/opencodez/ve
 
 const RELEASE_REPOSITORY = process.env["OPENCODEZ_UPDATE_REPOSITORY"] ?? "Krablante/opencodez"
 const RELEASES_API = `https://api.github.com/repos/${RELEASE_REPOSITORY}/releases/latest`
+const MANAGED_INSTALL_HELPER = "/usr/local/sbin/opencodez-install"
 
 const Asset = z.object({
   name: z.string(),
@@ -234,6 +235,7 @@ async function installAsset(input: { name: string; bytes: Uint8Array; target: st
 
 async function installWithSudo(input: { binary: string; target: string; tmp: string }) {
   try {
+    if (input.target === "/usr/local/bin/opencodez" && (await tryManagedInstall(input.binary))) return
     await runSudo(["install", "-m", "0755", input.binary, input.tmp])
     await runSudo(["mv", "-f", input.tmp, input.target])
   } catch (error) {
@@ -242,6 +244,20 @@ async function installWithSudo(input: { binary: string; target: string; tmp: str
       `Cannot replace protected install target ${input.target}: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
+}
+
+async function tryManagedInstall(binary: string) {
+  const available = await fs
+    .stat(MANAGED_INSTALL_HELPER)
+    .then((stat) => stat.isFile())
+    .catch(() => false)
+  if (!available) return false
+  const proc = Bun.spawn(["sudo", "-n", "--", MANAGED_INSTALL_HELPER, binary], {
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "inherit",
+  })
+  return (await proc.exited) === 0
 }
 
 async function runSudo(args: string[]) {

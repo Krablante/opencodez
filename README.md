@@ -93,6 +93,10 @@ On Unix, OpenCodez asks for `sudo` only when the installed binary is in a
 protected system path such as `/usr/local/bin`. Installations older than
 `1.17.20+opencodez.2` need one bootstrap update with `sudo opencodez update`;
 later releases handle the protected target automatically.
+Managed deployments may install the narrow `/usr/local/sbin/opencodez-install`
+helper. When present, `opencodez update` uses it non-interactively to replace
+only `/usr/local/bin/opencodez`; ordinary public installs keep the interactive
+sudo fallback.
 If the installed binary is newer than the latest published release, `opencodez update` treats it as current instead of downgrading it.
 
 ## Run From Source
@@ -105,7 +109,7 @@ For local development, run the source-checkout launcher directly:
 ```
 
 Release builds should set `OPENCODEZ_BUILD=1` so the build script emits `opencodez-*` artifacts with an `opencodez` binary inside.
-Normal public releases should use the `publish` GitHub Actions workflow. Give it an OpenCodez release version such as `1.17.18+opencodez.3`; the release version must include `opencodez` so accidental upstream-looking tags are rejected. The workflow embeds that complete version by default, builds the `opencodez-*` assets, verifies their names and archive contents, uploads them to GitHub Releases, and publishes the release unless `draft` is enabled.
+Normal public releases should use the `publish` GitHub Actions workflow. Give it an OpenCodez release version such as `1.18.4+opencodez.1`; the release version must include `opencodez` so accidental upstream-looking tags are rejected. The workflow embeds that complete version by default, builds the `opencodez-*` assets, verifies their names and archive contents, uploads them to GitHub Releases, and publishes the release unless `draft` is enabled.
 
 ## Side-by-Side With OpenCode
 

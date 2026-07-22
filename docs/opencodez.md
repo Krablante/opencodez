@@ -38,8 +38,13 @@ protected system path. Installations older than `1.17.20+opencodez.2` require
 one bootstrap run with `sudo opencodez update`; later releases elevate only the
 atomic replacement step automatically.
 
+Managed hosts can install `/usr/local/sbin/opencodez-install` with a scoped
+sudoers rule. The updater prefers that helper for a non-interactive atomic
+replacement of `/usr/local/bin/opencodez`, then falls back to the normal
+interactive sudo flow when the helper is absent.
+
 Release versions use the upstream base plus OpenCodez build metadata, for
-example `1.17.20+opencodez.2`. The release tag and embedded binary version must
+example `1.18.4+opencodez.1`. The release tag and embedded binary version must
 match exactly.
 
 ## System Prompt Library
@@ -54,6 +59,11 @@ in:
 Bundled files are copied only when missing, so user edits are preserved. The
 selector combines bundled Codex prompts, upstream OpenCode built-ins, and custom
 files from this directory.
+
+The same System selector is available in both generations of the Web/Desktop
+prompt composer. New sessions carry the selected prompt in submission metadata;
+existing sessions keep their server-side selection when models or layouts
+change.
 
 Bundled Codex-derived prompts include:
 
