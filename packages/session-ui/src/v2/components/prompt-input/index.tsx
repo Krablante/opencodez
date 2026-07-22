@@ -230,7 +230,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
                 </Show>
               }
             >
-              {props.modelControl}
+              {(control) => control()}
             </Show>
             <Show when={view.variant}>
               {(control) => (

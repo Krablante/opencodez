@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.18.4+opencodez.3
+
+Fixed the shared Web/Desktop System prompt selector after live validation in
+both composer generations. The control now uses a small lifecycle-independent
+Portal menu with outside-click and Escape handling, avoiding the v2 composer
+slot's popover-anchor remount behavior.
+
+Also fixed the upstream v2 `modelControl` slot to evaluate stateful controls
+once. This prevents duplicate Portal content while preserving the existing
+model selector contract.
+
 ## 1.18.4+opencodez.2
 
 Fixed a ProjectV2 regression discovered during live fleet validation: non-git

@@ -1,12 +1,12 @@
-import { Popover as KobaltePopover } from "@kobalte/core/popover"
 import { Icon } from "@opencode-ai/ui/icon"
 import type {
   OpenCodezPromptEntry,
   OpenCodezPromptModel,
   OpenCodezPromptState,
 } from "@opencode-ai/sdk/v2/client"
-import { For, Show, createEffect, createMemo, on, type Accessor, type Component, type JSX } from "solid-js"
+import { For, Show, createEffect, createMemo, on, onCleanup, type Accessor, type Component, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
+import { Portal } from "solid-js/web"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
 
@@ -27,6 +27,8 @@ type State = {
   entries: OpenCodezPromptEntry[]
   prompt?: OpenCodezPromptState
   metadata: Record<string, unknown>
+  left: number
+  bottom: number
 }
 
 export function createOpenCodezPromptControl(options: Options): {
@@ -42,8 +44,12 @@ export function createOpenCodezPromptControl(options: Options): {
     loaded: false,
     entries: [],
     metadata: {},
+    left: 8,
+    bottom: 8,
   })
   let search: HTMLInputElement | undefined
+  let trigger: HTMLButtonElement | undefined
+  let menu: HTMLDivElement | undefined
   let request = 0
 
   const refresh = async () => {
@@ -99,7 +105,17 @@ export function createOpenCodezPromptControl(options: Options): {
     setState({ entries, loaded: true })
   }
 
-  const setOpen = (open: boolean) => {
+  const position = () => {
+    const rect = trigger?.getBoundingClientRect()
+    if (!rect) return
+    setState({
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 296)),
+      bottom: Math.max(8, window.innerHeight - rect.top + 8),
+    })
+  }
+
+  const setOpen = (open: boolean, restore = true) => {
+    if (open) position()
     setState("open", open)
     if (open) {
       void load()
@@ -107,8 +123,36 @@ export function createOpenCodezPromptControl(options: Options): {
       return
     }
     setState("search", "")
-    options.restoreFocus()
+    if (restore) options.restoreFocus()
   }
+
+  createEffect(
+    on(
+      () => state.open,
+      (open) => {
+        if (!open) return
+        const pointer = (event: PointerEvent) => {
+          const target = event.target
+          if (!(target instanceof Node)) return
+          if (trigger?.contains(target) || menu?.contains(target)) return
+          setOpen(false, false)
+        }
+        const key = (event: KeyboardEvent) => {
+          if (event.key === "Escape") setOpen(false)
+        }
+        document.addEventListener("pointerdown", pointer)
+        document.addEventListener("keydown", key)
+        window.addEventListener("resize", position)
+        window.addEventListener("scroll", position, true)
+        onCleanup(() => {
+          document.removeEventListener("pointerdown", pointer)
+          document.removeEventListener("keydown", key)
+          window.removeEventListener("resize", position)
+          window.removeEventListener("scroll", position, true)
+        })
+      },
+    ),
+  )
 
   const select = async (name: string) => {
     const sessionID = options.sessionID()
@@ -136,19 +180,30 @@ export function createOpenCodezPromptControl(options: Options): {
   })
 
   const Control: Component = () => (
-    <KobaltePopover open={state.open} onOpenChange={setOpen} placement="top-start" gutter={8}>
-      <KobaltePopover.Trigger
+    <>
+      <button
+        ref={trigger}
+        type="button"
         data-action="prompt-system"
         class="h-6 min-w-0 max-w-[200px] px-2 flex items-center gap-1 rounded-md text-12-regular text-text-weak hover:text-text-strong hover:bg-surface-base-hover"
         style={options.style?.()}
         aria-label="Select System prompt"
+        aria-expanded={state.open}
+        onClick={() => setOpen(!state.open)}
       >
         <Icon name="prompt" size="small" />
         <span class="truncate">S: {state.prompt?.system ?? "default"}</span>
         <Icon name="chevron-down" size="small" />
-      </KobaltePopover.Trigger>
-      <KobaltePopover.Portal>
-        <KobaltePopover.Content class="z-50 w-72 overflow-hidden rounded-md border border-border-weak-base bg-background-base shadow-lg">
+      </button>
+      <Show when={state.open}>
+        <Portal>
+          <div
+            ref={menu}
+            role="dialog"
+            aria-label="Select System prompt"
+            class="fixed z-50 w-72 overflow-hidden rounded-md border border-border-weak-base bg-background-base shadow-lg"
+            style={{ left: `${state.left}px`, bottom: `${state.bottom}px` }}
+          >
           <div class="p-2 border-b border-border-weak-base">
             <input
               ref={search}
@@ -187,9 +242,10 @@ export function createOpenCodezPromptControl(options: Options): {
               </Show>
             </Show>
           </div>
-        </KobaltePopover.Content>
-      </KobaltePopover.Portal>
-    </KobaltePopover>
+          </div>
+        </Portal>
+      </Show>
+    </>
   )
 
   return {
