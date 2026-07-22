@@ -1,5 +1,5 @@
 name: publish
-run-name: "release ${{ inputs.release_version || github.ref_name }}"
+run-name: "release ${{ inputs.release_version }}"
 
 on:
   workflow_dispatch:
@@ -17,11 +17,8 @@ on:
         required: false
         default: false
         type: boolean
-  push:
-    tags:
-      - 'v*\+opencodez.*'
 
-concurrency: publish-${{ github.ref }}-${{ inputs.release_version || github.ref_name }}
+concurrency: publish-${{ github.ref }}-${{ inputs.release_version }}
 
 permissions:
   contents: write
@@ -45,15 +42,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            release_version="$INPUT_RELEASE_VERSION"
-            binary_version="$INPUT_BINARY_VERSION"
-            draft="$INPUT_DRAFT"
-          else
-            release_version="${GITHUB_REF_NAME#v}"
-            binary_version=""
-            draft="false"
-          fi
+          release_version="$INPUT_RELEASE_VERSION"
+          binary_version="$INPUT_BINARY_VERSION"
+          draft="$INPUT_DRAFT"
 
           release_version="${release_version#v}"
           if [[ -z "$binary_version" ]]; then

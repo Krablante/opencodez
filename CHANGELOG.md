@@ -7,6 +7,9 @@ directories now receive stable directory-scoped project IDs instead of sharing
 the global project ID. This prevents a server process first opened at `/` from
 widening later non-git workspaces back to the filesystem root.
 
+The publish workflow is now manual-only, preventing a published draft's tag
+from launching a second redundant build against an already existing release.
+
 ## 1.18.4+opencodez.1
 
 Merged upstream OpenCode `1.18.4` into OpenCodez.
