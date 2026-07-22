@@ -44,7 +44,7 @@ replacement of `/usr/local/bin/opencodez`, then falls back to the normal
 interactive sudo flow when the helper is absent.
 
 Release versions use the upstream base plus OpenCodez build metadata, for
-example `1.18.4+opencodez.1`. The release tag and embedded binary version must
+example `1.18.4+opencodez.2`. The release tag and embedded binary version must
 match exactly.
 
 ## System Prompt Library

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.18.4+opencodez.2
+
+Fixed a ProjectV2 regression discovered during live fleet validation: non-git
+directories now receive stable directory-scoped project IDs instead of sharing
+the global project ID. This prevents a server process first opened at `/` from
+widening later non-git workspaces back to the filesystem root.
+
 ## 1.18.4+opencodez.1
 
 Merged upstream OpenCode `1.18.4` into OpenCodez.

@@ -114,7 +114,10 @@ const layer = Layer.effect(
         const filesystemRoot = AbsolutePath.make(path.parse(input).root)
         // OpenCodez: keep non-git projects bounded.
         const directory = input === filesystemRoot ? AbsolutePath.make(os.homedir()) : input
-        return { id: ID.global, directory, vcs: undefined }
+        // Non-git directories must not share ID.global: instance state is keyed by
+        // project ID, so a process first opened at "/" could otherwise widen every
+        // later non-git workspace back to the filesystem root.
+        return { id: ID.make(Hash.fast(`local:${directory}`)), directory, vcs: undefined }
       }
 
       const previous = yield* cached(repo.commonDirectory)
