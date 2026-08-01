@@ -221,6 +221,25 @@ original task or adding a synthetic continuation message. Both paths start a
 safe full Responses request after the history replacement; later compatible
 turns can resume incremental continuation.
 
+The post-sampling trigger also follows Codex: crossing the token limit starts
+automatic compaction only when the model requires another sampling request,
+such as after a tool call. A completed final answer is not compacted merely
+because its final usage crossed the threshold. If the provider reports overflow
+after emitting durable reasoning, text, or tool work, that partial turn is
+treated as mid-turn and is included rather than discarded.
+
+The compact request reuses the same prepared effective System, plugin
+transformations, model options, and model-visible tool schemas as the sampling
+request. If user steering arrives around compaction, it remains pending: it is
+excluded from both compact input and the first mandatory post-compact
+continuation, then admitted normally. Before transport, OpenCodez estimates the
+complete compact payload and, only when it would exceed the model window,
+replaces contiguous oversized trailing tool outputs with the same bounded
+marker used by Codex. User messages, tool calls, and ordinary outputs are never
+summarized or dropped locally. The unary compact request uses Codex's 20-minute
+default deadline because compacting a near-full large context can legitimately
+take more than two minutes.
+
 If the provider itself reports context overflow while automatic compaction is
 enabled, that error is treated as an internal recovery trigger rather than
 surfaced as a failed user turn. Manual compaction still stops after writing the
@@ -266,17 +285,20 @@ OpenCodez config boundary:
   response item normalization, `previous_response_id`, and continuation
   invalidation.
 - `packages/opencode/src/opencodez/responses-compact.ts` builds the canonical
-  compact request with the existing Responses lowering and calls the remote
-  endpoint.
+  compact request with the existing Responses lowering, bounds only oversized
+  trailing tool output, and calls the remote endpoint.
 - `packages/opencode/src/opencodez/responses-compaction.ts` finds persisted
   compaction items, exposes them to the current request without writing a second
   state store, and injects them into the wire body. Direct mid-turn continuation
   uses one internal non-network marker to satisfy the AI SDK's non-empty prompt
   validation; the same adapter removes it before the request leaves the process.
-- `packages/opencode/src/session/prompt.ts` distinguishes pre-turn from mid-turn
-  pressure, while `packages/opencode/src/session/compaction.ts` keeps a pending
-  pre-turn message outside compact input and includes the complete active turn
-  for mid-turn compaction.
+- `packages/opencode/src/session/model-context.ts` is the shared preparation
+  boundary for effective System context, transformed history, and model-visible
+  tools used by both sampling and compact requests.
+- `packages/opencode/src/session/prompt.ts` owns the explicit follow-up and
+  durable-output decision, while `packages/opencode/src/session/compaction.ts`
+  owns pre-turn replay, complete mid-turn history, and the pending-input
+  boundary through the first post-compact continuation.
 - `packages/opencode/src/plugin/openai/ws-pool.ts` owns one continuation per
   session-and-account-affine socket and resets it on reconnect, login change,
   abort, failure, or concurrent HTTP fallback.

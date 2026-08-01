@@ -238,7 +238,12 @@ includes the current user request, assistant work, tool calls, and tool results,
 then continues the same model loop directly from OpenAI's opaque compacted state
 without a replacement user message or replayed task.
 A provider context-overflow used to trigger recovery is not surfaced as a failed
-turn.
+turn. Final answers do not trigger a redundant compact-and-continue merely for
+crossing the threshold. Compact requests use the same effective System and tool
+schemas as sampling; steering input waits until the mandatory post-compact
+continuation, and only oversized trailing tool outputs may be replaced to fit
+the request window. The remote request allows the same long unary deadline as
+Codex and still has no local-summary fallback.
 
 `opencodez.responses.compaction.threshold` is a fraction of the model's input
 window and defaults to the Codex policy of `0.9`. It accepts values greater than

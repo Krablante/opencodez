@@ -621,6 +621,7 @@ export type CompactionPart = {
   type: "compaction"
   auto: boolean
   phase?: "pre-turn" | "mid-turn"
+  turn_id?: string
   overflow?: boolean
   tail_start_id?: string
   remote?: {

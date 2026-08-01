@@ -31,6 +31,8 @@ export type Result = "compact" | "stop" | "continue"
 
 export interface Handle {
   readonly message: SessionV1.Assistant
+  readonly needsFollowUp?: boolean
+  readonly producedDurableOutput?: boolean
   readonly updateToolCall: (
     toolCallID: string,
     update: (part: SessionV1.ToolPart) => SessionV1.ToolPart,
@@ -72,6 +74,8 @@ interface ProcessorContext extends Input {
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
   reasoningMap: Record<string, SessionV1.ReasoningPart>
+  sawToolCall: boolean
+  producedDurableOutput: boolean
 }
 
 type StreamEvent = LLMEvent
@@ -111,6 +115,8 @@ const layer = Layer.effect(
         needsCompaction: false,
         currentText: undefined,
         reasoningMap: {},
+        sawToolCall: false,
+        producedDurableOutput: false,
       }
       let aborted = false
 
@@ -295,6 +301,7 @@ const layer = Layer.effect(
             // Match dev: silently drop orphan deltas (no preceding reasoning-start).
             if (!(value.id in ctx.reasoningMap)) return
             ctx.reasoningMap[value.id].text += value.text
+            if (value.text.length > 0) ctx.producedDurableOutput = true
             if (value.providerMetadata) ctx.reasoningMap[value.id].metadata = value.providerMetadata
             yield* session.updatePartDelta({
               sessionID: ctx.reasoningMap[value.id].sessionID,
@@ -333,6 +340,8 @@ const layer = Layer.effect(
               throw new Error(`Tool call not allowed while generating summary: ${value.name}`)
             }
             yield* ensureToolCall(value)
+            if (!value.providerExecuted) ctx.sawToolCall = true
+            ctx.producedDurableOutput = true
             const input = isRecord(value.input) ? value.input : { value: value.input }
             yield* updateToolCall(value.id, (match) => ({
               ...match,
@@ -474,7 +483,9 @@ const layer = Layer.effect(
                 messageID: ctx.assistantMessage.parentID,
               })
               .pipe(Effect.ignore, Effect.forkIn(scope))
+            const needsFollowUp = ctx.sawToolCall || value.reason === "tool-calls" || value.reason === "unknown"
             if (
+              needsFollowUp &&
               !ctx.assistantMessage.summary &&
               isOverflow({ cfg: yield* config.get(), tokens: usage.tokens, model: ctx.model })
             ) {
@@ -499,6 +510,7 @@ const layer = Layer.effect(
           case "text-delta":
             if (!ctx.currentText) return
             ctx.currentText.text += value.text
+            if (value.text.length > 0) ctx.producedDurableOutput = true
             if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
             yield* session.updatePartDelta({
               sessionID: ctx.currentText.sessionID,
@@ -684,6 +696,17 @@ const layer = Layer.effect(
       return {
         get message() {
           return ctx.assistantMessage
+        },
+        get needsFollowUp() {
+          return (
+            ctx.sawToolCall ||
+            ctx.assistantMessage.finish === "tool-calls" ||
+            ctx.assistantMessage.finish === "unknown" ||
+            (ctx.needsCompaction && ctx.producedDurableOutput)
+          )
+        },
+        get producedDurableOutput() {
+          return ctx.producedDurableOutput
         },
         updateToolCall,
         completeToolCall,

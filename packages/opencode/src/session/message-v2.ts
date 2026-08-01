@@ -562,6 +562,26 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
       )
     : -1
   const tailIndex = part?.tail_start_id ? result.findIndex((msg) => msg.info.id === part.tail_start_id) : -1
+  const turnID = part?.turn_id
+  if (
+    part?.remote?.providerID === "openai" &&
+    part.phase === "mid-turn" &&
+    turnID &&
+    part.tail_start_id &&
+    summaryIndex > compactionIndex
+  ) {
+    return result
+      .slice(compactionIndex)
+      .filter(
+        (message) =>
+          !(
+            message.info.role === "user" &&
+            message.info.id !== compaction?.info.id &&
+            message.info.id > turnID &&
+            !message.parts.some((item) => item.type === "compaction")
+          ),
+      )
+  }
   if (tailIndex >= 0 && tailIndex < compactionIndex && summaryIndex > compactionIndex) {
     return [
       ...result.slice(compactionIndex, summaryIndex + 1),

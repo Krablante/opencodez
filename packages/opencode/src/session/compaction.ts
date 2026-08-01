@@ -12,7 +12,7 @@ import { Plugin } from "@/plugin"
 import { Config } from "@/config/config"
 import { NotFoundError } from "@/storage/storage"
 
-import { Effect, Layer, Context } from "effect"
+import { Effect, Layer, Context, Option } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { isOverflow as overflow, usable } from "./overflow"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
@@ -25,8 +25,18 @@ import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-e
 import { Auth } from "@/auth"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 import { OpenCodezResponsesCompact } from "@/opencodez/responses-compact"
+import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
 import { SystemPrompt } from "./system"
 import { Usage } from "@opencode-ai/llm"
+import type { TaskPromptOps } from "@/tool/task"
+import { SessionModelContext } from "./model-context"
+import { LLMRequestPrep } from "./llm/request"
+import { Instruction } from "./instruction"
+import { Permission } from "@/permission"
+import { ToolRegistry } from "@/tool/registry"
+import { MCP } from "@/mcp"
+import { Truncate } from "@/tool/truncate"
+import { errorMessage } from "@/util/error"
 
 export const Event = SessionCompactionEvent
 
@@ -37,6 +47,9 @@ const PRUNE_PROTECTED_TOOLS = ["skill"]
 const DEFAULT_TAIL_TURNS = 2
 const MIN_PRESERVE_RECENT_TOKENS = 2_000
 const MAX_PRESERVE_RECENT_TOKENS = 8_000
+// Codex allows four default five-minute stream idle windows for the unary
+// compact request. Large histories regularly need longer than two minutes.
+const REMOTE_COMPACTION_TIMEOUT_MS = 20 * 60_000
 type Turn = {
   start: number
   end: number
@@ -148,6 +161,7 @@ export interface Interface {
     phase?: Phase
     overflow?: boolean
     abort?: AbortSignal
+    promptOps?: TaskPromptOps
   }) => Effect.Effect<"continue" | "stop">
   readonly create: (input: {
     sessionID: SessionID
@@ -155,8 +169,11 @@ export interface Interface {
     model: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
     auto: boolean
     phase?: Phase
+    turnID?: MessageID
     overflow?: boolean
   }) => Effect.Effect<void>
+  readonly capturePending: (input: { sessionID: SessionID; messages: SessionV1.WithParts[] }) => Effect.Effect<boolean>
+  readonly releasePending: (input: { sessionID: SessionID }) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionCompaction") {}
@@ -175,6 +192,12 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
     const auth = yield* Auth.Service
+    const instruction = yield* Instruction.Service
+    const system = yield* SystemPrompt.Service
+    const permission = yield* Permission.Service
+    const registry = yield* ToolRegistry.Service
+    const mcp = yield* MCP.Service
+    const truncate = yield* Truncate.Service
 
     const isOverflow = Effect.fn("SessionCompaction.isOverflow")(function* (input: {
       tokens: SessionV1.Assistant["tokens"]
@@ -304,6 +327,54 @@ const layer = Layer.effect(
       }
     })
 
+    const replayUser = Effect.fnUntraced(function* (input: {
+      sessionID: SessionID
+      message: { info: SessionV1.User; parts: SessionV1.Part[] }
+      replaceMedia: boolean
+    }) {
+      const original = input.message.info
+      const replay = yield* session.updateMessage({
+        id: MessageID.ascending(),
+        role: "user",
+        sessionID: input.sessionID,
+        time: { created: Date.now() },
+        agent: original.agent,
+        model: original.model,
+        format: original.format,
+        tools: original.tools,
+        system: original.system,
+      })
+      for (const part of input.message.parts) {
+        if (part.type === "compaction") continue
+        const next =
+          input.replaceMedia && part.type === "file" && MessageV2.isMedia(part.mime)
+            ? { type: "text" as const, text: `[Attached ${part.mime}: ${part.filename ?? "file"}]` }
+            : part
+        yield* session.updatePart({
+          ...next,
+          id: PartID.ascending(),
+          messageID: replay.id,
+          sessionID: input.sessionID,
+        })
+      }
+    })
+
+    const pendingUsers = Effect.fnUntraced(function* (input: {
+      sessionID: SessionID
+      turnID: MessageID
+      markerID: MessageID
+    }) {
+      return (yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie))
+        .filter(
+          (message): message is SessionV1.WithParts & { info: SessionV1.User } =>
+            message.info.role === "user" &&
+            message.info.id > input.turnID &&
+            message.info.id !== input.markerID &&
+            !message.parts.some((part) => part.type === "compaction"),
+        )
+        .toSorted((a, b) => a.info.id.localeCompare(b.info.id))
+    })
+
     const completeCompaction = Effect.fn("SessionCompaction.complete")(function* (input: {
       sessionID: SessionID
       userMessage: SessionV1.User
@@ -316,31 +387,7 @@ const layer = Layer.effect(
     }) {
       if (input.result === "continue" && input.auto) {
         if (input.replay) {
-          const original = input.replay.info
-          const replayMsg = yield* session.updateMessage({
-            id: MessageID.ascending(),
-            role: "user",
-            sessionID: input.sessionID,
-            time: { created: Date.now() },
-            agent: original.agent,
-            model: original.model,
-            format: original.format,
-            tools: original.tools,
-            system: original.system,
-          })
-          for (const part of input.replay.parts) {
-            if (part.type === "compaction") continue
-            const replayPart =
-              part.type === "file" && MessageV2.isMedia(part.mime)
-                ? { type: "text" as const, text: `[Attached ${part.mime}: ${part.filename ?? "file"}]` }
-                : part
-            yield* session.updatePart({
-              ...replayPart,
-              id: PartID.ascending(),
-              messageID: replayMsg.id,
-              sessionID: input.sessionID,
-            })
-          }
+          yield* replayUser({ sessionID: input.sessionID, message: input.replay, replaceMedia: true })
         }
 
         if (!input.replay && !input.direct) {
@@ -409,6 +456,7 @@ const layer = Layer.effect(
       phase?: Phase
       overflow?: boolean
       abort?: AbortSignal
+      promptOps?: TaskPromptOps
     }) {
       const parent = input.messages.findLast((m) => m.info.id === input.parentID)
       if (!parent || parent.info.role !== "user") {
@@ -452,8 +500,32 @@ const layer = Layer.effect(
         }
       }
 
+      const turnID = compactionPart?.turn_id
+      const pending =
+        phase === "mid-turn" && turnID
+          ? input.messages.filter(
+              (message) =>
+                message.info.role === "user" &&
+                message.info.id > turnID &&
+                message.info.id !== input.parentID &&
+                !message.parts.some((part) => part.type === "compaction"),
+            )
+          : []
+      if (pending.length > 0) {
+        const pendingIDs = new Set(pending.map((message) => message.info.id))
+        messages = messages.filter(
+          (message) =>
+            !pendingIDs.has(message.info.id) &&
+            !(message.info.role === "assistant" && pendingIDs.has(message.info.parentID)),
+        )
+        const firstPending = pending.toSorted((a, b) => a.info.id.localeCompare(b.info.id))[0]
+        if (compactionPart && firstPending) {
+          yield* session.updatePart({ ...compactionPart, tail_start_id: firstPending.info.id })
+        }
+      }
+
       const cfg = yield* config.get()
-      const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
+      const history = compactionPart ? messages.filter((message) => message.info.id !== input.parentID) : messages
       const sourceModel = yield* provider
         .getModel(userMessage.model.providerID, userMessage.model.modelID)
         .pipe(Effect.orDie)
@@ -462,6 +534,8 @@ const layer = Layer.effect(
 
       if (remote) {
         if (!compactionPart) throw new Error(`Missing compaction part for ${input.parentID}`)
+        if (!input.promptOps) throw new Error(`Missing prompt operations for remote compaction ${input.parentID}`)
+        const promptOps = input.promptOps
         const ctx = yield* InstanceState.context
         const msg: SessionV1.Assistant = {
           id: MessageID.ascending(),
@@ -490,19 +564,72 @@ const layer = Layer.effect(
         yield* session.updateMessage(msg)
         yield* events.publish(MessageV2.Event.Updated, { sessionID: input.sessionID, info: msg })
 
-        const providerInfo = yield* provider.getProvider(sourceModel.providerID)
         yield* Effect.logInfo("remote compaction", {
           "session.id": input.sessionID,
           phase: phase ?? "manual",
           messages: history.length,
         })
-        const compacted = yield* OpenCodezResponsesCompact.compact({
-          sessionID: input.sessionID,
-          model: sourceModel,
-          provider: providerInfo,
-          system: SystemPrompt.provider(sourceModel),
-          messages: history,
-          abort: input.abort ?? AbortSignal.timeout(120_000),
+        const compacted = yield* Effect.gen(function* () {
+          const requestUser =
+            input.messages.find(
+              (message): message is SessionV1.WithParts & { info: SessionV1.User } =>
+                message.info.role === "user" && message.info.id === turnID,
+            )?.info ??
+            replay?.info ??
+            input.messages.findLast(
+              (message): message is SessionV1.WithParts & { info: SessionV1.User } =>
+                message.info.role === "user" && !message.parts.some((part) => part.type === "compaction"),
+            )?.info
+          if (!requestUser) throw new Error(`Missing request user for compaction ${input.parentID}`)
+          const requestAgent = yield* agents.get(requestUser.agent)
+          if (!requestAgent) throw new Error(`Agent not found for compaction: ${requestUser.agent}`)
+          const sessionInfo = yield* session.get(input.sessionID).pipe(Effect.orDie)
+          const active = OpenCodezResponsesCompaction.tail(history)
+          const context = yield* SessionModelContext.resolve({
+            agent: requestAgent,
+            model: sourceModel,
+            session: sessionInfo,
+            messages: structuredClone(active.messages),
+            promptOps,
+          }).pipe(
+            Effect.provideService(Plugin.Service, plugin),
+            Effect.provideService(Permission.Service, permission),
+            Effect.provideService(ToolRegistry.Service, registry),
+            Effect.provideService(MCP.Service, mcp),
+            Effect.provideService(Truncate.Service, truncate),
+            Effect.provideService(RuntimeFlags.Service, flags),
+            Effect.provideService(Instruction.Service, instruction),
+            Effect.provideService(SystemPrompt.Service, system),
+          )
+          const providerInfo = yield* provider.getProvider(sourceModel.providerID)
+          const prepared = yield* LLMRequestPrep.prepare({
+            user: requestUser,
+            sessionID: input.sessionID,
+            parentSessionID: sessionInfo.parentID,
+            sessionMetadata: OpenCodezResponsesCompaction.withMetadata(sessionInfo.metadata, history),
+            model: sourceModel,
+            agent: requestAgent,
+            permission: sessionInfo.permission,
+            system: context.system,
+            messages: context.messages,
+            tools: context.tools,
+            provider: providerInfo,
+            auth: authInfo,
+            plugin,
+            flags,
+            isWorkflow: false,
+            config: cfg,
+          })
+          return yield* OpenCodezResponsesCompact.compact({
+            model: sourceModel,
+            provider: providerInfo,
+            system: prepared.system,
+            messages: prepared.messages,
+            tools: prepared.tools,
+            options: prepared.params.options,
+            items: active.items,
+            abort: input.abort ?? AbortSignal.timeout(REMOTE_COMPACTION_TIMEOUT_MS),
+          })
         }).pipe(
           Effect.match({
             onFailure: (error) => ({ ok: false as const, error }),
@@ -511,15 +638,39 @@ const layer = Layer.effect(
         )
 
         if (!compacted.ok) {
+          yield* Effect.logError("remote compaction failed", {
+            "session.id": input.sessionID,
+            phase: phase ?? "manual",
+            error: errorMessage(compacted.error),
+          })
           msg.error = MessageV2.fromError(compacted.error, { providerID: sourceModel.providerID })
           msg.finish = "error"
           msg.time.completed = Date.now()
           yield* session.updateMessage(msg)
           return "stop"
         }
+        if (compacted.value.trimmedOutputs > 0) {
+          yield* Effect.logInfo("trimmed remote compaction tool outputs", {
+            "session.id": input.sessionID,
+            count: compacted.value.trimmedOutputs,
+          })
+        }
 
+        const currentPart = yield* session.getPart({
+          sessionID: input.sessionID,
+          messageID: compactionPart.messageID,
+          partID: compactionPart.id,
+        })
+        const discoveredPending = turnID
+          ? yield* pendingUsers({ sessionID: input.sessionID, turnID, markerID: input.parentID })
+          : []
         yield* session.updatePart({
           ...compactionPart,
+          ...(currentPart?.type === "compaction" && currentPart.tail_start_id
+            ? { tail_start_id: currentPart.tail_start_id }
+            : discoveredPending[0]
+              ? { tail_start_id: discoveredPending[0].info.id }
+              : {}),
           remote: {
             providerID: "openai",
             items: compacted.value.items,
@@ -655,20 +806,143 @@ const layer = Layer.effect(
       })
     })
 
+    const capturePending = Effect.fn("SessionCompaction.capturePending")(function* (input: {
+      sessionID: SessionID
+      messages: SessionV1.WithParts[]
+    }) {
+      const marker = input.messages.findLast(
+        (message): message is SessionV1.WithParts & { info: SessionV1.User } =>
+          message.info.role === "user" &&
+          message.parts.some(
+            (part) =>
+              part.type === "compaction" &&
+              part.phase === "mid-turn" &&
+              part.remote?.providerID === "openai" &&
+              part.turn_id !== undefined,
+          ),
+      )
+      const part = marker?.parts.find(
+        (item): item is SessionV1.CompactionPart =>
+          item.type === "compaction" &&
+          item.phase === "mid-turn" &&
+          item.remote?.providerID === "openai" &&
+          item.turn_id !== undefined,
+      )
+      if (!marker || !part?.turn_id || part.tail_start_id) return false
+      const summary = input.messages.find(
+        (message) =>
+          message.info.role === "assistant" &&
+          message.info.summary === true &&
+          message.info.parentID === marker.info.id &&
+          message.info.finish !== undefined,
+      )
+      const continuation = summary
+        ? input.messages.find(
+            (message) =>
+              message.info.role === "assistant" &&
+              message.info.summary !== true &&
+              message.info.parentID === marker.info.id &&
+              message.info.id > summary.info.id,
+          )
+        : undefined
+      if (!summary || continuation) return false
+      const pending = yield* pendingUsers({
+        sessionID: input.sessionID,
+        turnID: part.turn_id,
+        markerID: marker.info.id,
+      })
+      if (!pending[0]) return false
+      yield* session.updatePart({ ...part, tail_start_id: pending[0].info.id })
+      return true
+    })
+
+    const releasePending = Effect.fn("SessionCompaction.releasePending")(function* (input: { sessionID: SessionID }) {
+      const messages = (yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).toSorted((a, b) =>
+        a.info.id.localeCompare(b.info.id),
+      )
+      const marker = messages.findLast(
+        (message): message is SessionV1.WithParts & { info: SessionV1.User } =>
+          message.info.role === "user" &&
+          message.parts.some(
+            (part) =>
+              part.type === "compaction" &&
+              part.phase === "mid-turn" &&
+              part.remote?.providerID === "openai" &&
+              part.tail_start_id !== undefined,
+          ),
+      )
+      const part = marker?.parts.find(
+        (item): item is SessionV1.CompactionPart =>
+          item.type === "compaction" &&
+          item.phase === "mid-turn" &&
+          item.remote?.providerID === "openai" &&
+          item.tail_start_id !== undefined,
+      )
+      if (!marker || !part?.turn_id) return
+      const summary = messages.find(
+        (message) =>
+          message.info.role === "assistant" &&
+          message.info.summary === true &&
+          message.info.parentID === marker.info.id &&
+          message.info.finish !== undefined,
+      )
+      if (!summary) return
+      const continuation = messages.find(
+        (message) =>
+          message.info.role === "assistant" &&
+          message.info.summary !== true &&
+          message.info.parentID === marker.info.id &&
+          message.info.id > summary.info.id &&
+          message.info.time.completed !== undefined,
+      )
+      if (!continuation) return
+
+      const pending = yield* pendingUsers({
+        sessionID: input.sessionID,
+        turnID: part.turn_id,
+        markerID: marker.info.id,
+      })
+      for (const message of pending) {
+        yield* replayUser({ sessionID: input.sessionID, message, replaceMedia: false })
+      }
+      for (const message of pending) {
+        if (message.info.id > marker.info.id) {
+          yield* session.removeMessage({ sessionID: input.sessionID, messageID: message.info.id })
+        }
+      }
+      yield* session.updatePart({ ...part, tail_start_id: undefined })
+      yield* Effect.logInfo("released pending input after remote compaction", {
+        "session.id": input.sessionID,
+        count: pending.length,
+      })
+    })
+
     const create = Effect.fn("SessionCompaction.create")(function* (input: {
       sessionID: SessionID
       agent: string
       model: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
       auto: boolean
       phase?: Phase
+      turnID?: MessageID
       overflow?: boolean
     }) {
+      const source = input.turnID
+        ? Option.getOrUndefined(
+            yield* session
+              .findMessage(input.sessionID, (message) => message.info.id === input.turnID)
+              .pipe(Effect.orDie),
+          )
+        : undefined
+      const turn = source?.info.role === "user" ? source.info : undefined
       const msg = yield* session.updateMessage({
         id: MessageID.ascending(),
         role: "user",
-        model: input.model,
+        model: turn?.model ?? input.model,
         sessionID: input.sessionID,
-        agent: input.agent,
+        agent: turn?.agent ?? input.agent,
+        format: turn?.format,
+        tools: turn?.tools,
+        system: turn?.system,
         time: { created: Date.now() },
       })
       yield* session.updatePart({
@@ -678,8 +952,18 @@ const layer = Layer.effect(
         type: "compaction",
         auto: input.auto,
         phase: input.phase,
+        turn_id: input.turnID,
         overflow: input.overflow,
       })
+      for (const part of source?.parts ?? []) {
+        if (part.type !== "agent") continue
+        yield* session.updatePart({
+          ...part,
+          id: PartID.ascending(),
+          messageID: msg.id,
+          sessionID: msg.sessionID,
+        })
+      }
     })
 
     return Service.of({
@@ -687,6 +971,8 @@ const layer = Layer.effect(
       prune,
       process: processCompaction,
       create,
+      capturePending,
+      releasePending,
     })
   }),
 )
@@ -704,6 +990,12 @@ export const node = LayerNode.make({
     EventV2Bridge.node,
     RuntimeFlags.node,
     Auth.node,
+    Instruction.node,
+    SystemPrompt.node,
+    Permission.node,
+    ToolRegistry.node,
+    MCP.node,
+    Truncate.node,
   ],
 })
 

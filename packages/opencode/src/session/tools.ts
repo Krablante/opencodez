@@ -14,12 +14,10 @@ import { Plugin } from "@/plugin"
 import type { TaskPromptOps } from "@/tool/task"
 import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
 import { Effect } from "effect"
-import { MessageV2 } from "./message-v2"
 import { Session } from "./session"
 import { SessionProcessor } from "./processor"
 import { PartID } from "./schema"
 import { EffectBridge } from "@/effect/bridge"
-import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { isRecord } from "@/util/record"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -42,7 +40,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   agent: Agent.Info
   model: Provider.Model
   session: Session.Info
-  processor: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
+  processor?: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
   bypassAgentCheck: boolean
   messages: SessionV1.WithParts[]
   promptOps: TaskPromptOps
@@ -56,38 +54,46 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const truncate = yield* Truncate.Service
   const flags = yield* RuntimeFlags.Service
 
-  const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
-    sessionID: input.session.id,
-    abort: options.abortSignal!,
-    messageID: input.processor.message.id,
-    callID: options.toolCallId,
-    extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck, promptOps: input.promptOps },
-    agent: input.agent.name,
-    messages: input.messages,
-    metadata: (val) =>
-      input.processor.updateToolCall(options.toolCallId, (match) => {
-        if (!["running", "pending"].includes(match.state.status)) return match
-        return {
-          ...match,
-          state: {
-            title: val.title,
-            metadata: val.metadata,
-            status: "running",
-            input: args,
-            time: { start: Date.now() },
-          },
-        }
-      }),
-    ask: (req) =>
-      permission
-        .ask({
-          ...req,
-          sessionID: input.session.id,
-          tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-          ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
-        })
-        .pipe(Effect.orDie),
-  })
+  const requireProcessor = () => {
+    if (!input.processor) throw new Error("Tool execution requires a session processor")
+    return input.processor
+  }
+
+  const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => {
+    const processor = requireProcessor()
+    return {
+      sessionID: input.session.id,
+      abort: options.abortSignal!,
+      messageID: processor.message.id,
+      callID: options.toolCallId,
+      extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck, promptOps: input.promptOps },
+      agent: input.agent.name,
+      messages: input.messages,
+      metadata: (val) =>
+        processor.updateToolCall(options.toolCallId, (match) => {
+          if (!["running", "pending"].includes(match.state.status)) return match
+          return {
+            ...match,
+            state: {
+              title: val.title,
+              metadata: val.metadata,
+              status: "running",
+              input: args,
+              time: { start: Date.now() },
+            },
+          }
+        }),
+      ask: (req) =>
+        permission
+          .ask({
+            ...req,
+            sessionID: input.session.id,
+            tool: { messageID: processor.message.id, callID: options.toolCallId },
+            ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
+          })
+          .pipe(Effect.orDie),
+    }
+  }
 
   for (const item of yield* registry.tools({
     modelID: ModelV2.ID.make(input.model.api.id),
@@ -115,7 +121,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
                 ...attachment,
                 id: PartID.ascending(),
                 sessionID: ctx.sessionID,
-                messageID: input.processor.message.id,
+                messageID: ctx.messageID,
               })),
             }
             yield* plugin.trigger(
@@ -124,7 +130,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               output,
             )
             if (options.abortSignal?.aborted) {
-              yield* input.processor.completeToolCall(options.toolCallId, output)
+              yield* requireProcessor().completeToolCall(options.toolCallId, output)
             }
             return output
           }),
@@ -211,7 +217,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               output,
             )
             if (opts.abortSignal?.aborted) {
-              yield* input.processor.completeToolCall(opts.toolCallId, output)
+              yield* requireProcessor().completeToolCall(opts.toolCallId, output)
             }
             return output
           }),
@@ -294,7 +300,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               output,
             )
             if (opts.abortSignal?.aborted) {
-              yield* input.processor.completeToolCall(opts.toolCallId, output)
+              yield* requireProcessor().completeToolCall(opts.toolCallId, output)
             }
             return output
           }),
@@ -367,7 +373,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
                 ...attachment,
                 id: PartID.ascending(),
                 sessionID: ctx.sessionID,
-                messageID: input.processor.message.id,
+                messageID: ctx.messageID,
               })),
             }
             yield* plugin.trigger(
@@ -376,7 +382,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               output,
             )
             if (opts.abortSignal?.aborted) {
-              yield* input.processor.completeToolCall(opts.toolCallId, output)
+              yield* requireProcessor().completeToolCall(opts.toolCallId, output)
             }
             return output
           }),
@@ -413,7 +419,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
                 "tool.name": key,
                 "tool.call_id": opts.toolCallId,
                 "session.id": ctx.sessionID,
-                "message.id": input.processor.message.id,
+                "message.id": ctx.messageID,
               },
             }),
           )
@@ -476,12 +482,12 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               ...attachment,
               id: PartID.ascending(),
               sessionID: ctx.sessionID,
-              messageID: input.processor.message.id,
+              messageID: ctx.messageID,
             })),
             content: result.content,
           }
           if (opts.abortSignal?.aborted) {
-            yield* input.processor.completeToolCall(opts.toolCallId, output)
+            yield* requireProcessor().completeToolCall(opts.toolCallId, output)
           }
           return output
         }),

@@ -55,7 +55,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { eq } from "drizzle-orm"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
-import { SessionTools } from "./tools"
+import { SessionModelContext } from "./model-context"
 import { LLMEvent } from "@opencode-ai/llm"
 
 // @ts-ignore
@@ -1093,6 +1093,29 @@ const layer = Layer.effect(
           let msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
             Effect.provideService(Database.Service, database),
           )
+          if (yield* compaction.capturePending({ sessionID, messages: msgs })) {
+            msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
+              Effect.provideService(Database.Service, database),
+            )
+          }
+          if (
+            msgs.some(
+              (message) =>
+                message.info.role === "user" &&
+                message.parts.some(
+                  (part) =>
+                    part.type === "compaction" &&
+                    part.phase === "mid-turn" &&
+                    part.remote?.providerID === "openai" &&
+                    part.tail_start_id !== undefined,
+                ),
+            )
+          ) {
+            yield* compaction.releasePending({ sessionID })
+            msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
+              Effect.provideService(Database.Service, database),
+            )
+          }
 
           const { user: lastUser, assistant: lastAssistant, finished: lastFinished, tasks } = MessageV2.latest(msgs)
 
@@ -1108,6 +1131,8 @@ const layer = Layer.effect(
             lastAssistantMsg?.parts.some(
               (part) => part.type === "tool" && !part.metadata?.providerExecuted && !isOrphanedInterruptedTool(part),
             ) ?? false
+          const modelNeedsFollowUp =
+            hasToolCalls || lastAssistant?.finish === "tool-calls" || lastAssistant?.finish === "unknown"
           const directRemoteCompaction =
             lastAssistant?.summary === true &&
             lastAssistant.parentID === lastUser.id &&
@@ -1126,8 +1151,7 @@ const layer = Layer.effect(
 
           if (
             lastAssistant?.finish &&
-            !["tool-calls"].includes(lastAssistant.finish) &&
-            !hasToolCalls &&
+            !modelNeedsFollowUp &&
             lastUser.id < lastAssistant.id &&
             !directRemoteCompaction
           ) {
@@ -1166,11 +1190,12 @@ const layer = Layer.effect(
           if (task?.type === "compaction") {
             const result = yield* compaction.process({
               messages: msgs,
-              parentID: lastUser.id,
+              parentID: task.messageID,
               sessionID,
               auto: task.auto,
               phase: task.phase,
               overflow: task.overflow,
+              promptOps: yield* ops(),
             })
             if (result === "stop") break
             continue
@@ -1186,7 +1211,8 @@ const layer = Layer.effect(
               agent: lastUser.agent,
               model: lastUser.model,
               auto: true,
-              phase: lastFinished.parentID === lastUser.id ? "mid-turn" : "pre-turn",
+              phase: modelNeedsFollowUp ? "mid-turn" : "pre-turn",
+              turnID: modelNeedsFollowUp ? lastFinished.parentID : lastUser.id,
             })
             continue
           }
@@ -1243,16 +1269,12 @@ const layer = Layer.effect(
             .pipe(Effect.onInterrupt(() => finalizeInterruptedAssistant))
 
           const outcome: "break" | "continue" = yield* Effect.gen(function* () {
-            const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
-            const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
             const promptOps = yield* ops()
-
-            const tools = yield* SessionTools.resolve({
+            const context = yield* SessionModelContext.resolve({
               agent,
               session,
               model,
               processor: handle,
-              bypassAgentCheck,
               messages: msgs,
               promptOps,
             }).pipe(
@@ -1262,7 +1284,10 @@ const layer = Layer.effect(
               Effect.provideService(MCP.Service, mcp),
               Effect.provideService(Truncate.Service, truncate),
               Effect.provideService(RuntimeFlags.Service, flags),
+              Effect.provideService(Instruction.Service, instruction),
+              Effect.provideService(SystemPrompt.Service, sys),
             )
+            const tools = context.tools
 
             if (lastUser.format?.type === "json_schema") {
               tools["StructuredOutput"] = createStructuredOutputTool({
@@ -1276,21 +1301,7 @@ const layer = Layer.effect(
             if (step === 1)
               yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
 
-            yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-
-            const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
-              sys.skills(agent),
-              sys.environment(model),
-              instruction.system().pipe(Effect.orDie),
-              sys.mcp(agent, session.permission),
-              MessageV2.toModelMessagesEffect(msgs, model),
-            ])
-            const system = [
-              ...env,
-              ...instructions,
-              ...(mcpInstructions ? [mcpInstructions] : []),
-              ...(skills ? [skills] : []),
-            ]
+            const system = context.system
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({
@@ -1302,7 +1313,7 @@ const layer = Layer.effect(
               sessionMetadata: OpenCodezResponsesCompaction.withMetadata(session.metadata, msgs),
               system,
               messages: [
-                ...modelMsgs,
+                ...context.messages,
                 ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),
               ],
               tools,
@@ -1341,6 +1352,7 @@ const layer = Layer.effect(
               }
             }
 
+            if (directRemoteCompaction) yield* compaction.releasePending({ sessionID })
             if (result === "stop") return "break" as const
             if (result === "compact") {
               yield* compaction.create({
@@ -1348,8 +1360,9 @@ const layer = Layer.effect(
                 agent: lastUser.agent,
                 model: lastUser.model,
                 auto: true,
-                phase: handle.message.finish || lastFinished?.parentID === lastUser.id ? "mid-turn" : "pre-turn",
-                overflow: !handle.message.finish,
+                phase: handle.needsFollowUp || handle.producedDurableOutput ? "mid-turn" : "pre-turn",
+                turnID: handle.message.parentID,
+                overflow: !handle.producedDurableOutput,
               })
             }
             return "continue" as const

@@ -64,8 +64,11 @@ message IDs, so their reverts cannot mutate the original session.
 
 ChatGPT OAuth compaction uses `POST /responses/compact` regardless of the
 selected Responses wire mode. The session layer builds the request through the
-same Responses lowering as normal model turns, stores the returned canonical
-items in `CompactionPart.remote`, and starts a new full request chain.
+same context preparation and Responses lowering as normal model turns. The
+effective System, plugin transforms, model options, and model-visible tool
+schemas therefore match the turn being compacted. The returned canonical items
+are stored in `CompactionPart.remote`, and continuation starts a new full request
+chain.
 
 On later turns, the request layer registers persisted items for the current
 session and adds a private header. This fetch adapter removes that header before
@@ -101,4 +104,10 @@ assistant work, tool calls, and tool results—and continues from the returned
 opaque state in the same model loop, without a synthetic continuation message or
 replayed task. A provider context-overflow is an internal trigger while
 automatic compaction is enabled, so it does not emit a transient session error.
-Manual compaction does not auto-continue.
+Post-sampling compaction runs only when another model request is required; a
+finished answer never causes a redundant continuation. Steering input arriving
+around compaction is withheld from both compact input and the first mandatory
+continuation, then admitted normally. A transport-boundary size check can replace
+only contiguous oversized trailing tool outputs with a bounded marker. The
+request keeps Codex's long unary deadline; manual compaction does not
+auto-continue.

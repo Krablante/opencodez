@@ -1,14 +1,14 @@
 import { Cause, Effect } from "effect"
 import type { Provider } from "@/provider/provider"
-import { MessageV2 } from "@/session/message-v2"
 import { LLMNative } from "@/session/llm/native-request"
-import { OpenCodezResponsesCompaction } from "./responses-compaction"
 import { OpenAIResponses } from "@opencode-ai/llm/protocols/openai-responses"
-import type { SessionV1 } from "@opencode-ai/core/v1/session"
-import type { ModelMessage } from "ai"
+import { ProviderTransform } from "@/provider/transform"
+import { Token } from "@/util/token"
+import type { ModelMessage, Tool } from "ai"
 
 export type Result = {
   items: unknown[]
+  trimmedOutputs: number
   usage: {
     total: number
     input: number
@@ -17,65 +17,56 @@ export type Result = {
   }
 }
 
-function toCompactInput(input: { model: Provider.Model; system: string[]; messages: ModelMessage[] }) {
+const TRUNCATED_OUTPUT = "Output exceeded the available model context and was truncated"
+
+function toCompactInput(input: {
+  model: Provider.Model
+  system: string[]
+  messages: ModelMessage[]
+  tools: Record<string, Tool>
+  options: Record<string, unknown>
+}) {
   const request = LLMNative.request({
     model: input.model,
     system: input.system,
     messages: input.messages,
-    tools: {},
+    tools: input.tools,
     // Compact input must remain self-contained under ZDR. Referencing
     // non-persisted reasoning items by rs_* id makes /responses/compact 404.
-    providerOptions: { openai: { store: false } },
+    providerOptions: ProviderTransform.providerOptions(input.model, { ...input.options, store: false }),
     headers: {},
   })
   return OpenAIResponses.protocol.body.from(request)
 }
 
 export function compact(input: {
-  sessionID: string
   model: Provider.Model
   provider: Provider.Info
   system: string[]
-  messages: readonly SessionV1.WithParts[]
+  messages: ModelMessage[]
+  tools: Record<string, Tool>
+  options: Record<string, unknown>
+  items: unknown[]
   abort: AbortSignal
 }) {
   return Effect.gen(function* () {
-    const context = OpenCodezResponsesCompaction.tail(input.messages)
-    let model = input.model.api.id
-    let instructions = input.system.join("\n")
-    let items = context.items.filter((item) => !isSystemMessage(item))
-    if (context.messages.length > 0) {
-      const messages = yield* MessageV2.toModelMessagesEffect(context.messages, input.model)
-      if (messages.length > 0) {
-        const body = yield* toCompactInput({
-          model: input.model,
-          system: input.system,
-          messages,
-        })
-        if (!Array.isArray(body.input)) throw new Error("OpenAI compact input must be an array")
-        model = body.model
-        instructions = body.instructions ?? instructions
-        items = [...items, ...body.input]
-      }
-    }
+    const body = yield* toCompactInput(input)
+    if (!Array.isArray(body.input)) throw new Error("OpenAI compact input must be an array")
+    const request = compactBody(body, [...input.items.filter((item) => !isSystemMessage(item)), ...body.input])
+    const trimmedOutputs = trimOutputs(request, input.model.limit.input || input.model.limit.context)
 
     const baseURL =
       typeof input.provider.options.baseURL === "string"
         ? input.provider.options.baseURL.replace(/\/$/, "")
         : "https://api.openai.com/v1"
-    const fetcher = (
+    const fetcher: typeof fetch =
       typeof input.provider.options.fetch === "function" ? input.provider.options.fetch : fetch
-    ) as typeof fetch
     const response = yield* Effect.tryPromise({
       try: () =>
         fetcher(`${baseURL}/responses/compact`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            model,
-            instructions,
-            input: items,
-          }),
+          body: JSON.stringify(request),
           signal: input.abort,
         }),
       catch: (cause) => new Error("OpenAI remote compaction request failed", { cause }),
@@ -96,6 +87,7 @@ export function compact(input: {
     const outputDetails = isRecord(usage.output_tokens_details) ? usage.output_tokens_details : {}
     return {
       items: payload.output,
+      trimmedOutputs,
       usage: {
         total: number(usage.total_tokens),
         input: number(usage.input_tokens),
@@ -104,6 +96,45 @@ export function compact(input: {
       },
     } satisfies Result
   }).pipe(Effect.catchCause((cause) => Effect.fail(Cause.squash(cause))))
+}
+
+function compactBody(body: Record<string, unknown>, items: unknown[]) {
+  const result: Record<string, unknown> & { input: unknown[] } = {
+    model: body.model,
+    input: items,
+  }
+  for (const key of [
+    "instructions",
+    "tools",
+    "parallel_tool_calls",
+    "reasoning",
+    "service_tier",
+    "prompt_cache_key",
+    "text",
+  ]) {
+    if (body[key] !== undefined) result[key] = body[key]
+  }
+  return result
+}
+
+function trimOutputs(body: Record<string, unknown> & { input: unknown[] }, contextWindow: number) {
+  if (contextWindow <= 0) return 0
+  let estimate = Token.estimate(JSON.stringify(body))
+  let rewritten = 0
+  for (let index = body.input.length - 1; index >= 0 && estimate > contextWindow; index--) {
+    const item = body.input[index]
+    if (!isRecord(item)) break
+    if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
+      body.input[index] = { ...item, output: TRUNCATED_OUTPUT }
+    } else if (item.type === "tool_search_output") {
+      body.input[index] = { ...item, tools: [] }
+    } else {
+      break
+    }
+    rewritten++
+    estimate = Token.estimate(JSON.stringify(body))
+  }
+  return rewritten
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

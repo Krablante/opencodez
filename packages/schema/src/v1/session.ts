@@ -197,6 +197,7 @@ export const CompactionPart = Schema.Struct({
   type: Schema.Literal("compaction"),
   auto: Schema.Boolean,
   phase: Schema.optional(Schema.Literals(["pre-turn", "mid-turn"])),
+  turn_id: Schema.optional(MessageID),
   overflow: Schema.optional(Schema.Boolean),
   tail_start_id: Schema.optional(MessageID),
   remote: Schema.optional(
