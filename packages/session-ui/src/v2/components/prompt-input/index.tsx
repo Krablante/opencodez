@@ -212,20 +212,25 @@ export function PromptInputV2(props: PromptInputV2Props) {
               onContext={props.controller.openContext}
               onShell={props.controller.openShell}
             />
-            <Show when={view.agent}>
+            <Show when={view.agent} keyed>
               {(control) => (
-                <PromptInputV2ConfiguredSelect title="Choose agent" keybind={["Mod", "."]} control={control()} />
+                <PromptInputV2ConfiguredSelect
+                  title="Choose agent"
+                  keybind={["Mod", "."]}
+                  control={control}
+                  mobileIcon={<Icon name="brain" size="small" />}
+                />
               )}
             </Show>
             <Show
               when={props.modelControl}
               fallback={
-                <Show when={view.model}>
+                <Show when={view.model} keyed>
                   {(control) => (
                     <PromptInputV2ConfiguredSelect
                       title="Choose model"
                       keybind={["Mod", "M"]}
-                      control={control()}
+                      control={control}
                       model
                     />
                   )}
@@ -234,13 +239,14 @@ export function PromptInputV2(props: PromptInputV2Props) {
             >
               {(control) => control()}
             </Show>
-            <Show when={(props.variantControlVisible ?? true) && view.variant}>
+            <Show when={(props.variantControlVisible ?? true) && view.variant} keyed>
               {(control) => (
-                <Show when={control().options().length > 1}>
+                <Show when={control.options().length > 1}>
                   <PromptInputV2ConfiguredSelect
                     title="Choose model variant"
                     keybind={["Shift", "Mod", "D"]}
-                    control={control()}
+                    control={control}
+                    mobileIcon={<IconV2 name="chevron-down" />}
                   />
                 </Show>
               )}
@@ -474,7 +480,7 @@ export function PromptInputV2AddMenu(props: {
 }) {
   return (
     <TooltipV2
-      class="min-w-0 shrink"
+      class="shrink-0"
       placement="top"
       value={
         <>
@@ -521,6 +527,7 @@ function PromptInputV2ConfiguredSelect(props: {
   keybind?: string[]
   control: PromptInputV2SelectControl
   model?: boolean
+  mobileIcon?: JSX.Element
 }) {
   const current = () => props.control.current()
   const providerID = () => props.control.options().find((option) => option.id === current())?.providerID
@@ -535,6 +542,7 @@ function PromptInputV2ConfiguredSelect(props: {
           <ProviderIcon id={providerID()!} class="size-4 shrink-0 opacity-60" />
         </Show>
       }
+      mobileIcon={props.mobileIcon}
       onSelect={props.control.onSelect}
     />
   )
@@ -546,12 +554,14 @@ export function PromptInputV2Select(props: {
   options: PromptInputV2Option[]
   current: string
   currentIcon?: JSX.Element
+  mobileIcon?: JSX.Element
   class?: string
   onOpenChange?: (open: boolean) => void
   onSelect: (id: string) => void
 }) {
   return (
     <TooltipV2
+      class={props.mobileIcon ? "w-7 shrink-0 sm:w-auto sm:min-w-0 sm:shrink" : "min-w-0 shrink"}
       placement="top"
       value={
         <>
@@ -565,14 +575,23 @@ export function PromptInputV2Select(props: {
           as={ButtonV2}
           variant="ghost-muted"
           size="normal"
-          class={`min-w-0 max-w-[220px] shrink justify-start ![font-weight:440] ${props.class ?? ""}`}
+          class={`min-w-0 max-w-[220px] shrink justify-start ![font-weight:440] ${
+            props.mobileIcon ? "!w-7 !px-1 sm:!w-auto sm:!px-[11px]" : ""
+          } ${props.class ?? ""}`}
           aria-label={props.title}
         >
           {props.currentIcon}
-          <span class="truncate capitalize leading-5">
+          <Show when={props.mobileIcon}>{(icon) => <span class="flex sm:hidden">{icon()}</span>}</Show>
+          <span classList={{ "min-w-0 truncate capitalize leading-5": true, "hidden sm:inline": !!props.mobileIcon }}>
             {props.options.find((option) => option.id === props.current)?.label ?? props.current}
           </span>
-          <span class="-ml-0.5 -mr-1 flex shrink-0">
+          <span
+            classList={{
+              "-ml-0.5 -mr-1 shrink-0": true,
+              flex: !props.mobileIcon,
+              "hidden sm:flex": !!props.mobileIcon,
+            }}
+          >
             <IconV2 name="chevron-down" />
           </span>
         </MenuV2.Trigger>

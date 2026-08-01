@@ -5,8 +5,9 @@
 ### Changed
 
 - Made default-disabled FFF a true zero-index mode: OpenCodez no longer starts the upstream `rg --files` fallback or retains a background path index when `OPENCODE_DISABLE_FFF=1`. Directory browsing and explicit agent file tools remain available.
-- Made the v2 Web composer controls shrink and truncate inside narrow/mobile layouts, with an icon-only System control and readable Model priority, so Agent, System, Model, Variant, and Send remain contained without changing desktop spacing.
-- Updated the fork base from upstream OpenCode `1.18.4` to `1.18.10` while keeping the OpenCodez prompt, project, updater, embedded Web UI, Responses wire, and remote compaction layers isolated.
+- Made the v2 Web composer controls shrink and truncate inside narrow/mobile layouts, with icon-only Agent, System, and Variant controls and readable Model priority, so every control remains contained without changing desktop spacing.
+- Updated the fork base from upstream OpenCode `1.18.4` to `1.18.11` while keeping the OpenCodez prompt, project, updater, embedded Web UI, Responses wire, and remote compaction layers isolated.
+- Adopted upstream fixes for MCP SSE reconnect loops, configurable interleaved reasoning fields, stale prompt controls and session tabs, narrow file-tree tabs, directory selection, and external desktop links.
 - Adopted upstream's current project-scoped MCP state loading.
 - Ported OpenCodez prompt metadata into the current App prompt controller and session-creation flow.
 - History edits now force one safe full request before incremental ChatGPT OAuth continuation resumes on the resulting branch.

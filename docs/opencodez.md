@@ -44,7 +44,7 @@ replacement of `/usr/local/bin/opencodez`, then falls back to the normal
 interactive sudo flow when the helper is absent.
 
 Release versions use the upstream base plus OpenCodez build metadata, for
-example `1.18.10+opencodez.1`. The release tag and embedded binary version must
+example `1.18.11+opencodez.1`. The release tag and embedded binary version must
 match exactly.
 
 ## System Prompt Library
@@ -307,8 +307,9 @@ missing URLs.
 
 The v2 composer keeps Agent, System, Model, Variant, and Send controls in one
 bounded row. Controls shrink and truncate on narrow/mobile layouts while
-desktop spacing remains unchanged; System becomes an icon-only control below
-the `sm` breakpoint and the Send action never leaves the composer.
+desktop spacing remains unchanged; Agent, System, and Variant become icon-only
+below the `sm` breakpoint so the Model stays readable and the Send action never
+leaves the composer.
 
 OpenCodez can embed the built web UI as one packed binary asset. Runtime delivery
 unpacks it in memory, applies SPA fallback, preserves MIME types, serves
