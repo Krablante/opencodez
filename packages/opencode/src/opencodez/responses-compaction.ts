@@ -2,6 +2,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 
 export const HEADER = "x-opencodez-responses-compaction"
 export const METADATA_KEY = "opencodez.responses.compaction"
+export const CONTINUE_MARKER = "__OPENCODEZ_REMOTE_COMPACTION_CONTINUE__"
 
 type Context = {
   items: unknown[]
@@ -70,7 +71,9 @@ export function inject(body: BodyInit | null | undefined, sessionID: string | un
     const firstNonSystem = parsed.input.findIndex((item) => !isSystemMessage(item))
     const split = firstNonSystem === -1 ? parsed.input.length : firstNonSystem
     const system = parsed.input.slice(0, split)
-    const input = parsed.input.slice(split)
+    const tail = parsed.input.slice(split)
+    const marker = tail.findIndex(isContinueMarker)
+    const input = marker === -1 ? tail : [...tail.slice(0, marker), ...tail.slice(marker + 1)]
     return JSON.stringify({
       ...parsed,
       // /compact echoes the system item it received, but Codex rejects that
@@ -86,6 +89,20 @@ export function inject(body: BodyInit | null | undefined, sessionID: string | un
 
 function isSystemMessage(value: unknown) {
   return !!value && typeof value === "object" && "role" in value && value.role === "system"
+}
+
+function isContinueMarker(value: unknown) {
+  if (!value || typeof value !== "object" || !("role" in value) || value.role !== "user") return false
+  if (!("content" in value) || !Array.isArray(value.content) || value.content.length !== 1) return false
+  const content = value.content[0]
+  return (
+    !!content &&
+    typeof content === "object" &&
+    "type" in content &&
+    content.type === "input_text" &&
+    "text" in content &&
+    content.text === CONTINUE_MARKER
+  )
 }
 
 export function clear(sessionID: string) {

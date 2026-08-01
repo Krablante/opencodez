@@ -1108,12 +1108,28 @@ const layer = Layer.effect(
             lastAssistantMsg?.parts.some(
               (part) => part.type === "tool" && !part.metadata?.providerExecuted && !isOrphanedInterruptedTool(part),
             ) ?? false
+          const directRemoteCompaction =
+            lastAssistant?.summary === true &&
+            lastAssistant.parentID === lastUser.id &&
+            lastAssistantMsg?.info.role === "assistant" &&
+            msgs.some(
+              (message) =>
+                message.info.id === lastUser.id &&
+                message.parts.some(
+                  (part) =>
+                    part.type === "compaction" &&
+                    part.auto &&
+                    part.phase === "mid-turn" &&
+                    part.remote?.providerID === "openai",
+                ),
+            )
 
           if (
             lastAssistant?.finish &&
             !["tool-calls"].includes(lastAssistant.finish) &&
             !hasToolCalls &&
-            lastUser.id < lastAssistant.id
+            lastUser.id < lastAssistant.id &&
+            !directRemoteCompaction
           ) {
             const orphan = lastAssistantMsg?.parts.find(
               (part): part is SessionV1.ToolPart => part.type === "tool" && isOrphanedInterruptedTool(part),
@@ -1153,6 +1169,7 @@ const layer = Layer.effect(
               parentID: lastUser.id,
               sessionID,
               auto: task.auto,
+              phase: task.phase,
               overflow: task.overflow,
             })
             if (result === "stop") break
@@ -1169,9 +1186,7 @@ const layer = Layer.effect(
               agent: lastUser.agent,
               model: lastUser.model,
               auto: true,
-              // The pending turn has not reached the provider; compact older
-              // history and use the existing overflow replay path to resend it.
-              overflow: true,
+              phase: lastFinished.parentID === lastUser.id ? "mid-turn" : "pre-turn",
             })
             continue
           }
@@ -1333,6 +1348,7 @@ const layer = Layer.effect(
                 agent: lastUser.agent,
                 model: lastUser.model,
                 auto: true,
+                phase: handle.message.finish || lastFinished?.parentID === lastUser.id ? "mid-turn" : "pre-turn",
                 overflow: !handle.message.finish,
               })
             }

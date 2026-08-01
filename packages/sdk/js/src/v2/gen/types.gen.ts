@@ -620,6 +620,7 @@ export type CompactionPart = {
   messageID: string
   type: "compaction"
   auto: boolean
+  phase?: "pre-turn" | "mid-turn"
   overflow?: boolean
   tail_start_id?: string
   remote?: {

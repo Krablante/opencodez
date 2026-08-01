@@ -211,12 +211,20 @@ system prefix first, and then inserts the opaque compacted state before the new
 tail. Remote errors remain session-visible and never silently fall back to local
 summarization.
 
-Automatic pre-turn compaction preserves the pending user turn outside the
-compacted history and replays it after a successful compact. If the provider
-itself reports context overflow while automatic compaction is enabled, that
-error is treated as the internal recovery trigger rather than surfaced as a
-failed user turn. Manual compaction still stops after writing the compacted
-state and waits for the next user message.
+Automatic compaction records whether pressure occurred before or during the
+active turn. Pre-turn compaction keeps the pending user message outside the
+compact request and replays it once after success. Mid-turn compaction sends the
+complete active turn to OpenAI, including the current user request, assistant
+work, tool calls, and tool results. The returned opaque state therefore contains
+the work already completed, and the same loop continues without replaying the
+original task or adding a synthetic continuation message. Both paths start a
+safe full Responses request after the history replacement; later compatible
+turns can resume incremental continuation.
+
+If the provider itself reports context overflow while automatic compaction is
+enabled, that error is treated as an internal recovery trigger rather than
+surfaced as a failed user turn. Manual compaction still stops after writing the
+compacted state and waits for the next user message.
 
 #### Compaction Policy
 
@@ -262,7 +270,13 @@ OpenCodez config boundary:
   endpoint.
 - `packages/opencode/src/opencodez/responses-compaction.ts` finds persisted
   compaction items, exposes them to the current request without writing a second
-  state store, and injects them into the wire body.
+  state store, and injects them into the wire body. Direct mid-turn continuation
+  uses one internal non-network marker to satisfy the AI SDK's non-empty prompt
+  validation; the same adapter removes it before the request leaves the process.
+- `packages/opencode/src/session/prompt.ts` distinguishes pre-turn from mid-turn
+  pressure, while `packages/opencode/src/session/compaction.ts` keeps a pending
+  pre-turn message outside compact input and includes the complete active turn
+  for mid-turn compaction.
 - `packages/opencode/src/plugin/openai/ws-pool.ts` owns one continuation per
   session-and-account-affine socket and resets it on reconnect, login change,
   abort, failure, or concurrent HTTP fallback.

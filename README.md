@@ -232,9 +232,13 @@ OAuth because other providers cannot interpret OpenAI's opaque state.
 Zero Data Retention is supported by sending encrypted reasoning state inline
 instead of referencing non-persisted reasoning item IDs. Continuation keeps the
 current System metadata ahead of the replayed compacted state.
-When automatic compaction is enabled, a pre-turn compact replays the pending
-user turn after success. A provider context-overflow used to trigger that
-recovery is not surfaced as a failed turn.
+Automatic compaction distinguishes pre-turn from mid-turn pressure. A pre-turn
+compact preserves and replays the pending user message once. A mid-turn compact
+includes the current user request, assistant work, tool calls, and tool results,
+then continues the same model loop directly from OpenAI's opaque compacted state
+without a replacement user message or replayed task.
+A provider context-overflow used to trigger recovery is not surfaced as a failed
+turn.
 
 `opencodez.responses.compaction.threshold` is a fraction of the model's input
 window and defaults to the Codex policy of `0.9`. It accepts values greater than

@@ -54,6 +54,8 @@ type CompletedCompaction = {
   summary: string | undefined
 }
 
+type Phase = NonNullable<SessionV1.CompactionPart["phase"]>
+
 function summaryText(message: SessionV1.WithParts) {
   const text = message.parts
     .filter((part): part is SessionV1.TextPart => part.type === "text")
@@ -143,6 +145,7 @@ export interface Interface {
     messages: SessionV1.WithParts[]
     sessionID: SessionID
     auto: boolean
+    phase?: Phase
     overflow?: boolean
     abort?: AbortSignal
   }) => Effect.Effect<"continue" | "stop">
@@ -151,6 +154,7 @@ export interface Interface {
     agent: string
     model: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
     auto: boolean
+    phase?: Phase
     overflow?: boolean
   }) => Effect.Effect<void>
 }
@@ -306,6 +310,8 @@ const layer = Layer.effect(
       replay?: { info: SessionV1.User; parts: SessionV1.Part[] }
       result: "continue" | "stop"
       auto: boolean
+      phase?: Phase
+      direct?: boolean
       overflow?: boolean
     }) {
       if (input.result === "continue" && input.auto) {
@@ -337,7 +343,7 @@ const layer = Layer.effect(
           }
         }
 
-        if (!input.replay) {
+        if (!input.replay && !input.direct) {
           const info = yield* provider.getProvider(input.userMessage.model.providerID)
           if (
             (yield* plugin.trigger(
@@ -368,7 +374,7 @@ const layer = Layer.effect(
               model: input.userMessage.model,
             })
             const text =
-              (input.overflow
+              (input.overflow && input.phase !== "mid-turn"
                 ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
                 : "") +
               "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
@@ -400,6 +406,7 @@ const layer = Layer.effect(
       messages: SessionV1.WithParts[]
       sessionID: SessionID
       auto: boolean
+      phase?: Phase
       overflow?: boolean
       abort?: AbortSignal
     }) {
@@ -417,7 +424,11 @@ const layer = Layer.effect(
             parts: SessionV1.Part[]
           }
         | undefined
-      if (input.overflow) {
+      // Markers created before phases were persisted used overflow=true for
+      // pre-turn recovery. Keep those sessions resumable while making new
+      // mid-turn compaction preserve the complete in-flight turn.
+      const phase = input.phase ?? (input.overflow ? "pre-turn" : undefined)
+      if (phase === "pre-turn") {
         const idx = input.messages.findIndex((m) => m.info.id === input.parentID)
         for (let i = idx - 1; i >= 0; i--) {
           const msg = input.messages[i]
@@ -428,7 +439,13 @@ const layer = Layer.effect(
           }
         }
         const hasContent =
-          replay && messages.some((m) => m.info.role === "user" && !m.parts.some((p) => p.type === "compaction"))
+          replay &&
+          messages.some(
+            (m) =>
+              m.info.role === "user" &&
+              (!m.parts.some((p) => p.type === "compaction") ||
+                m.parts.some((p) => p.type === "compaction" && p.remote?.providerID === "openai")),
+          )
         if (!hasContent) {
           replay = undefined
           messages = input.messages
@@ -474,6 +491,11 @@ const layer = Layer.effect(
         yield* events.publish(MessageV2.Event.Updated, { sessionID: input.sessionID, info: msg })
 
         const providerInfo = yield* provider.getProvider(sourceModel.providerID)
+        yield* Effect.logInfo("remote compaction", {
+          "session.id": input.sessionID,
+          phase: phase ?? "manual",
+          messages: history.length,
+        })
         const compacted = yield* OpenCodezResponsesCompact.compact({
           sessionID: input.sessionID,
           model: sourceModel,
@@ -523,6 +545,8 @@ const layer = Layer.effect(
           replay,
           result: "continue",
           auto: input.auto,
+          phase,
+          direct: phase === "mid-turn",
           overflow: input.overflow,
         })
       }
@@ -626,6 +650,7 @@ const layer = Layer.effect(
         replay,
         result,
         auto: input.auto,
+        phase,
         overflow: input.overflow,
       })
     })
@@ -635,6 +660,7 @@ const layer = Layer.effect(
       agent: string
       model: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
       auto: boolean
+      phase?: Phase
       overflow?: boolean
     }) {
       const msg = yield* session.updateMessage({
@@ -651,6 +677,7 @@ const layer = Layer.effect(
         sessionID: msg.sessionID,
         type: "compaction",
         auto: input.auto,
+        phase: input.phase,
         overflow: input.overflow,
       })
     })

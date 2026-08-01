@@ -73,6 +73,12 @@ network I/O and prepends the opaque items to the lowered tail. The session part
 is the only persistent state; the in-memory map is a request-local transport
 bridge and is cleared when the session is deleted.
 
+Direct mid-turn continuation has no new model-visible user input. Because the
+AI SDK rejects an empty local message list before transport, lowering inserts a
+single internal marker and this adapter removes it before network I/O. The
+Responses request therefore contains the opaque compacted state without a
+synthetic continuation message.
+
 Remote endpoint errors are returned as session errors. There is no local-summary
 fallback for ChatGPT OAuth.
 
@@ -88,7 +94,11 @@ limit. `opencodez.responses.compaction.threshold` may lower that percentage and
 OAuth remote compaction; other providers continue to use upstream OpenCode
 policy.
 
-Pre-turn automatic compaction replays the pending user turn after compacting
-the older history. A provider context-overflow is an internal trigger while
+Automatic compaction persists an explicit phase. Pre-turn compaction excludes
+the pending user message from compact input and replays it once after success.
+Mid-turn compaction includes the complete active turn—current user input,
+assistant work, tool calls, and tool results—and continues from the returned
+opaque state in the same model loop, without a synthetic continuation message or
+replayed task. A provider context-overflow is an internal trigger while
 automatic compaction is enabled, so it does not emit a transient session error.
 Manual compaction does not auto-continue.
