@@ -25,12 +25,15 @@ export function isOverflow(input: {
   model: Provider.Model
   outputTokenMax?: number
   limit?: number
+  additionalTokens?: number
 }) {
   if (input.cfg.compaction?.auto === false) return false
   if (input.model.limit.context === 0) return false
 
   const count =
-    input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
+    (input.tokens.total ||
+      input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write) +
+    (input.additionalTokens ?? 0)
   const threshold = Math.min(usable(input), input.limit ?? Number.POSITIVE_INFINITY)
   return count >= threshold
 }

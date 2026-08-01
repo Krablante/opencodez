@@ -67,6 +67,12 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
       new Error("This session contains OpenAI remote compaction state and must continue with ChatGPT OAuth"),
     )
   }
+  const compatibilityError = OpenCodezResponsesCompaction.compatibilityError(input.sessionMetadata, {
+    modelID: input.model.api.id,
+    accountKey:
+      input.auth?.type === "oauth" ? OpenCodezResponsesCompaction.accountKey(input.auth.accountId) : undefined,
+  })
+  if (compatibilityError) return yield* Effect.fail(new Error(compatibilityError))
   const hasRemoteCompaction =
     isOpenaiOauth && OpenCodezResponsesCompaction.register(input.sessionID, input.sessionMetadata)
   const opencodezPrompts = OpenCodezIdentity.enabled

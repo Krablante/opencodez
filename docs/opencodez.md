@@ -226,24 +226,44 @@ automatic compaction only when the model requires another sampling request,
 such as after a tool call. A completed final answer is not compacted merely
 because its final usage crossed the threshold. If the provider reports overflow
 after emitting durable reasoning, text, or tool work, that partial turn is
-treated as mid-turn and is included rather than discarded.
+treated as mid-turn and is included rather than discarded. Before a follow-up
+request, OpenCodez also adds newly completed tool-output size to the provider's
+last usage. A large result can therefore start mid-turn compaction before the
+provider rejects the next request; if rejection still occurs, the durable
+assistant/tool progress keeps recovery in the same mid-turn phase.
 
-The compact request reuses the same prepared effective System, plugin
-transformations, model options, and model-visible tool schemas as the sampling
-request. If user steering arrives around compaction, it remains pending: it is
+The active runner freezes the prepared effective System, transformed options,
+and model-visible tool schemas used for sampling, then reuses that snapshot for
+mid-turn compact while lowering the current history with all newly completed
+tool work. Manual compaction and restart recovery reconstruct the same context
+through the shared preparation boundary because no in-memory sampling snapshot
+exists. If user steering arrives around compaction, it remains pending: it is
 excluded from both compact input and the first mandatory post-compact
 continuation, then admitted normally. Before transport, OpenCodez estimates the
 complete compact payload and, only when it would exceed the model window,
 replaces contiguous oversized trailing tool outputs with the same bounded
 marker used by Codex. User messages, tool calls, and ordinary outputs are never
 summarized or dropped locally. The unary compact request uses Codex's 20-minute
-default deadline because compacting a near-full large context can legitimately
-take more than two minutes.
+default deadline and is cancelled with the owning session operation, so a Stop
+does not leave the HTTP request running in the background.
+
+Remote output is normalized before persistence: current user/assistant messages
+and opaque compaction items are retained, while echoed developer/System,
+reasoning, and tool artifacts are discarded. New compaction state also records
+the source API model and, when the login exposes an account id, a one-way ChatGPT
+account key. Standard, Fast, and Pro aliases that resolve to the same API model
+remain compatible; a different base model or account fails locally with a clear
+error instead of sending opaque state to an incompatible provider context.
+Older stored state without these identity fields remains readable.
 
 If the provider itself reports context overflow while automatic compaction is
 enabled, that error is treated as an internal recovery trigger rather than
 surfaced as a failed user turn. Manual compaction still stops after writing the
-compacted state and waits for the next user message.
+compacted state and waits for the next user message. A manual `/compact` uses
+the model currently selected by the caller, even when the previous user turn
+used another model. The UI renders the completed divider only after the remote
+operation succeeds; a failed request remains an error rather than appearing as
+a successful compaction.
 
 #### Compaction Policy
 
@@ -294,7 +314,9 @@ OpenCodez config boundary:
   validation; the same adapter removes it before the request leaves the process.
 - `packages/opencode/src/session/model-context.ts` is the shared preparation
   boundary for effective System context, transformed history, and model-visible
-  tools used by both sampling and compact requests.
+  tools used by both sampling and compact requests. The active runner retains
+  the prepared request controls through a pending mid-turn compact without a
+  second storage layer.
 - `packages/opencode/src/session/prompt.ts` owns the explicit follow-up and
   durable-output decision, while `packages/opencode/src/session/compaction.ts`
   owns pre-turn replay, complete mid-turn history, and the pending-input

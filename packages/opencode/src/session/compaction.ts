@@ -151,6 +151,7 @@ export interface Interface {
   readonly isOverflow: (input: {
     tokens: SessionV1.Assistant["tokens"]
     model: Provider.Model
+    additionalTokens?: number
   }) => Effect.Effect<boolean>
   readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
   readonly process: (input: {
@@ -161,6 +162,7 @@ export interface Interface {
     phase?: Phase
     overflow?: boolean
     abort?: AbortSignal
+    prepared?: LLMRequestPrep.Prepared
     promptOps?: TaskPromptOps
   }) => Effect.Effect<"continue" | "stop">
   readonly create: (input: {
@@ -202,6 +204,7 @@ const layer = Layer.effect(
     const isOverflow = Effect.fn("SessionCompaction.isOverflow")(function* (input: {
       tokens: SessionV1.Assistant["tokens"]
       model: Provider.Model
+      additionalTokens?: number
     }) {
       const cfg = yield* config.get()
       const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
@@ -215,6 +218,7 @@ const layer = Layer.effect(
         model: input.model,
         outputTokenMax: flags.outputTokenMax,
         limit,
+        additionalTokens: input.additionalTokens,
       })
     })
 
@@ -456,6 +460,7 @@ const layer = Layer.effect(
       phase?: Phase
       overflow?: boolean
       abort?: AbortSignal
+      prepared?: LLMRequestPrep.Prepared
       promptOps?: TaskPromptOps
     }) {
       const parent = input.messages.findLast((m) => m.info.id === input.parentID)
@@ -585,41 +590,54 @@ const layer = Layer.effect(
           if (!requestAgent) throw new Error(`Agent not found for compaction: ${requestUser.agent}`)
           const sessionInfo = yield* session.get(input.sessionID).pipe(Effect.orDie)
           const active = OpenCodezResponsesCompaction.tail(history)
-          const context = yield* SessionModelContext.resolve({
-            agent: requestAgent,
-            model: sourceModel,
-            session: sessionInfo,
-            messages: structuredClone(active.messages),
-            promptOps,
-          }).pipe(
-            Effect.provideService(Plugin.Service, plugin),
-            Effect.provideService(Permission.Service, permission),
-            Effect.provideService(ToolRegistry.Service, registry),
-            Effect.provideService(MCP.Service, mcp),
-            Effect.provideService(Truncate.Service, truncate),
-            Effect.provideService(RuntimeFlags.Service, flags),
-            Effect.provideService(Instruction.Service, instruction),
-            Effect.provideService(SystemPrompt.Service, system),
-          )
           const providerInfo = yield* provider.getProvider(sourceModel.providerID)
-          const prepared = yield* LLMRequestPrep.prepare({
-            user: requestUser,
-            sessionID: input.sessionID,
-            parentSessionID: sessionInfo.parentID,
-            sessionMetadata: OpenCodezResponsesCompaction.withMetadata(sessionInfo.metadata, history),
-            model: sourceModel,
-            agent: requestAgent,
-            permission: sessionInfo.permission,
-            system: context.system,
-            messages: context.messages,
-            tools: context.tools,
-            provider: providerInfo,
-            auth: authInfo,
-            plugin,
-            flags,
-            isWorkflow: false,
-            config: cfg,
-          })
+          const snapshot = input.prepared
+          const prepared = snapshot
+            ? yield* Effect.gen(function* () {
+                if (phase === "mid-turn" && input.overflow) return snapshot
+                const messages = structuredClone(active.messages)
+                yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages })
+                return {
+                  ...snapshot,
+                  messages: yield* MessageV2.toModelMessagesEffect(messages, sourceModel),
+                }
+              })
+            : yield* Effect.gen(function* () {
+                const context = yield* SessionModelContext.resolve({
+                  agent: requestAgent,
+                  model: sourceModel,
+                  session: sessionInfo,
+                  messages: structuredClone(active.messages),
+                  promptOps,
+                }).pipe(
+                  Effect.provideService(Plugin.Service, plugin),
+                  Effect.provideService(Permission.Service, permission),
+                  Effect.provideService(ToolRegistry.Service, registry),
+                  Effect.provideService(MCP.Service, mcp),
+                  Effect.provideService(Truncate.Service, truncate),
+                  Effect.provideService(RuntimeFlags.Service, flags),
+                  Effect.provideService(Instruction.Service, instruction),
+                  Effect.provideService(SystemPrompt.Service, system),
+                )
+                return yield* LLMRequestPrep.prepare({
+                  user: requestUser,
+                  sessionID: input.sessionID,
+                  parentSessionID: sessionInfo.parentID,
+                  sessionMetadata: OpenCodezResponsesCompaction.withMetadata(sessionInfo.metadata, history),
+                  model: sourceModel,
+                  agent: requestAgent,
+                  permission: sessionInfo.permission,
+                  system: context.system,
+                  messages: context.messages,
+                  tools: context.tools,
+                  provider: providerInfo,
+                  auth: authInfo,
+                  plugin,
+                  flags,
+                  isWorkflow: false,
+                  config: cfg,
+                })
+              })
           return yield* OpenCodezResponsesCompact.compact({
             model: sourceModel,
             provider: providerInfo,
@@ -674,6 +692,9 @@ const layer = Layer.effect(
           remote: {
             providerID: "openai",
             items: compacted.value.items,
+            model_id: sourceModel.api.id,
+            account_key:
+              authInfo?.type === "oauth" ? OpenCodezResponsesCompaction.accountKey(authInfo.accountId) : undefined,
           },
         })
         const usage = Session.getUsage({
@@ -937,7 +958,7 @@ const layer = Layer.effect(
       const msg = yield* session.updateMessage({
         id: MessageID.ascending(),
         role: "user",
-        model: turn?.model ?? input.model,
+        model: input.auto && turn ? turn.model : input.model,
         sessionID: input.sessionID,
         agent: turn?.agent ?? input.agent,
         format: turn?.format,

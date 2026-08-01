@@ -204,6 +204,8 @@ export const CompactionPart = Schema.Struct({
     Schema.Struct({
       providerID: Schema.Literal("openai"),
       items: Schema.mutable(Schema.Array(Schema.Unknown)),
+      model_id: Schema.optional(Schema.String),
+      account_key: Schema.optional(Schema.String),
     }),
   ),
 }).annotate({ identifier: "CompactionPart" })

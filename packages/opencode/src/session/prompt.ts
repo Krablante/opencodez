@@ -57,6 +57,8 @@ import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionModelContext } from "./model-context"
 import { LLMEvent } from "@opencode-ai/llm"
+import { Token } from "@/util/token"
+import { LLMRequestPrep } from "./llm/request"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1084,6 +1086,7 @@ const layer = Layer.effect(
         const ctx = yield* InstanceState.context
         let structured: unknown
         let step = 0
+        let preparedContext: LLMRequestPrep.Prepared | undefined
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
@@ -1195,16 +1198,31 @@ const layer = Layer.effect(
               auto: task.auto,
               phase: task.phase,
               overflow: task.overflow,
+              prepared: preparedContext,
               promptOps: yield* ops(),
             })
             if (result === "stop") break
             continue
           }
 
+          const additionalTokens = modelNeedsFollowUp
+            ? (lastAssistantMsg?.parts.reduce((total, part) => {
+                if (part.type !== "tool") return total
+                if (part.state.status === "completed") {
+                  return (
+                    total +
+                    Token.estimate(part.state.output) +
+                    Token.estimate(JSON.stringify(part.state.attachments ?? []))
+                  )
+                }
+                if (part.state.status === "error") return total + Token.estimate(part.state.error)
+                return total
+              }, 0) ?? 0)
+            : 0
           if (
             lastFinished &&
             lastFinished.summary !== true &&
-            (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
+            (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model, additionalTokens }))
           ) {
             yield* compaction.create({
               sessionID,
@@ -1319,6 +1337,9 @@ const layer = Layer.effect(
               tools,
               model,
               toolChoice: format.type === "json_schema" ? "required" : undefined,
+              onPrepared(prepared) {
+                preparedContext = prepared
+              },
             })
 
             if (structured !== undefined) {
@@ -1360,7 +1381,8 @@ const layer = Layer.effect(
                 agent: lastUser.agent,
                 model: lastUser.model,
                 auto: true,
-                phase: handle.needsFollowUp || handle.producedDurableOutput ? "mid-turn" : "pre-turn",
+                phase:
+                  modelNeedsFollowUp || handle.needsFollowUp || handle.producedDurableOutput ? "mid-turn" : "pre-turn",
                 turnID: handle.message.parentID,
                 overflow: !handle.producedDurableOutput,
               })

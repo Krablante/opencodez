@@ -627,6 +627,8 @@ export type CompactionPart = {
   remote?: {
     providerID: "openai"
     items: Array<unknown>
+    model_id?: string
+    account_key?: string
   }
 }
 

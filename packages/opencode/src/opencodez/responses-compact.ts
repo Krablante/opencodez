@@ -62,12 +62,12 @@ export function compact(input: {
     const fetcher: typeof fetch =
       typeof input.provider.options.fetch === "function" ? input.provider.options.fetch : fetch
     const response = yield* Effect.tryPromise({
-      try: () =>
+      try: (signal) =>
         fetcher(`${baseURL}/responses/compact`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(request),
-          signal: input.abort,
+          signal: AbortSignal.any([signal, input.abort]),
         }),
       catch: (cause) => new Error("OpenAI remote compaction request failed", { cause }),
     })
@@ -83,10 +83,12 @@ export function compact(input: {
     if (!isRecord(payload) || !Array.isArray(payload.output) || payload.output.length === 0) {
       throw new Error("OpenAI remote compaction returned no output items")
     }
+    const items = payload.output.filter(keepOutputItem)
+    if (items.length === 0) throw new Error("OpenAI remote compaction returned no supported output items")
     const usage = isRecord(payload.usage) ? payload.usage : {}
     const outputDetails = isRecord(usage.output_tokens_details) ? usage.output_tokens_details : {}
     return {
-      items: payload.output,
+      items,
       trimmedOutputs,
       usage: {
         total: number(usage.total_tokens),
@@ -147,6 +149,20 @@ function number(value: unknown) {
 
 function isSystemMessage(value: unknown) {
   return isRecord(value) && value.type === "message" && value.role === "system"
+}
+
+function keepOutputItem(value: unknown) {
+  if (!isRecord(value)) return false
+  // The ChatGPT legacy compact endpoint serializes Codex's context-compaction
+  // item as compaction_summary. Keep both current and legacy wire names.
+  if (
+    value.type === "compaction" ||
+    value.type === "compaction_summary" ||
+    value.type === "context_compaction" ||
+    value.type === "agent_message"
+  )
+    return true
+  return value.type === "message" && (value.role === "user" || value.role === "assistant")
 }
 
 export * as OpenCodezResponsesCompact from "./responses-compact"

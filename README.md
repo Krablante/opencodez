@@ -242,8 +242,11 @@ turn. Final answers do not trigger a redundant compact-and-continue merely for
 crossing the threshold. Compact requests use the same effective System and tool
 schemas as sampling; steering input waits until the mandatory post-compact
 continuation, and only oversized trailing tool outputs may be replaced to fit
-the request window. The remote request allows the same long unary deadline as
-Codex and still has no local-summary fallback.
+the request window. Newly completed tool output is included in the preflight
+limit, remote state is bound to its base API model and ChatGPT account, and Stop
+cancels the compact request. The UI reports compaction only after success. The
+remote request allows the same long unary deadline as Codex and still has no
+local-summary fallback.
 
 `opencodez.responses.compaction.threshold` is a fraction of the model's input
 window and defaults to the Codex policy of `0.9`. It accepts values greater than

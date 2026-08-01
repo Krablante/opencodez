@@ -6,9 +6,11 @@ export const CONTINUE_MARKER = "__OPENCODEZ_REMOTE_COMPACTION_CONTINUE__"
 
 type Context = {
   items: unknown[]
+  modelID?: string
+  accountKey?: string
 }
 
-const active = new Map<string, unknown[]>()
+const active = new Map<string, Context>()
 
 export function latest(messages: readonly SessionV1.WithParts[]) {
   for (let index = messages.length - 1; index >= 0; index--) {
@@ -20,8 +22,11 @@ export function latest(messages: readonly SessionV1.WithParts[]) {
       index,
       messageID: message.info.id,
       items: part.remote.items,
+      modelID: part.remote.model_id,
+      accountKey: part.remote.account_key,
     }
   }
+  return undefined
 }
 
 export function tail(messages: readonly SessionV1.WithParts[]) {
@@ -45,6 +50,8 @@ export function withMetadata(metadata: Record<string, unknown> | undefined, mess
     ...(metadata ?? {}),
     [METADATA_KEY]: {
       items: context.items,
+      modelID: context.modelID,
+      accountKey: context.accountKey,
     } satisfies Context,
   }
 }
@@ -52,7 +59,7 @@ export function withMetadata(metadata: Record<string, unknown> | undefined, mess
 export function register(sessionID: string, metadata: Record<string, unknown> | undefined) {
   const value = metadata?.[METADATA_KEY]
   if (!isContext(value)) return false
-  active.set(sessionID, value.items)
+  active.set(sessionID, value)
   return true
 }
 
@@ -63,8 +70,8 @@ export function has(metadata: Record<string, unknown> | undefined) {
 export function inject(body: BodyInit | null | undefined, sessionID: string | undefined) {
   if (!sessionID) throw new Error("Remote compaction request is missing a session ID")
   if (typeof body !== "string") throw new Error("Remote compaction request body must be JSON text")
-  const items = active.get(sessionID)
-  if (!items) throw new Error(`Remote compaction context is unavailable for session ${sessionID}`)
+  const context = active.get(sessionID)
+  if (!context) throw new Error(`Remote compaction context is unavailable for session ${sessionID}`)
   try {
     const parsed = JSON.parse(body) as Record<string, unknown>
     if (!Array.isArray(parsed.input)) throw new Error("Remote compaction request input must be an array")
@@ -79,7 +86,7 @@ export function inject(body: BodyInit | null | undefined, sessionID: string | un
       // /compact echoes the system item it received, but Codex rejects that
       // stale item when the compacted context is replayed. Keep the current
       // request's system prefix and place compacted state immediately after it.
-      input: [...system, ...items.filter((item) => !isSystemMessage(item)), ...input],
+      input: [...system, ...context.items.filter((item) => !isSystemMessage(item)), ...input],
     })
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Remote compaction")) throw error
@@ -109,8 +116,31 @@ export function clear(sessionID: string) {
   active.delete(sessionID)
 }
 
+export function accountKey(accountID: string | undefined) {
+  if (!accountID) return undefined
+  return new Bun.CryptoHasher("sha256").update(accountID).digest("hex")
+}
+
+export function compatibilityError(
+  metadata: Record<string, unknown> | undefined,
+  input: { modelID: string; accountKey?: string },
+): string | undefined {
+  const context = metadata?.[METADATA_KEY]
+  if (!isContext(context)) return
+  if (context.modelID && context.modelID !== input.modelID) {
+    return `This session's OpenAI compacted state belongs to model ${context.modelID}; continue with that base model or start a new session before switching`
+  }
+  if (context.accountKey && context.accountKey !== input.accountKey) {
+    return "This session's OpenAI compacted state belongs to a different ChatGPT account"
+  }
+  return undefined
+}
+
 function isContext(value: unknown): value is Context {
-  return !!value && typeof value === "object" && Array.isArray((value as Context).items)
+  if (!value || typeof value !== "object") return false
+  if (!("items" in value) || !Array.isArray(value.items)) return false
+  if ("modelID" in value && value.modelID !== undefined && typeof value.modelID !== "string") return false
+  return !("accountKey" in value) || value.accountKey === undefined || typeof value.accountKey === "string"
 }
 
 export * as OpenCodezResponsesCompaction from "./responses-compaction"
