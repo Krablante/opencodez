@@ -132,6 +132,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           agent: Agent.ID.pipe(Schema.optional),
           model: Model.Ref.pipe(Schema.optional),
           location: Location.Ref.pipe(Schema.optional),
+          metadata: Session.Info.fields.metadata,
         }),
         success: Schema.Struct({ data: Session.Info }),
       }).annotateMerge(

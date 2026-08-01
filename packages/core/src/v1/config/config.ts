@@ -67,7 +67,7 @@ export const Info = Schema.Struct({
       "Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications",
   }),
   opencodez: Schema.optional(ConfigOpencodez.Info).annotate({
-    description: "OpenCodez prompt library and context pruning configuration",
+    description: "OpenCodez prompt library and Responses wire configuration",
   }),
   disabled_providers: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
     description: "Disable providers that are loaded automatically",

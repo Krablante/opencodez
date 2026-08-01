@@ -30,23 +30,6 @@ describe("OpenCodezSession", () => {
     expect(sol.system).toBe("codex_gpt_5_6_sol")
   })
 
-  test("ignores legacy Tone fields in persisted metadata", () => {
-    const state = OpenCodezSession.fromMetadata({
-      opencodez: {
-        selection: {
-          system: "codex_gpt_5_5",
-          systemManual: true,
-          tone: "codex_pragmatic",
-          toneManual: true,
-        },
-      },
-    })
-
-    expect(state.selection).toEqual({ system: "codex_gpt_5_5", systemManual: true })
-    expect(state.selection).not.toHaveProperty("tone")
-    expect(state.selection).not.toHaveProperty("toneManual")
-  })
-
   test("persists explicit None as a disabled System", () => {
     const metadata = OpenCodezSession.metadataWithSelection(undefined, OpenCodezSession.disable())
     expect(OpenCodezSession.fromMetadata(metadata).selection).toEqual({ system: null, systemManual: true })

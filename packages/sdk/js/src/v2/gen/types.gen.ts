@@ -622,6 +622,10 @@ export type CompactionPart = {
   auto: boolean
   overflow?: boolean
   tail_start_id?: string
+  remote?: {
+    providerID: "openai"
+    items: Array<unknown>
+  }
 }
 
 export type Part =
@@ -1930,14 +1934,10 @@ export type Config = {
         | {
             [key: string]: string
           }
-    }
-    pruning?: {
-      enabled?: boolean
-      pruning_size?: number
-      preserve_tools?: Array<string>
-      prune?: {
-        reasoning?: boolean
-        tool?: boolean
+      wire?: "legacy" | "codex"
+      compaction?: {
+        threshold?: number
+        token_limit?: number
       }
     }
   }
@@ -3949,6 +3949,9 @@ export type SessionV2Info = {
   agent?: string
   model?: ModelRef
   cost: number
+  metadata?: {
+    [key: string]: unknown
+  }
   tokens: {
     input: number
     output: number
@@ -11521,6 +11524,9 @@ export type V2SessionCreateData = {
     agent?: string
     model?: ModelRef
     location?: LocationRef
+    metadata?: {
+      [key: string]: unknown
+    }
   }
   path?: never
   query?: never

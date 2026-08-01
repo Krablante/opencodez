@@ -52,7 +52,7 @@ import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { useArgs } from "../../context/args"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
-import { OpenCodezPromptSelector, OpenCodezPruningStatusDialog } from "../opencodez-dialogs"
+import { OpenCodezPromptSelector } from "../opencodez-dialogs"
 import { OpenCodezSession } from "@opencode-ai/core/opencodez/session"
 import { OpenCodezSlash } from "@opencode-ai/core/opencodez/slash"
 import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
@@ -248,9 +248,11 @@ export function Prompt(props: PromptProps) {
   })
   const openCodezIndicator = createMemo(() => {
     const selection = openCodezSelection()
+    const terminalWidth = dimensions().width
+    if (terminalWidth < 72) return undefined
     const label = `S: ${selection.system}`
     const compactLabel = label.length > 35 ? `S:${selection.system}` : label
-    const width = Math.max(18, Math.min(56, Math.floor(dimensions().width / 3)))
+    const width = Math.max(16, Math.min(24, Math.floor(terminalWidth / 5)))
     return Locale.truncateMiddle(compactLabel, width)
   })
 
@@ -338,7 +340,8 @@ export function Prompt(props: PromptProps) {
     interrupt: 0,
   })
   const hasRightContent = createMemo(
-    () => (OpenCodezIdentity.enabled && store.mode === "normal") || Boolean(props.right),
+    () =>
+      (OpenCodezIdentity.enabled && store.mode === "normal" && Boolean(openCodezIndicator())) || Boolean(props.right),
   )
 
   createEffect(
@@ -986,7 +989,7 @@ export function Prompt(props: PromptProps) {
       return
     }
     const state = OpenCodezSession.fromMetadata(metadata)
-    OpenCodezSession.resetPending(state.selection ?? {}, state.pruning ?? {})
+    OpenCodezSession.resetPending(state.selection ?? {})
   }
 
   async function selectOpenCodezPrompt(input: {
@@ -1069,30 +1072,6 @@ export function Prompt(props: PromptProps) {
         return clearCommandInput()
       }
       if (!(await applyNamedPrompt(command.name, sessionID))) return true
-      return clearCommandInput()
-    }
-    if (command.type === "pruning") {
-      if (command.error) {
-        toast.show({ message: command.error, variant: "warning", duration: 3500 })
-        return true
-      }
-      if (!command.action) {
-        dialog.replace(() => (
-          <OpenCodezPruningStatusDialog
-            sessionID={sessionID}
-            metadata={currentOpenCodezMetadata()}
-            config={sync.data.config}
-          />
-        ))
-        return clearCommandInput()
-      }
-      if (command.action === "on") OpenCodezSession.setPruning(sessionID, { enabled: true }, currentOpenCodezMetadata())
-      if (command.action === "off")
-        OpenCodezSession.setPruning(sessionID, { enabled: false }, currentOpenCodezMetadata())
-      if (command.action === "size")
-        OpenCodezSession.setPruning(sessionID, { pruning_size: command.size }, currentOpenCodezMetadata())
-      await persistOpenCodezState(sessionID)
-      toast.show({ message: "Pruning settings updated for this session", variant: "info", duration: 2500 })
       return clearCommandInput()
     }
   }
@@ -1654,15 +1633,17 @@ export function Prompt(props: PromptProps) {
               </box>
               <Show when={hasRightContent()}>
                 <box flexDirection="row" gap={1} alignItems="center" minWidth={0}>
-                  <Show when={OpenCodezIdentity.enabled && store.mode === "normal"}>
-                    <text
-                      flexShrink={1}
-                      wrapMode="none"
-                      overflow="hidden"
-                      fg={fadeColor(theme.textMuted, modelMetaAlpha())}
-                    >
-                      {openCodezIndicator()}
-                    </text>
+                  <Show when={OpenCodezIdentity.enabled && store.mode === "normal" ? openCodezIndicator() : undefined}>
+                    {(label) => (
+                      <text
+                        flexShrink={1}
+                        wrapMode="none"
+                        overflow="hidden"
+                        fg={fadeColor(theme.textMuted, modelMetaAlpha())}
+                      >
+                        {label()}
+                      </text>
+                    )}
                   </Show>
                   {props.right}
                 </box>

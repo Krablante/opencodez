@@ -23,6 +23,7 @@ export interface StreamResponsesWebSocketOptions {
   idleTimeout?: number
   signal?: AbortSignal
   onFirstEvent?: (error?: WrappedError) => void
+  onEvent?: (event: Record<string, unknown>) => void
   onComplete?: (event: Record<string, unknown>) => void
   onTerminal?: (event: Record<string, unknown>) => void
   onRetryableTerminal?: (event: Record<string, unknown>) => Promise<WebSocket | undefined>
@@ -193,6 +194,8 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
         return undefined
       }
     })()
+
+    if (event) options.onEvent?.(event)
 
     if (event?.type === "error" && options.onRetryableTerminal) {
       cleanupSocket()

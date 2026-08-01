@@ -13,6 +13,7 @@ import { Provider } from "@/provider/provider"
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
+import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
@@ -1163,7 +1164,15 @@ const layer = Layer.effect(
             lastFinished.summary !== true &&
             (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
           ) {
-            yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
+            yield* compaction.create({
+              sessionID,
+              agent: lastUser.agent,
+              model: lastUser.model,
+              auto: true,
+              // The pending turn has not reached the provider; compact older
+              // history and use the existing overflow replay path to resend it.
+              overflow: true,
+            })
             continue
           }
 
@@ -1275,7 +1284,7 @@ const layer = Layer.effect(
               permission: session.permission,
               sessionID,
               parentSessionID: session.parentID,
-              sessionMetadata: session.metadata,
+              sessionMetadata: OpenCodezResponsesCompaction.withMetadata(session.metadata, msgs),
               system,
               messages: [
                 ...modelMsgs,

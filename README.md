@@ -1,7 +1,7 @@
 <h1 align="center">OpenCodez</h1>
 
 <p align="center">
-  A local-first OpenCode fork for flexible System prompt control, token-saving pruning, and bundled Codex prompts for a Codex-like experience.
+  A local-first OpenCode fork for flexible System prompt control, bundled Codex prompts, and stateful ChatGPT Responses transport by default.
 </p>
 
 <p align="center">
@@ -23,16 +23,16 @@
 
 ## At a Glance
 
-OpenCodez is for people who want OpenCode to stay OpenCode, but with flexible prompt control, a ready-to-use Codex-style prompt set, and less noisy model context.
+OpenCodez is for people who want OpenCode to stay OpenCode, but with flexible prompt control, a ready-to-use Codex-style prompt set, and efficient stateful ChatGPT Responses requests.
 
-| Area           | What OpenCodez adds                                                                                               |
-| -------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Prompt control | TUI command and web composer control for the active System prompt.                                                |
-| Prompt library | Upstream built-ins, bundled Codex presets, and user prompt files in one shared selector.                          |
-| Model defaults | Configurable System defaults, with Codex-style defaults for OpenAI Responses GPT models out of the box.           |
-| Session state  | A manual System choice stays with the session and does not reset on `/model`.                                    |
-| Pruning        | Reasoning and tool result payloads can be replaced with clear placeholders before context is sent to the model.   |
-| Updates        | `opencodez update` uses GitHub Releases.                                                                          |
+| Area           | What OpenCodez adds                                                                                        |
+| -------------- | ---------------------------------------------------------------------------------------------------------- |
+| Prompt control | TUI command and web composer control for the active System prompt.                                         |
+| Prompt library | Upstream built-ins, bundled Codex presets, and user prompt files in one shared selector.                   |
+| Model defaults | Configurable System defaults, with Codex-style defaults for OpenAI Responses GPT models out of the box.    |
+| Session state  | A manual System choice stays with the session and does not reset on `/model`.                              |
+| Responses wire | ChatGPT OAuth can send incremental Codex-style WebSocket turns instead of resending the full conversation. |
+| Updates        | `opencodez update` uses GitHub Releases.                                                                   |
 
 Read the full public feature reference in [docs/opencodez.md](docs/opencodez.md).
 
@@ -46,16 +46,22 @@ OpenCodez keeps the normal OpenCode shape, but adds a few practical controls:
 - Model-aware defaults choose System prompts automatically for OpenAI Responses GPT models, and users can configure defaults for other models too.
 - A manual `/system` choice stays active when you switch models.
 - The TUI shows the concrete active System prompt id while you work.
-- `/pruning` lets you view and change session-local pruning settings.
-- Tool calls stay readable while tool result and reasoning payloads can be replaced with deterministic placeholders.
+- ChatGPT OAuth can use Codex-compatible stateful Responses WebSocket requests with safe full-request fallback.
+- ChatGPT OAuth uses server-side Responses compaction for long sessions and persists the opaque compacted context across restart and reconnect.
 - Non-git projects stay scoped to the selected directory, explicit filesystem
-  roots clamp to `$HOME`, and FFF indexing is disabled by default.
+  roots clamp to `$HOME`, and background file indexing is disabled by default.
 - `opencodez update` prints GitHub release, download progress, and install
   stages instead of staying silent during large asset downloads.
 
 OpenCodez is meant to be a small fork, not a full rebrand. Upstream internals, docs, workflows, integrations, and package surfaces should stay as close to OpenCode as practical unless a fork-specific change is genuinely needed.
 
-For detailed behavior, defaults, command semantics, pruning rules, and maintenance notes, use [OpenCodez Docs](docs/opencodez.md).
+With the default `OPENCODE_DISABLE_FFF=1`, OpenCodez uses a no-op file-search
+index: it starts neither FFF nor the upstream `rg --files` fallback. Web/TUI
+fuzzy file suggestions are empty in this mode, while directory browsing,
+direct file access, and agent `glob`/`grep` tools continue to work. Set the
+variable to `0` only when upstream background indexing is explicitly wanted.
+
+For detailed behavior, defaults, command semantics, Responses wire configuration, and maintenance notes, use [OpenCodez Docs](docs/opencodez.md).
 
 ## Install & Update
 
@@ -109,7 +115,7 @@ For local development, run the source-checkout launcher directly:
 ```
 
 Release builds should set `OPENCODEZ_BUILD=1` so the build script emits `opencodez-*` artifacts with an `opencodez` binary inside.
-Normal public releases should use the `publish` GitHub Actions workflow. Give it an OpenCodez release version such as `1.18.4+opencodez.3`; the release version must include `opencodez` so accidental upstream-looking tags are rejected. The workflow embeds that complete version by default, builds the `opencodez-*` assets, verifies their names and archive contents, uploads them to GitHub Releases, and publishes the release unless `draft` is enabled.
+Normal public releases should use the `publish` GitHub Actions workflow. Give it an OpenCodez release version such as `1.18.10+opencodez.1`; the release version must include `opencodez` so accidental upstream-looking tags are rejected. The workflow embeds that complete version by default, builds the `opencodez-*` assets, verifies their names and archive contents, uploads them to GitHub Releases, and publishes the release unless `draft` is enabled.
 
 ## Side-by-Side With OpenCode
 
@@ -138,7 +144,7 @@ The maintained public reference for OpenCodez-specific behavior is:
 docs/opencodez.md
 ```
 
-It covers System prompt defaults, pruning, config roots, session behavior, and maintenance expectations for this fork. Upstream OpenCode documentation remains the source for normal OpenCode behavior.
+It covers System prompt defaults, Responses wire modes, config roots, session behavior, and maintenance expectations for this fork. Upstream OpenCode documentation remains the source for normal OpenCode behavior.
 
 Prompt library paths:
 
@@ -182,6 +188,11 @@ Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one p
 {
   "opencodez": {
     "responses": {
+      "wire": "codex",
+      "compaction": {
+        "threshold": 0.9,
+        "token_limit": 300000,
+      },
       "system": {
         "default": "codex_gpt_5_5",
         "gpt-5.2-codex": "codex_gpt_5_2_codex",
@@ -195,29 +206,43 @@ Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one p
 }
 ```
 
-## Pruning Config
+## Responses Config
 
-Pruning defaults also live in `~/.config/opencodez/opencode.jsonc`:
+`opencodez.responses.wire` accepts `codex` or `legacy` and defaults to `codex`.
+The default applies only to OpenAI models authenticated through ChatGPT OAuth.
+It sends incremental input with `previous_response_id` while a matching WebSocket
+conversation remains live, and safely returns to a full request after reconnects,
+interruptions, context changes, or model-setting changes. Set the value to
+`legacy` to restore the previous request flow. API-key OpenAI access and other
+providers keep their existing behavior.
 
-```jsonc
-{
-  "opencodez": {
-    "pruning": {
-      "enabled": true,
-      "pruning_size": 20000,
-      "prune": {
-        "reasoning": true,
-        "tool": true,
-      },
-      "preserve_tools": [],
-    },
-  },
-}
-```
+ChatGPT OAuth Fast model entries keep the same underlying model and send the
+catalog's `service_tier: "priority"` through the Codex product route. Switching
+between Standard and Fast remains a normal model change and safely starts a new
+full continuation chain. Changing the logged-in ChatGPT account does the same;
+response and reasoning IDs are never reused across account boundaries.
 
-`enabled` turns pruning on or off. `pruning_size` is the payload budget, currently counted in characters. `prune.reasoning` and `prune.tool` decide which payload types can be replaced with placeholders. `preserve_tools` is a list of tool names or glob patterns that should never be pruned.
+For ChatGPT OAuth, automatic and manual compaction use OpenAI's
+`responses/compact` endpoint instead of a local summarization turn. OpenCodez
+stores the returned opaque items in the session and restores them before later
+Responses requests, including after a process restart. Compaction failures are
+reported directly and do not silently fall back to a lower-quality local
+summary. After remote compaction, that session must continue through ChatGPT
+OAuth because other providers cannot interpret OpenAI's opaque state.
+Zero Data Retention is supported by sending encrypted reasoning state inline
+instead of referencing non-persisted reasoning item IDs. Continuation keeps the
+current System metadata ahead of the replayed compacted state.
+When automatic compaction is enabled, a pre-turn compact replays the pending
+user turn after success. A provider context-overflow used to trigger that
+recovery is not surfaced as a failed turn.
 
-The `/pruning` TUI command changes only the current session's `enabled` state and `pruning_size`. It does not rewrite `opencode.jsonc`.
+`opencodez.responses.compaction.threshold` is a fraction of the model's input
+window and defaults to the Codex policy of `0.9`. It accepts values greater than
+`0` and no greater than `0.9`, so configuration can compact earlier but never
+later than the safe default. Optional `token_limit` adds an absolute positive
+token cap. The effective trigger is the minimum of the percentage limit, the
+absolute cap, and OpenCode's usable-input limit. For the current Luna/Sol input
+window of `372000`, the default trigger is `334800` tokens.
 
 ## Commands
 
@@ -226,10 +251,6 @@ The `/pruning` TUI command changes only the current session's `enabled` state an
 | `/system`               | Opens the Core/System prompt selector.                                    |
 | `/system codex_gpt_5_5` | Sets the current session System prompt directly.                          |
 | `/system none`          | Explicitly disables the selectable System prompt for the current session. |
-| `/pruning`              | Opens the pruning settings view.                                          |
-| `/pruning on`           | Enables pruning for the current session.                                  |
-| `/pruning off`          | Disables pruning for the current session.                                 |
-| `/pruning size 20000`   | Sets the current session pruning payload budget.                          |
 
 ## Upstream OpenCode README
 

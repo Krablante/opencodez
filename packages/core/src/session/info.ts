@@ -35,6 +35,7 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
         write: row.tokens_cache_write,
       },
     },
+    metadata: row.metadata ?? undefined,
     location: Location.Ref.make({
       directory: AbsolutePath.make(row.directory),
       workspaceID: row.workspace_id ? WorkspaceV2.ID.make(row.workspace_id) : undefined,

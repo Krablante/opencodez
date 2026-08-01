@@ -20,6 +20,15 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/FileSystem/Search") {}
 
+const disabledLayer = Layer.succeed(
+  Service,
+  Service.of({
+    find: () => Effect.succeed([]),
+    glob: () => Effect.succeed([]),
+    grep: () => Effect.succeed([]),
+  }),
+)
+
 export const ripgrepLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -232,7 +241,12 @@ export const fffLayer = Layer.effect(
   }),
 )
 
-const layer = Layer.unwrap(Effect.sync(() => (Flag.OPENCODE_DISABLE_FFF || !Fff.available() ? ripgrepLayer : fffLayer)))
+const layer = Layer.unwrap(
+  Effect.sync(() => {
+    if (Flag.OPENCODE_DISABLE_FFF) return disabledLayer
+    return Fff.available() ? fffLayer : ripgrepLayer
+  }),
+)
 
 export const locationLayer = layer
 

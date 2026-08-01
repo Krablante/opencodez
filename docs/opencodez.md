@@ -1,9 +1,9 @@
 # OpenCodez
 
 OpenCodez is a small public fork of OpenCode. It preserves upstream behavior and
-adds isolated runtime roots, managed System prompts, session-local context
-pruning, fork-specific updates, safe project discovery, and multiserver web
-operation.
+adds isolated runtime roots, managed System prompts, a default Codex-compatible
+Responses wire mode for ChatGPT OAuth, fork-specific updates, safe project
+discovery, and multiserver web operation.
 
 ## Runtime Roots
 
@@ -44,7 +44,7 @@ replacement of `/usr/local/bin/opencodez`, then falls back to the normal
 interactive sudo flow when the helper is absent.
 
 Release versions use the upstream base plus OpenCodez build metadata, for
-example `1.18.4+opencodez.3`. The release tag and embedded binary version must
+example `1.18.10+opencodez.1`. The release tag and embedded binary version must
 match exactly.
 
 ## System Prompt Library
@@ -64,6 +64,16 @@ The same System selector is available in both generations of the Web/Desktop
 prompt composer. New sessions carry the selected prompt in submission metadata;
 existing sessions keep their server-side selection when models or layouts
 change.
+
+Session creation carries the same optional metadata through both the current
+Protocol API and the App compatibility adapter, so a selection made before the
+first message survives creation, reload, and later protocol upgrades.
+
+The Web prompt control stays in the compact model-control row. In the TUI the
+same selection is secondary status: it is rendered as `S: <name>`, omitted
+below 72 terminal columns, and capped at 24 columns so the model, agent, and
+workspace indicators keep priority. Only the System selector is exposed;
+upstream command templates remain an internal slash-command payload.
 
 Bundled Codex-derived prompts include:
 
@@ -107,16 +117,167 @@ Users can override defaults in `~/.config/opencodez/opencode.jsonc`:
 {
   "opencodez": {
     "responses": {
+      "wire": "codex",
+      "compaction": {
+        "threshold": 0.9,
+        "token_limit": 300000,
+      },
       "system": {
         "default": "codex_gpt_5_5",
         "gpt-5.6-luna": "codex_gpt_5_6_luna_terra",
         "gpt-5.6-terra": "codex_gpt_5_6_luna_terra",
-        "gpt-5.6-sol": "codex_gpt_5_6_sol"
-      }
-    }
-  }
+        "gpt-5.6-sol": "codex_gpt_5_6_sol",
+      },
+    },
+  },
 }
 ```
+
+## Responses Wire Mode
+
+ChatGPT OAuth sessions can use the stateful Responses WebSocket protocol from
+Codex `rust-v0.146.0`. The first model request sends the full conversation.
+Later requests on the same live connection send only new input items together
+with `previous_response_id` when the conversation prefix and model settings
+still match.
+
+The default is `codex`. Set `opencodez.responses.wire` to `legacy` to restore the
+previous OpenCode request flow. The setting applies only to OpenAI models
+authenticated through ChatGPT OAuth; OpenAI API-key access and other providers
+are unchanged.
+
+Fast aliases supplied by the model catalog keep the base model id and use
+`service_tier: "priority"`. ChatGPT's Codex backend also requires the Codex
+product originator for accelerated routing, so the OAuth adapter supplies it at
+the existing authenticated fetch boundary. No extra request, entitlement probe,
+warning, or UI state is involved. The response may still report
+`service_tier: "default"`; paired Standard/Fast latency checks are the reliable
+product-level validation.
+
+OpenCodez automatically sends a full request after a reconnect, interrupted
+response, context compaction, history edit, or relevant model-setting change.
+The existing HTTP fallback also receives the original full request rather than
+an incremental body.
+
+Continuation state is keyed by both the local session and the ChatGPT account.
+Changing accounts therefore opens a fresh chain and sends one full request
+instead of reusing account-scoped response or reasoning IDs.
+
+### History Revert and Branching
+
+Session history remains canonical in the local OpenCode database. A staged
+revert records only the target message and optional part; unrevert removes that
+marker without changing stored messages. Sending a replacement prompt commits
+the revert, removes the selected message and its later tail from the active
+branch, and then creates the replacement user/assistant pair.
+
+The shortened or edited input cannot match the previous Responses prefix, so
+Codex wire deliberately omits `previous_response_id` and sends one full request
+to start a new server-side branch. Later turns on that branch resume incremental
+continuation normally. After a process restart, the in-memory continuation is
+gone and the same local branch is reconstructed in another safe full request.
+Forking a session copies message history under new IDs; reverting the fork does
+not modify its original session.
+
+### Server-Side Compaction
+
+Automatic and manual compaction use OpenAI's documented
+[`responses/compact`](https://developers.openai.com/api/docs/guides/compaction)
+endpoint for ChatGPT OAuth. OpenCodez keeps the existing provider-aware overflow
+threshold, but the compaction operation itself runs on the OpenAI server instead
+of asking the model for a local text summary.
+
+The returned canonical response items are stored in the session's compaction
+part. Later model requests discard the pre-compaction local history, prepend the
+opaque items to the new tail, and then use the normal Responses transport. This
+survives process restart and WebSocket reconnect without a second state store.
+The original session history remains available locally for audit, but is no
+longer sent to the model.
+
+Remote compaction is independent of `opencodez.responses.wire`: explicit
+`legacy` mode still uses server-side compaction over HTTP. Other providers keep
+upstream OpenCode local compaction. A session that already contains OpenAI opaque
+compaction state must continue through ChatGPT OAuth; switching to an
+incompatible provider produces a clear error instead of silently dropping the
+old context. Remote API failures are also surfaced directly and never fall back
+to a local summary.
+
+For OpenAI Zero Data Retention credentials, remote compaction lowers its input
+with `store: false`: encrypted reasoning state is included inline and
+non-persisted `rs_*` IDs are not sent as item references. OpenAI's compact output
+echoes the system item it received;
+OpenCodez removes that stale copy during replay, keeps the current request's
+system prefix first, and then inserts the opaque compacted state before the new
+tail. Remote errors remain session-visible and never silently fall back to local
+summarization.
+
+Automatic pre-turn compaction preserves the pending user turn outside the
+compacted history and replays it after a successful compact. If the provider
+itself reports context overflow while automatic compaction is enabled, that
+error is treated as the internal recovery trigger rather than surfaced as a
+failed user turn. Manual compaction still stops after writing the compacted
+state and waits for the next user message.
+
+#### Compaction Policy
+
+`opencodez.responses.compaction.threshold` controls the fraction of the model's
+input window at which ChatGPT OAuth compacts. It defaults to `0.9`, matching the
+Codex default, and accepts values greater than `0` and no greater than `0.9`.
+This permits earlier compaction without allowing a less safe threshold than
+Codex.
+
+Optional `opencodez.responses.compaction.token_limit` is a positive integer and
+acts like Codex's absolute `model_auto_compact_token_limit`. The effective limit
+is:
+
+```text
+min(input_window * threshold, token_limit when set, usable_input_limit)
+```
+
+For Luna, Terra, and Sol with an input window of `372000`, the default trigger
+is `334800` tokens. Setting `threshold` to `0.8` moves it to `297600`; setting
+`token_limit` to `250000` lowers it further to `250000`.
+
+The accounting scope is the full active context, which is the Codex default.
+The advanced Codex `body_after_prefix` scope is intentionally not exposed
+because OpenCode does not maintain Codex's carried-prefix token counter and an
+approximation would make compaction timing unstable.
+
+### Custom Responses Architecture
+
+The fork-specific implementation stays inside the existing OpenAI plugin and
+OpenCodez config boundary:
+
+- `packages/core/src/v1/config/opencodez.ts` defines the public wire and
+  compaction policy, while `packages/core/src/opencodez/settings.ts` owns the
+  `codex` and 90% defaults.
+- `packages/opencode/src/plugin/openai/codex.ts` enables the mode only for
+  ChatGPT OAuth, supplies the Codex product originator required by Fast routing,
+  and leaves API-key OpenAI access and other providers unchanged.
+- `packages/opencode/src/plugin/openai/responses-wire.ts` owns prefix matching,
+  response item normalization, `previous_response_id`, and continuation
+  invalidation.
+- `packages/opencode/src/opencodez/responses-compact.ts` builds the canonical
+  compact request with the existing Responses lowering and calls the remote
+  endpoint.
+- `packages/opencode/src/opencodez/responses-compaction.ts` finds persisted
+  compaction items, exposes them to the current request without writing a second
+  state store, and injects them into the wire body.
+- `packages/opencode/src/plugin/openai/ws-pool.ts` owns one continuation per
+  session-and-account-affine socket and resets it on reconnect, login change,
+  abort, failure, or concurrent HTTP fallback.
+- `packages/opencode/src/plugin/openai/ws.ts` remains the low-level WebSocket to
+  SSE adapter and exposes raw response events to the continuation state.
+
+The shared provider and `packages/llm` abstractions are unchanged, keeping this
+custom layer small and easy to rebase onto future OpenCode versions.
+
+Pinned Codex also contains WebSocket prewarming, which is a latency optimization
+rather than a correctness requirement. OpenCodez keeps its existing lazy,
+session-affine pool to avoid an idle connection and additional lifecycle state.
+It uses the explicit `responses/compact` endpoint from pinned Codex rather than
+the newer `context_management` request field because explicit output items can
+be persisted and restored deterministically by the existing session model.
 
 ## Session Behavior
 
@@ -125,8 +286,7 @@ therefore changes the effective prompt automatically. A manual `/system` choice
 belongs to the session and remains active across model changes.
 
 Choosing `None` explicitly disables the selectable System prompt for the
-session. Older prompt metadata fields are ignored safely when historical
-sessions are read.
+session.
 
 ## Commands
 
@@ -134,44 +294,21 @@ sessions are read.
 /system
 /system <name>
 /system none
-/pruning
-/pruning on
-/pruning off
-/pruning size <count>
 ```
 
 `/system` opens the System selector when no name is provided. The web composer
 exposes the same `S: <id>` control.
-
-## Context Pruning
-
-Pruning changes only the request sent to the model. Stored messages remain
-unchanged. Old reasoning payloads and tool results can be replaced with readable
-placeholders while recent and protected tools remain intact.
-
-```jsonc
-{
-  "opencodez": {
-    "pruning": {
-      "enabled": true,
-      "pruning_size": 20000,
-      "prune": {
-        "reasoning": true,
-        "tool": true
-      },
-      "preserve_tools": []
-    }
-  }
-}
-```
-
-Session-local pruning changes do not rewrite this file.
 
 ## Web Operation
 
 `OPENCODE_WEB_SERVERS_JSON` can seed managed server connections in the web app.
 Valid user-stored servers remain authoritative and environment entries fill only
 missing URLs.
+
+The v2 composer keeps Agent, System, Model, Variant, and Send controls in one
+bounded row. Controls shrink and truncate on narrow/mobile layouts while
+desktop spacing remains unchanged; System becomes an icon-only control below
+the `sm` breakpoint and the Send action never leaves the composer.
 
 OpenCodez can embed the built web UI as one packed binary asset. Runtime delivery
 unpacks it in memory, applies SPA fallback, preserves MIME types, serves
@@ -181,8 +318,16 @@ cache remains available when configured.
 ## Project Safety
 
 Non-git projects remain scoped to the selected directory. Explicit filesystem
-roots clamp to the user home directory, and FFF indexing is disabled by default.
-This prevents accidental root-wide indexing.
+roots clamp to the user home directory, and background file indexing is
+disabled by default.
+
+`OPENCODE_DISABLE_FFF=1` selects a no-op file-search layer. It starts neither
+FFF nor the upstream `rg --files` fallback and retains no background path list.
+Consequently Web/TUI fuzzy file suggestions return no entries, but direct
+directory listing, file reads, drag-and-drop, and explicit agent `glob`/`grep`
+tools continue to work. Set `OPENCODE_DISABLE_FFF=0` to opt into upstream FFF;
+when FFF is unavailable, upstream's ripgrep fallback remains available for that
+explicit opt-in mode.
 
 ## Implementation Map
 
@@ -190,21 +335,30 @@ This prevents accidental root-wide indexing.
 packages/core/src/opencodez/settings.ts
 packages/core/src/opencodez/session.ts
 packages/core/src/opencodez/slash.ts
+packages/core/src/filesystem/search.ts
 packages/opencode/src/opencodez/prompt-library.ts
 packages/opencode/src/opencodez/default-prompts/
+packages/opencode/src/plugin/openai/codex.ts
+packages/opencode/src/opencodez/responses-compact.ts
+packages/opencode/src/opencodez/responses-compaction.ts
+packages/opencode/src/plugin/openai/responses-wire.ts
+packages/opencode/src/plugin/openai/ws-pool.ts
+packages/opencode/src/plugin/openai/ws.ts
 packages/opencode/src/session/llm/request.ts
-packages/opencode/src/session/llm/context-prune.ts
 packages/opencode/src/server/routes/instance/httpapi/groups/opencodez.ts
 packages/opencode/src/server/routes/instance/httpapi/handlers/opencodez.ts
 packages/tui/src/component/opencodez-dialogs.tsx
 packages/app/src/components/prompt-input.tsx
+packages/session-ui/src/v2/components/prompt-input/index.tsx
 ```
 
 The OpenAPI document and JavaScript SDK are generated from the server contract.
 
 ## Release Verification
 
-A release should confirm the mapped System prompts, old metadata tolerance,
-pruning, generated SDK, one production Linux build, embedded web UI startup, and
-desktop/mobile System selector behavior. The public release must contain all
-platform archives plus one SHA-256 file per archive.
+A release should confirm the mapped System prompts, both Responses wire modes,
+default and configured compaction thresholds, remote
+compaction persistence across restart, generated SDK, one production Linux
+build, embedded web UI startup, and desktop/mobile System selector behavior. The
+public release must contain all platform archives plus one SHA-256 file per
+archive.

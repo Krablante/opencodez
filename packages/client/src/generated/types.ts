@@ -239,6 +239,7 @@ export type SessionsListOutput = {
     readonly agent?: string
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly cost: number
+    readonly metadata?: { readonly [x: string]: JsonValue }
     readonly tokens: {
       readonly input: number
       readonly output: number
@@ -272,25 +273,36 @@ export type SessionsCreateInput = {
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly metadata?: { readonly [x: string]: JsonValue }
   }["id"]
   readonly agent?: {
     readonly id?: string | null
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly metadata?: { readonly [x: string]: JsonValue }
   }["agent"]
   readonly model?: {
     readonly id?: string | null
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly metadata?: { readonly [x: string]: JsonValue }
   }["model"]
   readonly location?: {
     readonly id?: string | null
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly metadata?: { readonly [x: string]: JsonValue }
   }["location"]
+  readonly metadata?: {
+    readonly id?: string | null
+    readonly agent?: string | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly metadata?: { readonly [x: string]: JsonValue }
+  }["metadata"]
 }
 
 export type SessionsCreateOutput = {
@@ -301,6 +313,7 @@ export type SessionsCreateOutput = {
     readonly agent?: string
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly cost: number
+    readonly metadata?: { readonly [x: string]: JsonValue }
     readonly tokens: {
       readonly input: number
       readonly output: number
@@ -339,6 +352,7 @@ export type SessionsGetOutput = {
     readonly agent?: string
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly cost: number
+    readonly metadata?: { readonly [x: string]: JsonValue }
     readonly tokens: {
       readonly input: number
       readonly output: number

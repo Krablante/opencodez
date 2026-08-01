@@ -6,6 +6,8 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { createServer } from "http"
 import { OpenAIWebSocketPool } from "./ws-pool"
 import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
+import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
+import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 const ISSUER = "https://auth.openai.com"
@@ -264,15 +266,20 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
   const issuer = options.issuer ?? ISSUER
   const codexApiEndpoint = options.codexApiEndpoint ?? CODEX_API_ENDPOINT
   let websocketFetchInstalled = false
+  let responsesWire: "legacy" | "codex" = "codex"
   const websocketFetches: Array<ReturnType<typeof OpenAIWebSocketPool.createWebSocketFetch>> = []
 
   return {
+    async config(config) {
+      responsesWire = OpenCodezSettings.responsesWire(config)
+    },
     async dispose() {
       for (const websocketFetch of websocketFetches) websocketFetch.close()
       websocketFetches.length = 0
     },
     async event(input) {
       if (input.event.type !== "session.deleted") return
+      OpenCodezResponsesCompaction.clear(input.event.properties.info.id)
       for (const websocketFetch of websocketFetches) websocketFetch.remove(input.event.properties.info.id)
     },
     provider: {
@@ -321,9 +328,11 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
       provider: "openai",
       async loader(getAuth) {
         const auth = await getAuth()
-        const websocketFetch = options.experimentalWebSockets
-          ? OpenAIWebSocketPool.createWebSocketFetch({ httpFetch: fetch })
-          : undefined
+        const codexWire = auth.type === "oauth" && responsesWire === "codex"
+        const websocketFetch =
+          options.experimentalWebSockets || codexWire
+            ? OpenAIWebSocketPool.createWebSocketFetch({ httpFetch: fetch, wire: codexWire ? "codex" : "legacy" })
+            : undefined
         if (websocketFetch) {
           websocketFetches.push(websocketFetch)
           websocketFetchInstalled = true
@@ -403,6 +412,8 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               }
             }
             headers.set("authorization", `Bearer ${currentAuth.access}`)
+            // ChatGPT routes catalog Fast tiers only for the Codex product originator.
+            headers.set("originator", "codex_cli_rs")
             if (authWithAccount.accountId) {
               headers.set("ChatGPT-Account-Id", authWithAccount.accountId)
             }
@@ -411,14 +422,23 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               requestInput instanceof URL
                 ? requestInput
                 : new URL(typeof requestInput === "string" ? requestInput : requestInput.url)
-            const url =
-              parsed.pathname.includes("/v1/responses") || parsed.pathname.includes("/chat/completions")
+            const compact = parsed.pathname.endsWith("/responses/compact")
+            const url = compact
+              ? new URL(`${codexApiEndpoint}/compact`)
+              : parsed.pathname.includes("/v1/responses") || parsed.pathname.includes("/chat/completions")
                 ? new URL(codexApiEndpoint)
                 : parsed
 
+            const sessionID = headers.get("x-session-affinity") ?? undefined
+            const hasRemoteCompaction = headers.get(OpenCodezResponsesCompaction.HEADER) === "1"
+            headers.delete(OpenCodezResponsesCompaction.HEADER)
+
             const requestInit = {
               ...init,
-              body: init?.body,
+              body:
+                hasRemoteCompaction && parsed.pathname.endsWith("/responses")
+                  ? OpenCodezResponsesCompaction.inject(init?.body, sessionID)
+                  : init?.body,
               headers,
             }
             if (websocketFetch && parsed.pathname.endsWith("/responses")) return websocketFetch(url, requestInit)

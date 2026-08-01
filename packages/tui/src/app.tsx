@@ -81,7 +81,7 @@ import {
 
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
-import { OpenCodezPromptSelector, OpenCodezPruningStatusDialog } from "./component/opencodez-dialogs"
+import { OpenCodezPromptSelector } from "./component/opencodez-dialogs"
 import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import { createTuiAttention } from "./attention"
 import * as TuiAudio from "./audio"
@@ -634,21 +634,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
               slashName: "system",
               run: () => {
                 void openCodezPromptSelector()
-              },
-            },
-            {
-              name: "opencodez.pruning",
-              title: "Show pruning settings",
-              category: "OpenCodez",
-              slashName: "pruning",
-              run: () => {
-                dialog.replace(() => (
-                  <OpenCodezPruningStatusDialog
-                    sessionID={openCodezSessionID()}
-                    metadata={openCodezMetadata()}
-                    config={sync.data.config}
-                  />
-                ))
               },
             },
           ]

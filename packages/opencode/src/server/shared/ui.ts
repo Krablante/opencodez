@@ -1,4 +1,5 @@
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import { Effect, Stream } from "effect"
 import { HttpBody, HttpClient, HttpClientRequest, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { createHash } from "node:crypto"
@@ -19,6 +20,11 @@ export const DEFAULT_CSP = csp()
 
 const WEB_SERVERS_SCRIPT_PATH = "/opencode-web-servers.js"
 const DEFAULT_UI_ASSET_CACHE_MAX_AGE_SECONDS = 31_536_000
+
+function injectOpenCodezIdentity(body: string) {
+  if (!OpenCodezIdentity.enabled) return body
+  return body.replace("<title>OpenCode</title>", "<title>OpenCodez</title>")
+}
 
 type UIAssetSettings = {
   cache: boolean
@@ -196,7 +202,7 @@ function embeddedUIResponse(requestPath: string, file: string, body: Uint8Array,
   const mime = FSUtil.mimeType(file)
   const headers = uiAssetHeaders(requestPath, mime)
   if (mime.startsWith("text/html")) {
-    const text = injectWebServersScript(new TextDecoder().decode(body))
+    const text = injectWebServersScript(injectOpenCodezIdentity(new TextDecoder().decode(body)))
     headers.set("content-security-policy", cspForHtml(text))
     return HttpServerResponse.text(text, { headers })
   }
@@ -253,7 +259,7 @@ export function serveUIEffect(
     const headers = proxyResponseHeaders(response.headers)
 
     if (response.headers["content-type"]?.includes("text/html")) {
-      const body = injectWebServersScript(yield* response.text)
+      const body = injectWebServersScript(injectOpenCodezIdentity(yield* response.text))
       headers.set("Content-Security-Policy", cspForHtml(body))
       return HttpServerResponse.text(body, { status: response.status, headers })
     }

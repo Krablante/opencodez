@@ -1,9 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Made default-disabled FFF a true zero-index mode: OpenCodez no longer starts the upstream `rg --files` fallback or retains a background path index when `OPENCODE_DISABLE_FFF=1`. Directory browsing and explicit agent file tools remain available.
+- Made the v2 Web composer controls shrink and truncate inside narrow/mobile layouts, with an icon-only System control and readable Model priority, so Agent, System, Model, Variant, and Send remain contained without changing desktop spacing.
+- Updated the fork base from upstream OpenCode `1.18.4` to `1.18.10` while keeping the OpenCodez prompt, project, updater, embedded Web UI, Responses wire, and remote compaction layers isolated.
+- Adopted upstream's current project-scoped MCP state loading.
+- Ported OpenCodez prompt metadata into the current App prompt controller and session-creation flow.
+- History edits now force one safe full request before incremental ChatGPT OAuth continuation resumes on the resulting branch.
+- OpenAI Zero Data Retention remote compaction lowers compact input with `store: false`, sends encrypted reasoning state instead of non-persisted item references, and replays compacted state after the current system prefix.
+- Made ChatGPT OAuth Fast aliases use real Codex product priority routing without extra probes or UI state. Standard/Fast switches still force a safe full request, and continuation is now account-scoped so a login change cannot reuse inaccessible response or reasoning IDs.
+- Fixed automatic remote compaction to replay the pending user turn after a pre-turn compact and to keep provider context-overflow as an internal recovery signal instead of a transient session error.
+- Kept the TUI System indicator secondary and compact: it is hidden on narrow terminals, capped at 24 columns, and shows only System state.
+- ChatGPT OAuth now uses the Codex-compatible stateful Responses WebSocket wire by default. Set `opencodez.responses.wire` to `legacy` to restore the previous full-request flow.
+- Stateful continuation sends only new input items with `previous_response_id` while the request prefix, model settings, and live WebSocket remain compatible; reconnects, interruptions, concurrent HTTP fallback, and context changes safely start a new full-request chain.
+- ChatGPT OAuth compaction now uses the server-side `responses/compact` endpoint. Opaque compaction output is persisted in the session, restored after restart, and prepended to later Responses requests without resending the pre-compaction history. Remote compaction errors remain visible and never silently downgrade to a local summary.
+- Remote compaction defaults to the Codex 90% input-window threshold. `opencodez.responses.compaction.threshold` can compact earlier, while optional `token_limit` provides a lower absolute cap.
+
 ## 1.18.4+opencodez.3
 
-Fixed the shared Web/Desktop System prompt selector after live validation in
-both composer generations. The control now uses a small lifecycle-independent
+Fixed the shared Web/Desktop System prompt selector in both composer
+generations. The control now uses a small lifecycle-independent
 Portal menu with outside-click and Escape handling, avoiding the v2 composer
 slot's popover-anchor remount behavior.
 
@@ -13,8 +32,8 @@ model selector contract.
 
 ## 1.18.4+opencodez.2
 
-Fixed a ProjectV2 regression discovered during live fleet validation: non-git
-directories now receive stable directory-scoped project IDs instead of sharing
+Fixed a ProjectV2 regression: non-git directories now receive stable
+directory-scoped project IDs instead of sharing
 the global project ID. This prevents a server process first opened at `/` from
 widening later non-git workspaces back to the filesystem root.
 
@@ -25,7 +44,7 @@ from launching a second redundant build against an already existing release.
 
 Merged upstream OpenCode `1.18.4` into OpenCodez.
 
-Preserved the complete OpenCodez custom layer: isolated identity and runtime roots, bundled public Codex system prompts, per-session System selection, request-local pruning, locally packed Web UI, seeded server connections, MCP visibility, fork-specific updater and release assets, non-git project boundaries, and default-disabled FFF indexing. Politia-local prompts remain external to the public repository and release artifacts.
+Preserved the complete OpenCodez custom layer: isolated identity and runtime roots, bundled public Codex system prompts, per-session System selection, locally packed Web UI, seeded server connections, MCP visibility, fork-specific updater and release assets, non-git project boundaries, and default-disabled FFF indexing.
 
 Adapted System selection to the upstream Web/Desktop v2 prompt composer through one shared control used by both composer generations. New-session prompt metadata and existing-session selection remain consistent across both interfaces.
 
@@ -41,13 +60,13 @@ Fixed `opencodez update` for protected system-wide installations such as `/usr/l
 
 Merged upstream OpenCode `1.17.20` into OpenCodez.
 
-Preserved the complete OpenCodez custom layer: isolated identity and runtime roots, bundled public Codex system prompts, per-session prompt selection, request-local context pruning, locally packed Web UI, seeded server connections, MCP visibility fixes, fork-specific updater and release assets, non-git project boundaries, and default-disabled FFF indexing. Politia-local prompts remain external to the public repository and release artifacts.
+Preserved the complete OpenCodez custom layer: isolated identity and runtime roots, bundled public Codex system prompts, per-session prompt selection, locally packed Web UI, seeded server connections, MCP visibility fixes, fork-specific updater and release assets, non-git project boundaries, and default-disabled FFF indexing.
 
 Upstream changes include terminal-only client and TUI fixes, refreshed web and desktop interfaces, provider and reasoning updates, GPT 5.6 model limits, Azure AI Foundry support, safer FFF cache defaults, and removal of the temporary Responses Lite compatibility layer now handled by the backend.
 
 ## 1.17.18+opencodez.3
 
-Removed Tone and Template as OpenCodez concepts across config, session state, request preparation, TUI, web, API, SDK, bundled assets, and documentation. OpenCodez prompt control now selects only the active System prompt; legacy Tone/Template metadata is ignored safely.
+Unified OpenCodez prompt control around the active System prompt across config, session state, request preparation, TUI, web, API, SDK, bundled assets, and documentation.
 
 Updated GPT 5.5 to the official Codex system prompt and added the official Codex `0.144.1` system prompts for GPT 5.6 Luna/Terra and Sol. Luna and Terra share one prompt; Sol uses its own prompt with its official embedded Personality section.
 
@@ -59,9 +78,9 @@ Fixed self-update when the download workspace and installed binary are on differ
 
 Merged upstream OpenCode `1.17.18` into OpenCodez.
 
-Preserved the OpenCodez identity and isolated runtime roots, managed system/tone prompt controls, session inheritance, request pruning, web server seeding, UI asset caching, MCP visibility, project discovery guards, and fork-specific release updater. Adapted the prompt and web integrations to the latest upstream Effect, provider, MCP resource, and composer changes while dropping compatibility behavior now supplied by upstream.
+Preserved the OpenCodez identity and isolated runtime roots, System prompt controls, session inheritance, web server seeding, UI asset caching, MCP visibility, project discovery guards, and fork-specific release updater. Adapted the prompt and web integrations to the latest upstream Effect, provider, MCP resource, and composer changes.
 
-Added `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` defaults. All three reuse the bundled GPT 5.5 Codex system prompt and retain the existing tone/personality behavior.
+Added `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` System defaults.
 
 Hardened the public release path with exact build-metadata versioning and an OpenCodez-aware Unix installer.
 
@@ -71,7 +90,7 @@ Merged upstream OpenCode `1.17.11` into OpenCodez.
 
 Kept the OpenCodez release/update path, branding, web server seeding, prompt controls, and project discovery/indexing safety guards. Fixed the OpenCodez updater to treat release build metadata such as `+opencodez.4` as a real update target.
 
-Upstream changes include server-aware session routes, session snapshots/revert controls, MCP resource/template support, plugin API v2, desktop/web polish, and provider integration updates.
+Upstream changes include server-aware session routes, session snapshots/revert controls, MCP resource support, plugin API v2, desktop/web polish, and provider integration updates.
 
 ## 1.17.8+opencodez.2
 

@@ -22,6 +22,11 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { buildPrompt } from "@opencode-ai/core/session/compaction"
 import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
+import { Auth } from "@/auth"
+import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
+import { OpenCodezResponsesCompact } from "@/opencodez/responses-compact"
+import { SystemPrompt } from "./system"
+import { Usage } from "@opencode-ai/llm"
 
 export const Event = SessionCompactionEvent
 
@@ -139,6 +144,7 @@ export interface Interface {
     sessionID: SessionID
     auto: boolean
     overflow?: boolean
+    abort?: AbortSignal
   }) => Effect.Effect<"continue" | "stop">
   readonly create: (input: {
     sessionID: SessionID
@@ -164,16 +170,24 @@ const layer = Layer.effect(
     const provider = yield* Provider.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+    const auth = yield* Auth.Service
 
     const isOverflow = Effect.fn("SessionCompaction.isOverflow")(function* (input: {
       tokens: SessionV1.Assistant["tokens"]
       model: Provider.Model
     }) {
+      const cfg = yield* config.get()
+      const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
+      let limit: number | undefined
+      if (input.model.providerID === "openai" && authInfo?.type === "oauth") {
+        limit = OpenCodezSettings.responsesCompactionLimit(cfg, input.model.limit)
+      }
       return overflow({
-        cfg: yield* config.get(),
+        cfg,
         tokens: input.tokens,
         model: input.model,
         outputTokenMax: flags.outputTokenMax,
+        limit,
       })
     })
 
@@ -286,12 +300,108 @@ const layer = Layer.effect(
       }
     })
 
+    const completeCompaction = Effect.fn("SessionCompaction.complete")(function* (input: {
+      sessionID: SessionID
+      userMessage: SessionV1.User
+      replay?: { info: SessionV1.User; parts: SessionV1.Part[] }
+      result: "continue" | "stop"
+      auto: boolean
+      overflow?: boolean
+    }) {
+      if (input.result === "continue" && input.auto) {
+        if (input.replay) {
+          const original = input.replay.info
+          const replayMsg = yield* session.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: input.sessionID,
+            time: { created: Date.now() },
+            agent: original.agent,
+            model: original.model,
+            format: original.format,
+            tools: original.tools,
+            system: original.system,
+          })
+          for (const part of input.replay.parts) {
+            if (part.type === "compaction") continue
+            const replayPart =
+              part.type === "file" && MessageV2.isMedia(part.mime)
+                ? { type: "text" as const, text: `[Attached ${part.mime}: ${part.filename ?? "file"}]` }
+                : part
+            yield* session.updatePart({
+              ...replayPart,
+              id: PartID.ascending(),
+              messageID: replayMsg.id,
+              sessionID: input.sessionID,
+            })
+          }
+        }
+
+        if (!input.replay) {
+          const info = yield* provider.getProvider(input.userMessage.model.providerID)
+          if (
+            (yield* plugin.trigger(
+              "experimental.compaction.autocontinue",
+              {
+                sessionID: input.sessionID,
+                agent: input.userMessage.agent,
+                model: yield* provider
+                  .getModel(input.userMessage.model.providerID, input.userMessage.model.modelID)
+                  .pipe(Effect.orDie),
+                provider: {
+                  source: info.source,
+                  info,
+                  options: info.options,
+                },
+                message: input.userMessage,
+                overflow: input.overflow === true,
+              },
+              { enabled: true },
+            )).enabled
+          ) {
+            const continueMsg = yield* session.updateMessage({
+              id: MessageID.ascending(),
+              role: "user",
+              sessionID: input.sessionID,
+              time: { created: Date.now() },
+              agent: input.userMessage.agent,
+              model: input.userMessage.model,
+            })
+            const text =
+              (input.overflow
+                ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
+                : "") +
+              "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
+            yield* session.updatePart({
+              id: PartID.ascending(),
+              messageID: continueMsg.id,
+              sessionID: input.sessionID,
+              type: "text",
+              metadata: { compaction_continue: true },
+              synthetic: true,
+              text,
+              time: {
+                start: Date.now(),
+                end: Date.now(),
+              },
+            })
+          }
+        }
+      }
+
+      if (input.result === "continue") {
+        yield* events.publish(Event.Compacted, { sessionID: input.sessionID })
+      }
+      return input.result
+    })
+
     const processCompaction = Effect.fn("SessionCompaction.process")(function* (input: {
       parentID: MessageID
       messages: SessionV1.WithParts[]
       sessionID: SessionID
       auto: boolean
       overflow?: boolean
+      abort?: AbortSignal
     }) {
       const parent = input.messages.findLast((m) => m.info.id === input.parentID)
       if (!parent || parent.info.role !== "user") {
@@ -325,12 +435,102 @@ const layer = Layer.effect(
         }
       }
 
+      const cfg = yield* config.get()
+      const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
+      const sourceModel = yield* provider
+        .getModel(userMessage.model.providerID, userMessage.model.modelID)
+        .pipe(Effect.orDie)
+      const authInfo = yield* auth.get(userMessage.model.providerID).pipe(Effect.orDie)
+      const remote = sourceModel.providerID === "openai" && authInfo?.type === "oauth"
+
+      if (remote) {
+        if (!compactionPart) throw new Error(`Missing compaction part for ${input.parentID}`)
+        const ctx = yield* InstanceState.context
+        const msg: SessionV1.Assistant = {
+          id: MessageID.ascending(),
+          role: "assistant",
+          parentID: input.parentID,
+          sessionID: input.sessionID,
+          mode: "compaction",
+          agent: "compaction",
+          variant: userMessage.model.variant,
+          summary: true,
+          path: {
+            cwd: ctx.directory,
+            root: ctx.worktree,
+          },
+          cost: 0,
+          tokens: {
+            output: 0,
+            input: 0,
+            reasoning: 0,
+            cache: { read: 0, write: 0 },
+          },
+          modelID: sourceModel.id,
+          providerID: sourceModel.providerID,
+          time: { created: Date.now() },
+        }
+        yield* session.updateMessage(msg)
+        yield* events.publish(MessageV2.Event.Updated, { sessionID: input.sessionID, info: msg })
+
+        const providerInfo = yield* provider.getProvider(sourceModel.providerID)
+        const compacted = yield* OpenCodezResponsesCompact.compact({
+          sessionID: input.sessionID,
+          model: sourceModel,
+          provider: providerInfo,
+          system: SystemPrompt.provider(sourceModel),
+          messages: history,
+          abort: input.abort ?? AbortSignal.timeout(120_000),
+        }).pipe(
+          Effect.match({
+            onFailure: (error) => ({ ok: false as const, error }),
+            onSuccess: (value) => ({ ok: true as const, value }),
+          }),
+        )
+
+        if (!compacted.ok) {
+          msg.error = MessageV2.fromError(compacted.error, { providerID: sourceModel.providerID })
+          msg.finish = "error"
+          msg.time.completed = Date.now()
+          yield* session.updateMessage(msg)
+          return "stop"
+        }
+
+        yield* session.updatePart({
+          ...compactionPart,
+          remote: {
+            providerID: "openai",
+            items: compacted.value.items,
+          },
+        })
+        const usage = Session.getUsage({
+          model: sourceModel,
+          usage: new Usage({
+            totalTokens: compacted.value.usage.total,
+            inputTokens: compacted.value.usage.input,
+            outputTokens: compacted.value.usage.output,
+            reasoningTokens: compacted.value.usage.reasoning,
+          }),
+        })
+        msg.cost = usage.cost
+        msg.tokens = usage.tokens
+        msg.finish = "stop"
+        msg.time.completed = Date.now()
+        yield* session.updateMessage(msg)
+        return yield* completeCompaction({
+          sessionID: input.sessionID,
+          userMessage,
+          replay,
+          result: "continue",
+          auto: input.auto,
+          overflow: input.overflow,
+        })
+      }
+
       const agent = yield* agents.get("compaction")
       const model = agent.model
         ? yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
-        : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID).pipe(Effect.orDie)
-      const cfg = yield* config.get()
-      const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
+        : sourceModel
       const prior = completedCompactions(history)
       const hidden = new Set(prior.flatMap((item) => [item.userIndex, item.assistantIndex]))
       const previousSummary = prior.at(-1)?.summary
@@ -419,95 +619,15 @@ const layer = Layer.effect(
         })
       }
 
-      if (result === "continue" && input.auto) {
-        if (replay) {
-          const original = replay.info
-          const replayMsg = yield* session.updateMessage({
-            id: MessageID.ascending(),
-            role: "user",
-            sessionID: input.sessionID,
-            time: { created: Date.now() },
-            agent: original.agent,
-            model: original.model,
-            format: original.format,
-            tools: original.tools,
-            system: original.system,
-          })
-          for (const part of replay.parts) {
-            if (part.type === "compaction") continue
-            const replayPart =
-              part.type === "file" && MessageV2.isMedia(part.mime)
-                ? { type: "text" as const, text: `[Attached ${part.mime}: ${part.filename ?? "file"}]` }
-                : part
-            yield* session.updatePart({
-              ...replayPart,
-              id: PartID.ascending(),
-              messageID: replayMsg.id,
-              sessionID: input.sessionID,
-            })
-          }
-        }
-
-        if (!replay) {
-          const info = yield* provider.getProvider(userMessage.model.providerID)
-          if (
-            (yield* plugin.trigger(
-              "experimental.compaction.autocontinue",
-              {
-                sessionID: input.sessionID,
-                agent: userMessage.agent,
-                model: yield* provider
-                  .getModel(userMessage.model.providerID, userMessage.model.modelID)
-                  .pipe(Effect.orDie),
-                provider: {
-                  source: info.source,
-                  info,
-                  options: info.options,
-                },
-                message: userMessage,
-                overflow: input.overflow === true,
-              },
-              { enabled: true },
-            )).enabled
-          ) {
-            const continueMsg = yield* session.updateMessage({
-              id: MessageID.ascending(),
-              role: "user",
-              sessionID: input.sessionID,
-              time: { created: Date.now() },
-              agent: userMessage.agent,
-              model: userMessage.model,
-            })
-            const text =
-              (input.overflow
-                ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
-                : "") +
-              "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: continueMsg.id,
-              sessionID: input.sessionID,
-              type: "text",
-              // Internal marker for auto-compaction followups so provider plugins
-              // can distinguish them from manual post-compaction user prompts.
-              // This is not a stable plugin contract and may change or disappear.
-              metadata: { compaction_continue: true },
-              synthetic: true,
-              text,
-              time: {
-                start: Date.now(),
-                end: Date.now(),
-              },
-            })
-          }
-        }
-      }
-
       if (processor.message.error) return "stop"
-      if (result === "continue") {
-        yield* events.publish(Event.Compacted, { sessionID: input.sessionID })
-      }
-      return result
+      return yield* completeCompaction({
+        sessionID: input.sessionID,
+        userMessage,
+        replay,
+        result,
+        auto: input.auto,
+        overflow: input.overflow,
+      })
     })
 
     const create = Effect.fn("SessionCompaction.create")(function* (input: {
@@ -556,6 +676,7 @@ export const node = LayerNode.make({
     Provider.node,
     EventV2Bridge.node,
     RuntimeFlags.node,
+    Auth.node,
   ],
 })
 

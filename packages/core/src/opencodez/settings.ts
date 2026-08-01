@@ -4,14 +4,10 @@ export type ConfigLike = Record<string, unknown> & {
   opencodez?: {
     responses?: {
       system?: string | Record<string, string>
-    }
-    pruning?: {
-      enabled?: boolean
-      pruning_size?: number
-      preserve_tools?: string[]
-      prune?: {
-        reasoning?: boolean
-        tool?: boolean
+      wire?: "legacy" | "codex"
+      compaction?: {
+        threshold?: number
+        token_limit?: number
       }
     }
   }
@@ -30,6 +26,9 @@ export type ModelLike =
     }
 
 export const defaults = {
+  compaction: {
+    threshold: 0.9,
+  },
   system: {
     default: "codex_gpt_5_5",
     "gpt-5.2": "codex_gpt_5_2",
@@ -43,15 +42,6 @@ export const defaults = {
     "gpt-5.6-terra": "codex_gpt_5_6_luna_terra",
     "gpt-5.6-sol": "codex_gpt_5_6_sol",
   },
-  pruning: {
-    enabled: true,
-    pruning_size: 20_000,
-    preserve_tools: [] as string[],
-    prune: {
-      reasoning: true,
-      tool: true,
-    },
-  },
 }
 
 export function defaultSystem(config: ConfigLike | undefined, model: ModelLike | undefined) {
@@ -62,17 +52,24 @@ export function defaultSystem(config: ConfigLike | undefined, model: ModelLike |
   return resolveModelMapping(defaults.system, model) ?? defaults.system.default
 }
 
-export function pruning(config: ConfigLike | undefined) {
-  const configured = config?.opencodez?.pruning
+export function responsesWire(config: ConfigLike | undefined) {
+  return config?.opencodez?.responses?.wire ?? "codex"
+}
+
+export function responsesCompaction(config: ConfigLike | undefined) {
+  const configured = config?.opencodez?.responses?.compaction
   return {
-    enabled: configured?.enabled ?? defaults.pruning.enabled,
-    pruning_size: configured?.pruning_size ?? defaults.pruning.pruning_size,
-    preserve_tools: configured?.preserve_tools ?? defaults.pruning.preserve_tools,
-    prune: {
-      reasoning: configured?.prune?.reasoning ?? defaults.pruning.prune.reasoning,
-      tool: configured?.prune?.tool ?? defaults.pruning.prune.tool,
-    },
+    threshold: configured?.threshold ?? defaults.compaction.threshold,
+    token_limit: configured?.token_limit,
   }
+}
+
+export function responsesCompactionLimit(config: ConfigLike | undefined, model: { input?: number; context: number }) {
+  const policy = responsesCompaction(config)
+  const base = model.input || model.context
+  let limit = Math.max(1, Math.floor(base * policy.threshold))
+  if (policy.token_limit !== undefined) limit = Math.min(limit, policy.token_limit)
+  return limit
 }
 
 function resolveModelMapping(mapping: Record<string, string>, model: ModelLike | undefined) {

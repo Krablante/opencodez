@@ -76,7 +76,7 @@ beforeAll(async () => {
   await fs.writeFile(path.join(root, "codex_gpt_5_5.md"), "GPT 5.5 SYSTEM")
   await fs.writeFile(path.join(root, "codex_gpt_5_6_luna_terra.md"), "GPT 5.6 LUNA TERRA SYSTEM")
   await fs.writeFile(path.join(root, "codex_gpt_5_6_sol.md"), "GPT 5.6 SOL SYSTEM")
-  await fs.writeFile(path.join(root, "manual_system.md"), "MANUAL SYSTEM\n{{ personality }}")
+  await fs.writeFile(path.join(root, "manual_system.md"), "MANUAL SYSTEM")
   LLMRequestPrep = (await import("../../src/session/llm/request")).LLMRequestPrep
 })
 
@@ -105,28 +105,19 @@ describe("LLMRequestPrep", () => {
     expect(prepared.system.join("\n")).toContain(expected)
   })
 
-  test("uses manual System and ignores legacy Tone metadata", async () => {
+  test("uses manual System", async () => {
     const prepared = await Effect.runPromise(
       LLMRequestPrep.prepare({
         ...input,
-        sessionID: "session-legacy-tone",
+        sessionID: "session-manual-system",
         sessionMetadata: {
-          opencodez: {
-            selection: {
-              system: "manual_system",
-              systemManual: true,
-              tone: "codex_pragmatic",
-              toneManual: true,
-            },
-          },
+          opencodez: { selection: { system: "manual_system", systemManual: true } },
         },
       }),
     )
     const system = prepared.system.join("\n")
 
     expect(system).toContain("MANUAL SYSTEM")
-    expect(system).not.toContain("personality")
-    expect(system).not.toContain("codex_pragmatic")
   })
 
   test("explicit None disables the model System default", async () => {

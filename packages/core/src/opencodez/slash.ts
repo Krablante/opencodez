@@ -1,8 +1,6 @@
 export * as OpenCodezSlash from "./slash"
 
-export type Command =
-  | { type: "system"; name?: string }
-  | { type: "pruning"; action?: "on" | "off" | "size"; size?: number; error?: string }
+export type Command = { type: "system"; name?: string }
 
 export function parse(input: string): Command | undefined {
   const trimmed = input.trim()
@@ -13,23 +11,9 @@ export function parse(input: string): Command | undefined {
   switch (head) {
     case "/system":
       return { type: "system", name: rest[0] }
-    case "/pruning":
-      return parsePruning(rest)
     default:
       return
   }
-}
-
-function parsePruning(args: string[]): Command {
-  const [action, value] = args
-  if (!action) return { type: "pruning" }
-  if (action === "on" || action === "off") return { type: "pruning", action }
-  if (action === "size") {
-    const size = Number(value)
-    if (!Number.isInteger(size) || size < 0) return { type: "pruning", error: "Expected a non-negative integer size" }
-    return { type: "pruning", action: "size", size }
-  }
-  return { type: "pruning", error: "Expected /pruning, /pruning on, /pruning off, or /pruning size N" }
 }
 
 function split(input: string) {

@@ -23,6 +23,7 @@ export const Info = Schema.Struct({
   agent: Agent.ID.pipe(optional),
   model: Model.Ref.pipe(optional),
   cost: Schema.Finite,
+  metadata: Schema.Record(Schema.String, Schema.Unknown).pipe(optional),
   tokens: Schema.Struct({
     input: Schema.Finite,
     output: Schema.Finite,

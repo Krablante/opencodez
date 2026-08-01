@@ -1,6 +1,7 @@
 import WebSocket from "ws"
 import { ProviderError } from "@/provider/error"
 import { isRecord } from "@/util/record"
+import { Continuation, type Mode } from "./responses-wire"
 import { OpenAIWebSocket } from "./ws"
 
 export const TITLE_HEADER = "x-opencode-title"
@@ -12,6 +13,7 @@ export interface CreateWebSocketFetchOptions {
   idleTimeout?: number
   maxConnectionAge?: number
   streamRetries?: number
+  wire?: Mode
 }
 
 interface PoolEntry {
@@ -21,6 +23,7 @@ interface PoolEntry {
   busy: boolean
   fallback: boolean
   streamFailures: number
+  continuation: Continuation
 }
 
 const DEFAULT_CONNECT_TIMEOUT = 15_000
@@ -67,15 +70,24 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     if (!sessionID) {
       return httpFetch(input, httpInit)
     }
-    const key = `${sessionID}:conversation`
+    // ChatGPT response and reasoning IDs are account-scoped. A login change
+    // must start a fresh continuation even when the local session stays open.
+    const key = `${sessionID}:conversation:${internalHeaders["chatgpt-account-id"] ?? ""}`
 
-    const entry = pool.get(key) ?? { lastUsedAt: Date.now(), busy: false, fallback: false, streamFailures: 0 }
+    const entry = pool.get(key) ?? {
+      lastUsedAt: Date.now(),
+      busy: false,
+      fallback: false,
+      streamFailures: 0,
+      continuation: new Continuation(),
+    }
     pool.set(key, entry)
 
     if (entry.fallback) {
       return httpFetch(input, httpInit)
     }
     if (entry.busy) {
+      entry.continuation.reset()
       return httpFetch(input, httpInit)
     }
 
@@ -96,21 +108,27 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         resolveFirstEvent = resolve
         rejectFirstEvent = reject
       })
+      const prepared = options?.wire === "codex" ? entry.continuation.prepare(body) : undefined
+      const transaction = options?.wire === "codex" ? entry.continuation.transaction(body) : undefined
       const response = OpenAIWebSocket.streamResponsesWebSocket({
         socket: entry.socket,
-        body,
+        body: prepared ?? body,
         idleTimeout,
         signal: init?.signal ?? undefined,
         onFirstEvent: (error) => resolveFirstEvent(error ?? true),
+        onEvent: transaction?.event,
+        onComplete: transaction?.complete,
         onTerminal: (event) => {
           entry.busy = false
           entry.lastUsedAt = Date.now()
           entry.streamFailures = 0
           if (event.type !== "response.completed" && event.type !== "response.done") {
+            transaction?.fail()
             invalidate(entry)
           }
         },
         onConnectionInvalid: (error) => {
+          transaction?.fail()
           entry.busy = false
           entry.lastUsedAt = Date.now()
           if (!entry.fallback) recordStreamFailure(entry)
@@ -118,6 +136,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
           resolveFirstEvent(false)
         },
         onAbort: (error) => {
+          transaction?.fail()
           entry.busy = false
           entry.lastUsedAt = Date.now()
           entry.streamFailures = 0
@@ -184,11 +203,12 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
   }
 
   function remove(sessionID: string) {
-    const key = `${sessionID}:conversation`
-    const entry = pool.get(key)
-    if (!entry) return
-    invalidate(entry)
-    pool.delete(key)
+    const prefix = `${sessionID}:conversation:`
+    for (const [key, entry] of pool) {
+      if (!key.startsWith(prefix)) continue
+      invalidate(entry)
+      pool.delete(key)
+    }
   }
 
   return Object.assign(websocketFetch, { close, remove })
@@ -241,6 +261,7 @@ async function socket(
 }
 
 function invalidate(entry: PoolEntry) {
+  entry.continuation.reset()
   if (entry.socket) {
     entry.socket.on("error", () => {})
     entry.socket.terminate()

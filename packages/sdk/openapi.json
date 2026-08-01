@@ -17394,6 +17394,20 @@
           "tail_start_id": {
             "type": "string",
             "pattern": "^msg"
+          },
+          "remote": {
+            "type": "object",
+            "properties": {
+              "providerID": {
+                "type": "string",
+                "enum": ["openai"]
+              },
+              "items": {
+                "type": "array"
+              }
+            },
+            "required": ["providerID", "items"],
+            "additionalProperties": false
           }
         },
         "required": ["id", "sessionID", "messageID", "type", "auto"],
@@ -21515,34 +21529,22 @@
                         }
                       }
                     ]
-                  }
-                },
-                "additionalProperties": false
-              },
-              "pruning": {
-                "type": "object",
-                "properties": {
-                  "enabled": {
-                    "type": "boolean"
                   },
-                  "pruning_size": {
-                    "type": "integer",
-                    "minimum": 0
+                  "wire": {
+                    "type": "string",
+                    "enum": ["legacy", "codex"]
                   },
-                  "preserve_tools": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "prune": {
+                  "compaction": {
                     "type": "object",
                     "properties": {
-                      "reasoning": {
-                        "type": "boolean"
+                      "threshold": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 0.9
                       },
-                      "tool": {
-                        "type": "boolean"
+                      "token_limit": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0
                       }
                     },
                     "additionalProperties": false

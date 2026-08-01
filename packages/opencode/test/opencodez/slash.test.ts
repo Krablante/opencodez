@@ -3,11 +3,8 @@ import { OpenCodezSession } from "@opencode-ai/core/opencodez/session"
 import { OpenCodezSlash } from "@opencode-ai/core/opencodez/slash"
 
 describe("OpenCodezSlash", () => {
-  test("parses System and pruning commands", () => {
+  test("parses System commands", () => {
     expect(OpenCodezSlash.parse("/system codex_gpt_5_5")).toEqual({ type: "system", name: "codex_gpt_5_5" })
-    expect(OpenCodezSlash.parse("/pruning size 0")).toEqual({ type: "pruning", action: "size", size: 0 })
-    expect(OpenCodezSlash.parse("/tone")).toBeUndefined()
-    expect(OpenCodezSlash.parse("/template gpt55")).toBeUndefined()
   })
 
   test("notifies TUI subscribers when session selection changes", () => {

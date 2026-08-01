@@ -3,7 +3,6 @@ import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 import type { Config, OpenCodezPromptEntry } from "@opencode-ai/sdk/v2"
 import { createMemo } from "solid-js"
 import { useSDK } from "../context/sdk"
-import { DialogAlert } from "../ui/dialog-alert"
 import { DialogSelect } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
@@ -68,26 +67,6 @@ export function OpenCodezPromptSelector(props: {
   )
 }
 
-export function OpenCodezPruningStatusDialog(props: {
-  sessionID?: string
-  metadata?: Record<string, unknown>
-  config?: Config
-}) {
-  const settings = OpenCodezSession.effectivePruning({
-    config: props.config,
-    sessionID: props.sessionID,
-    metadata: props.metadata,
-  })
-  const message = [
-    `enabled: ${settings.enabled}`,
-    `pruning_size: ${settings.pruning_size}`,
-    `reasoning: ${settings.prune.reasoning}`,
-    `tool: ${settings.prune.tool}`,
-    `preserve_tools: ${settings.preserve_tools.length ? settings.preserve_tools.join(", ") : "[]"}`,
-  ].join("\n")
-  return <DialogAlert title="Pruning" message={message} />
-}
-
 async function applySelection(
   client: ReturnType<typeof useSDK>["client"],
   name: string,
@@ -105,7 +84,7 @@ async function applySelection(
   if (sessionID) OpenCodezSession.hydrate(sessionID, result.data.metadata)
   else {
     const state = OpenCodezSession.fromMetadata(result.data.metadata)
-    OpenCodezSession.resetPending(state.selection ?? {}, state.pruning ?? {})
+    OpenCodezSession.resetPending(state.selection ?? {})
   }
 
   return `System set to ${OpenCodezSession.isNone(name) ? "None" : name}`

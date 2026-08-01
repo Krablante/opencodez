@@ -17,8 +17,8 @@ import { mergeDeep } from "remeda"
 import type { Info as ConfigInfo } from "@/config/config"
 import { OpenCodezPromptLibrary } from "@/opencodez/prompt-library"
 import { OpenCodezSession } from "@opencode-ai/core/opencodez/session"
-import { OpenCodezContextPrune } from "./context-prune"
 import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
+import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
@@ -60,10 +60,15 @@ export type Prepared = {
 const mergeOptions = (target: Record<string, any>, source: Record<string, any> | undefined): Record<string, any> =>
   mergeDeep(target, source ?? {}) as Record<string, any>
 
-const withoutLegacyPersonality = (prompt: string) => prompt.replaceAll(/\{\{\s*personality\s*\}\}/g, "").trim()
-
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
+  if (OpenCodezResponsesCompaction.has(input.sessionMetadata) && !isOpenaiOauth) {
+    return yield* Effect.fail(
+      new Error("This session contains OpenAI remote compaction state and must continue with ChatGPT OAuth"),
+    )
+  }
+  const hasRemoteCompaction =
+    isOpenaiOauth && OpenCodezResponsesCompaction.register(input.sessionID, input.sessionMetadata)
   const opencodezPrompts = OpenCodezIdentity.enabled
     ? yield* Effect.promise(async () => {
         const opencodez = OpenCodezSession.effective({
@@ -76,9 +81,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         return {
           systemDisabled: opencodez.systemManual && !opencodez.system,
           system: opencodez.system
-            ? await OpenCodezPromptLibrary.readPrompt(opencodez.system)
-                .then((prompt) => (prompt ? withoutLegacyPersonality(prompt) : undefined))
-                .catch(() => undefined)
+            ? await OpenCodezPromptLibrary.readPrompt(opencodez.system).catch(() => undefined)
             : undefined,
         }
       })
@@ -147,22 +150,6 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
           ),
           ...input.messages,
         ]
-  const prunedMessages = OpenCodezContextPrune.apply({
-    messages,
-    settings: OpenCodezIdentity.enabled
-      ? OpenCodezSession.effectivePruning({
-          config: input.config,
-          sessionID: input.sessionID,
-          metadata: input.sessionMetadata,
-        })
-      : {
-          enabled: false,
-          pruning_size: 0,
-          preserve_tools: [],
-          prune: { reasoning: false, tool: false },
-        },
-  })
-
   const params = yield* input.plugin.trigger(
     "chat.params",
     {
@@ -232,7 +219,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
 
   return {
     system,
-    messages: prunedMessages,
+    messages,
     tools: Object.fromEntries(Object.entries(tools).toSorted(([a], [b]) => a.localeCompare(b))),
     params,
     messageTransformOptions: options,
@@ -253,6 +240,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
           }),
       ...input.model.headers,
       ...headers,
+      ...(hasRemoteCompaction ? { [OpenCodezResponsesCompaction.HEADER]: "1" } : {}),
     },
   }
 })

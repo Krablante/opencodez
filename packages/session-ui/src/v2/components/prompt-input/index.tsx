@@ -21,6 +21,7 @@ import type {
   PromptInputV2Suggestion,
 } from "./types"
 import type { PromptInputV2Interaction, PromptInputV2SelectControl } from "./interaction"
+import "./attachments.css"
 
 export type {
   PromptInputV2Attachment,
@@ -39,6 +40,7 @@ export type PromptInputV2Props = {
   borderUnderlay?: boolean
   class?: string
   modelControl?: JSX.Element
+  variantControlVisible?: boolean
   attachKeybind?: string[]
   attachShortcut?: string
 }
@@ -106,7 +108,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
       <form
         data-component="prompt-input-v2"
         data-dock-border-underlay={props.borderUnderlay ? "v2" : undefined}
-        class="group/prompt-input relative min-h-[96px] w-full rounded-xl bg-v2-background-bg-base"
+        class="group/prompt-input relative min-h-[96px] w-full overflow-clip rounded-xl bg-v2-background-bg-base"
         classList={{
           "shadow-[var(--v2-elevation-raised)]": !props.borderUnderlay,
           "border border-v2-icon-icon-info border-dashed": state.drag === "active",
@@ -191,7 +193,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
 
         <div class="flex h-11 items-center px-2">
           <div
-            class="flex min-w-0 flex-1 items-center gap-1"
+            class="flex min-w-0 flex-1 items-center gap-0 sm:gap-1"
             aria-hidden={state.mode === "shell"}
             inert={state.mode === "shell" ? true : undefined}
             style={buttons()}
@@ -232,7 +234,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
             >
               {(control) => control()}
             </Show>
-            <Show when={view.variant}>
+            <Show when={(props.variantControlVisible ?? true) && view.variant}>
               {(control) => (
                 <Show when={control().options().length > 1}>
                   <PromptInputV2ConfiguredSelect
@@ -377,7 +379,7 @@ export function PromptInputV2Attachments(props: {
 }) {
   return (
     <Show when={props.attachments.length > 0 || (props.comments?.length ?? 0) > 0}>
-      <div data-slot="prompt-attachments" class="relative">
+      <div data-component="prompt-input-v2-attachments" data-slot="prompt-attachments" class="relative">
         <div
           data-slot="prompt-attachments-scroll"
           class="flex flex-nowrap gap-2 overflow-x-auto no-scrollbar px-2 pt-2 pb-1"
@@ -443,8 +445,14 @@ export function PromptInputV2Attachments(props: {
             )}
           </For>
         </div>
-        <div class="pointer-events-none absolute inset-y-0 left-0 z-10 w-6 bg-[linear-gradient(to_right,var(--v2-background-bg-base),transparent)]" />
-        <div class="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-[linear-gradient(to_left,var(--v2-background-bg-base),transparent)]" />
+        <div
+          data-slot="prompt-attachments-fade-left"
+          class="pointer-events-none absolute inset-y-0 left-0 z-10 w-6 bg-[linear-gradient(to_right,var(--v2-background-bg-base),transparent)]"
+        />
+        <div
+          data-slot="prompt-attachments-fade-right"
+          class="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-[linear-gradient(to_left,var(--v2-background-bg-base),transparent)]"
+        />
       </div>
     </Show>
   )
@@ -466,6 +474,7 @@ export function PromptInputV2AddMenu(props: {
 }) {
   return (
     <TooltipV2
+      class="min-w-0 shrink"
       placement="top"
       value={
         <>
@@ -556,7 +565,7 @@ export function PromptInputV2Select(props: {
           as={ButtonV2}
           variant="ghost-muted"
           size="normal"
-          class={`max-w-[220px] justify-start ![font-weight:440] ${props.class ?? ""}`}
+          class={`min-w-0 max-w-[220px] shrink justify-start ![font-weight:440] ${props.class ?? ""}`}
           aria-label={props.title}
         >
           {props.currentIcon}

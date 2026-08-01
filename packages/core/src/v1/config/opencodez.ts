@@ -1,27 +1,31 @@
 export * as ConfigOpencodez from "./opencodez"
 
-import { NonNegativeInt } from "../../schema"
 import { Schema } from "effect"
+
+export const Compaction = Schema.Struct({
+  threshold: Schema.optional(
+    Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(0.9)),
+  ).annotate({
+    description:
+      "ChatGPT OAuth remote compaction threshold as a fraction of the model input window (default: 0.9, maximum: 0.9)",
+  }),
+  token_limit: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))).annotate({
+    description: "Optional lower absolute token cap for ChatGPT OAuth remote compaction",
+  }),
+})
 
 export const Responses = Schema.Struct({
   system: Schema.optional(Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.String)])),
-})
-
-export const Pruning = Schema.Struct({
-  enabled: Schema.optional(Schema.Boolean),
-  pruning_size: Schema.optional(NonNegativeInt),
-  preserve_tools: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
-  prune: Schema.optional(
-    Schema.Struct({
-      reasoning: Schema.optional(Schema.Boolean),
-      tool: Schema.optional(Schema.Boolean),
-    }),
-  ),
+  wire: Schema.optional(Schema.Literals(["legacy", "codex"])).annotate({
+    description: "ChatGPT OAuth Responses wire mode (default: codex)",
+  }),
+  compaction: Schema.optional(Compaction).annotate({
+    description: "ChatGPT OAuth server-side Responses compaction policy",
+  }),
 })
 
 export const Info = Schema.Struct({
   responses: Schema.optional(Responses),
-  pruning: Schema.optional(Pruning),
 })
 
 export type Info = Schema.Schema.Type<typeof Info>

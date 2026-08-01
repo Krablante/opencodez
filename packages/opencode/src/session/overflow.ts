@@ -24,11 +24,13 @@ export function isOverflow(input: {
   tokens: SessionV1.Assistant["tokens"]
   model: Provider.Model
   outputTokenMax?: number
+  limit?: number
 }) {
   if (input.cfg.compaction?.auto === false) return false
   if (input.model.limit.context === 0) return false
 
   const count =
     input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
-  return count >= usable(input)
+  const threshold = Math.min(usable(input), input.limit ?? Number.POSITIVE_INFINITY)
+  return count >= threshold
 }

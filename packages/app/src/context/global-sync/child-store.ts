@@ -237,8 +237,12 @@ export function createChildStoreManager(input: {
             todo: {},
             permission: {},
             question: {},
-            mcp_ready: false,
-            mcp: {},
+            get mcp_ready() {
+              return !mcpQuery.isLoading
+            },
+            get mcp() {
+              return mcpQuery.isLoading ? {} : (mcpQuery.data ?? {})
+            },
             get mcp_resource() {
               return mcpResourceQuery.isLoading ? {} : (mcpResourceQuery.data ?? {})
             },
@@ -251,6 +255,7 @@ export function createChildStoreManager(input: {
             vcs: vcsStore.value,
             limit: 5,
             message: {},
+            session_message: {},
             part: {},
             part_text_accum_delta: {},
           })

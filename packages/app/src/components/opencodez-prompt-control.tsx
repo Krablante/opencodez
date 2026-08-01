@@ -1,9 +1,5 @@
 import { Icon } from "@opencode-ai/ui/icon"
-import type {
-  OpenCodezPromptEntry,
-  OpenCodezPromptModel,
-  OpenCodezPromptState,
-} from "@opencode-ai/sdk/v2/client"
+import type { OpenCodezPromptEntry, OpenCodezPromptModel, OpenCodezPromptState } from "@opencode-ai/sdk/v2/client"
 import { For, Show, createEffect, createMemo, on, onCleanup, type Accessor, type Component, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
@@ -185,15 +181,17 @@ export function createOpenCodezPromptControl(options: Options): {
         ref={trigger}
         type="button"
         data-action="prompt-system"
-        class="h-6 min-w-0 max-w-[200px] px-2 flex items-center gap-1 rounded-md text-12-regular text-text-weak hover:text-text-strong hover:bg-surface-base-hover"
+        class="h-6 min-w-0 max-w-[200px] shrink-0 px-2 flex items-center gap-1 rounded-md text-12-regular text-text-weak hover:text-text-strong hover:bg-surface-base-hover sm:shrink"
         style={options.style?.()}
         aria-label="Select System prompt"
         aria-expanded={state.open}
         onClick={() => setOpen(!state.open)}
       >
         <Icon name="prompt" size="small" />
-        <span class="truncate">S: {state.prompt?.system ?? "default"}</span>
-        <Icon name="chevron-down" size="small" />
+        <span class="hidden truncate sm:inline">S: {state.prompt?.system ?? "default"}</span>
+        <span class="hidden sm:inline-flex">
+          <Icon name="chevron-down" size="small" />
+        </span>
       </button>
       <Show when={state.open}>
         <Portal>
@@ -204,44 +202,50 @@ export function createOpenCodezPromptControl(options: Options): {
             class="fixed z-50 w-72 overflow-hidden rounded-md border border-border-weak-base bg-background-base shadow-lg"
             style={{ left: `${state.left}px`, bottom: `${state.bottom}px` }}
           >
-          <div class="p-2 border-b border-border-weak-base">
-            <input
-              ref={search}
-              value={state.search}
-              onInput={(event) => setState("search", event.currentTarget.value)}
-              placeholder="Search system prompts..."
-              class="w-full h-8 px-2 rounded-md bg-surface-base text-13-regular text-text-strong outline-none placeholder:text-text-weaker"
-            />
-          </div>
-          <div class="max-h-[244px] overflow-y-auto p-1">
-            <Show when={!state.loading} fallback={<div class="px-2 py-1.5 text-13-regular text-text-weak">Loading...</div>}>
-              <Show when={!state.error} fallback={<div class="px-2 py-1.5 text-13-regular text-text-weak">{state.error}</div>}>
+            <div class="p-2 border-b border-border-weak-base">
+              <input
+                ref={search}
+                value={state.search}
+                onInput={(event) => setState("search", event.currentTarget.value)}
+                placeholder="Search system prompts..."
+                class="w-full h-8 px-2 rounded-md bg-surface-base text-13-regular text-text-strong outline-none placeholder:text-text-weaker"
+              />
+            </div>
+            <div class="max-h-[244px] overflow-y-auto p-1">
+              <Show
+                when={!state.loading}
+                fallback={<div class="px-2 py-1.5 text-13-regular text-text-weak">Loading...</div>}
+              >
                 <Show
-                  when={entries().length > 0}
-                  fallback={<div class="px-2 py-1.5 text-13-regular text-text-weak">No prompts found</div>}
+                  when={!state.error}
+                  fallback={<div class="px-2 py-1.5 text-13-regular text-text-weak">{state.error}</div>}
                 >
-                  <For each={entries()}>
-                    {(entry) => {
-                      const label = entry.name === "none" ? "None" : entry.name
-                      return (
-                        <button
-                          type="button"
-                          class="w-full px-2 py-1.5 flex items-center gap-2 rounded-md text-left text-13-regular text-text-strong hover:bg-surface-base-hover"
-                          onClick={() => void select(entry.name)}
-                        >
-                          <Icon name="prompt" size="small" />
-                          <span class="min-w-0 flex-1 truncate">{label}</span>
-                          <Show when={entry.name === state.prompt?.system}>
-                            <Icon name="check" size="small" />
-                          </Show>
-                        </button>
-                      )
-                    }}
-                  </For>
+                  <Show
+                    when={entries().length > 0}
+                    fallback={<div class="px-2 py-1.5 text-13-regular text-text-weak">No prompts found</div>}
+                  >
+                    <For each={entries()}>
+                      {(entry) => {
+                        const label = entry.name === "none" ? "None" : entry.name
+                        return (
+                          <button
+                            type="button"
+                            class="w-full px-2 py-1.5 flex items-center gap-2 rounded-md text-left text-13-regular text-text-strong hover:bg-surface-base-hover"
+                            onClick={() => void select(entry.name)}
+                          >
+                            <Icon name="prompt" size="small" />
+                            <span class="min-w-0 flex-1 truncate">{label}</span>
+                            <Show when={entry.name === state.prompt?.system}>
+                              <Icon name="check" size="small" />
+                            </Show>
+                          </button>
+                        )
+                      }}
+                    </For>
+                  </Show>
                 </Show>
               </Show>
-            </Show>
-          </div>
+            </div>
           </div>
         </Portal>
       </Show>
