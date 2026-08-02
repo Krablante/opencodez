@@ -7,7 +7,7 @@ export const Compaction = Schema.Struct({
     Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(0.9)),
   ).annotate({
     description:
-      "ChatGPT OAuth remote compaction threshold as a fraction of the model input window (default: 0.9, maximum: 0.9)",
+      "ChatGPT OAuth remote compaction threshold as a fraction of the Codex-safe context window (default: 0.9, maximum: 0.9)",
   }),
   token_limit: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))).annotate({
     description: "Optional lower absolute token cap for ChatGPT OAuth remote compaction",

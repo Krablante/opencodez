@@ -243,20 +243,27 @@ turn. Final answers do not trigger a redundant compact-and-continue merely for
 crossing the threshold. Compact requests use the same effective System and tool
 schemas as sampling; steering input waits until the mandatory post-compact
 continuation even when provider-side overflow recovery follows a rejected
-request, and only oversized trailing tool outputs may be replaced to fit the
-request window. Newly completed tool output is included in the preflight limit,
-remote state is bound to its base API model and ChatGPT account, and Stop cancels
-the compact request through response-body processing. The UI reports compaction
-only after success. The remote request allows the same long unary deadline as
-Codex and still has no local-summary fallback.
+request. Inline images use model-visible token estimates rather than their
+base64 text size. If the complete compact payload is still too large, older tool
+outputs are bounded across the request while the newest tool image is preserved;
+the disposable request estimate includes a conservative margin because the
+durable OpenCode history is not item-bounded like Codex. The durable local
+history is unchanged. Newly completed tool output is included
+in the preflight limit, remote state is bound to its base API model and ChatGPT
+account, and Stop cancels the compact request through response-body processing.
+The UI reports compaction only after the returned remote state is persisted. The
+remote request allows the same long unary deadline as Codex and still has no
+local-summary fallback.
 
 `opencodez.responses.compaction.threshold` is a fraction of the model's input
 window and defaults to the Codex policy of `0.9`. It accepts values greater than
 `0` and no greater than `0.9`, so configuration can compact earlier but never
 later than the safe default. Optional `token_limit` adds an absolute positive
 token cap. The effective trigger is the minimum of the percentage limit, the
-absolute cap, and OpenCode's usable-input limit. For the current Luna/Sol input
-window of `372000`, the default trigger is `334800` tokens.
+absolute cap, OpenCode's usable-input limit, and Codex's advertised ChatGPT
+Responses context. Codex `rust-v0.146.0` uses a `272000` context window for the
+current Luna/Sol models, so their default trigger is `244800` tokens even when a
+general provider catalog advertises a larger input limit.
 
 ## Commands
 

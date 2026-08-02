@@ -14,6 +14,7 @@ import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
 import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
+import { OpenCodezResponsesCompact } from "@/opencodez/responses-compact"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
@@ -1215,7 +1216,9 @@ const layer = Layer.effect(
                   return (
                     total +
                     Token.estimate(part.state.output) +
-                    Token.estimate(JSON.stringify(part.state.attachments ?? []))
+                    (model.providerID === "openai"
+                      ? OpenCodezResponsesCompact.estimateInput(part.state.attachments ?? [])
+                      : Token.estimate(JSON.stringify(part.state.attachments ?? [])))
                   )
                 }
                 if (part.state.status === "error") return total + Token.estimate(part.state.error)

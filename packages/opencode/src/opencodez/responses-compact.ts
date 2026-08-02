@@ -5,6 +5,7 @@ import { OpenAIResponses } from "@opencode-ai/llm/protocols/openai-responses"
 import { ProviderTransform } from "@/provider/transform"
 import { Token } from "@/util/token"
 import type { ModelMessage, Tool } from "ai"
+import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 
 export type Result = {
   items: unknown[]
@@ -18,6 +19,14 @@ export type Result = {
 }
 
 const TRUNCATED_OUTPUT = "Output exceeded the available model context and was truncated"
+// Match Codex's conservative estimate for an automatically resized image input.
+// Counting inline base64 as text can overstate one screenshot by hundreds of
+// thousands of tokens and trigger compaction while the provider still has room.
+const IMAGE_INPUT_TOKENS = 1_844
+// Codex calls its byte-based history estimate a lower bound and also caps every
+// tool output when recording it. OpenCode keeps the durable output verbatim, so
+// apply the missing safety margin only to the disposable compact request copy.
+const COMPACT_ESTIMATE_SAFETY_FACTOR = 2
 
 function toCompactInput(input: {
   model: Provider.Model
@@ -53,7 +62,14 @@ export function compact(input: {
     const body = yield* toCompactInput(input)
     if (!Array.isArray(body.input)) throw new Error("OpenAI compact input must be an array")
     const request = compactBody(body, [...input.items.filter((item) => !isSystemMessage(item)), ...body.input])
-    const trimmedOutputs = trimOutputs(request, input.model.limit.input || input.model.limit.context)
+    const bounded = trimOutputs(request, OpenCodezSettings.responsesCompactionPayloadLimit(input.model.limit))
+    if (bounded.rewritten > 0) {
+      yield* Effect.logInfo("bounded remote compaction tool outputs", {
+        count: bounded.rewritten,
+        estimated_tokens: bounded.estimate,
+        limit: bounded.limit,
+      })
+    }
 
     const baseURL =
       typeof input.provider.options.baseURL === "string"
@@ -95,7 +111,7 @@ export function compact(input: {
     const outputDetails = isRecord(usage.output_tokens_details) ? usage.output_tokens_details : {}
     return {
       items,
-      trimmedOutputs,
+      trimmedOutputs: bounded.rewritten,
       usage: {
         total: number(usage.total_tokens),
         input: number(usage.input_tokens),
@@ -126,23 +142,83 @@ function compactBody(body: Record<string, unknown>, items: unknown[]) {
 }
 
 function trimOutputs(body: Record<string, unknown> & { input: unknown[] }, contextWindow: number) {
-  if (contextWindow <= 0) return 0
-  let estimate = Token.estimate(JSON.stringify(body))
+  if (contextWindow <= 0) return { rewritten: 0, estimate: 0, limit: contextWindow }
+  let estimate = estimateInput(body) * COMPACT_ESTIMATE_SAFETY_FACTOR
   let rewritten = 0
-  for (let index = body.input.length - 1; index >= 0 && estimate > contextWindow; index--) {
-    const item = body.input[index]
-    if (!isRecord(item)) break
-    if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
-      body.input[index] = { ...item, output: TRUNCATED_OUTPUT }
-    } else if (item.type === "tool_search_output") {
-      body.input[index] = { ...item, tools: [] }
-    } else {
-      break
-    }
+  const indexes = body.input.flatMap((item, index) => (isToolOutput(item) ? [index] : []))
+  const latest = indexes.at(-1)
+  const candidates = indexes
+    .flatMap((index) => {
+      const item = body.input[index]
+      if (!isRecord(item)) return []
+      const replacement = rewriteOutput(item, index === latest)
+      return [
+        {
+          index,
+          replacement,
+          saved: (estimateInput(item) - estimateInput(replacement)) * COMPACT_ESTIMATE_SAFETY_FACTOR,
+        },
+      ]
+    })
+    .filter((candidate) => candidate.saved > 0)
+    .toSorted((a, b) => {
+      const newest = Number(a.index === latest) - Number(b.index === latest)
+      if (newest !== 0) return newest
+      return b.saved - a.saved || a.index - b.index
+    })
+  for (const candidate of candidates) {
+    if (estimate <= contextWindow) break
+    body.input[candidate.index] = candidate.replacement
     rewritten++
-    estimate = Token.estimate(JSON.stringify(body))
+    estimate = Math.max(0, estimate - candidate.saved)
   }
-  return rewritten
+  return { rewritten, estimate, limit: contextWindow }
+}
+
+function isToolOutput(value: unknown) {
+  if (!isRecord(value)) return false
+  return (
+    value.type === "function_call_output" ||
+    value.type === "custom_tool_call_output" ||
+    value.type === "tool_search_output"
+  )
+}
+
+function rewriteOutput(item: Record<string, unknown>, preserveMedia: boolean) {
+  if (item.type === "tool_search_output") return { ...item, tools: [] }
+  if (!preserveMedia || !Array.isArray(item.output)) return { ...item, output: TRUNCATED_OUTPUT }
+  const media = item.output.filter((part) => isRecord(part) && part.type === "input_image")
+  return {
+    ...item,
+    output: [{ type: "input_text", text: TRUNCATED_OUTPUT }, ...media],
+  }
+}
+
+export function estimateInput(value: unknown) {
+  let estimate = Token.estimate(JSON.stringify(value))
+  const visit = (item: unknown): void => {
+    if (typeof item === "string") {
+      const payload = inlineImagePayload(item)
+      if (payload) estimate = Math.max(0, estimate - Token.estimate(payload) + IMAGE_INPUT_TOKENS)
+      return
+    }
+    if (Array.isArray(item)) {
+      item.forEach(visit)
+      return
+    }
+    if (!isRecord(item)) return
+    Object.values(item).forEach(visit)
+  }
+  visit(value)
+  return estimate
+}
+
+function inlineImagePayload(value: string) {
+  const comma = value.indexOf(",")
+  if (comma < 0) return undefined
+  const metadata = value.slice(0, comma).toLowerCase()
+  if (!metadata.startsWith("data:image/") || !metadata.includes(";base64")) return undefined
+  return value.slice(comma + 1)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

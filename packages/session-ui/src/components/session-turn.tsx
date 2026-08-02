@@ -290,11 +290,10 @@ export function SessionTurn(
   )
 
   const interrupted = createMemo(() => assistantMessages().some((m) => m.error?.name === "MessageAbortedError"))
-  const compacted = createMemo(
-    () =>
-      !!compaction() &&
-      assistantMessages().some((message) => message.summary === true && !!message.finish && !message.error),
-  )
+  const compacted = createMemo(() => {
+    const part = compaction()
+    return part?.type === "compaction" && !!part.remote
+  })
   const divider = createMemo(() => {
     if (compacted()) return i18n.t("ui.messagePart.compaction")
     if (interrupted()) return i18n.t("ui.message.interrupted")

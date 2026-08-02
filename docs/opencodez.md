@@ -243,13 +243,21 @@ continuation, then admitted normally. This boundary remains tied to the original
 active turn even if preflight underestimates the request and the provider itself
 reports overflow; frozen request controls are then combined with history that
 still excludes the pending steer. Before transport, OpenCodez estimates the
-complete compact payload and, only when it would exceed the model window,
-replaces contiguous oversized trailing tool outputs with the same bounded marker
-used by Codex. User messages, tool calls, ordinary outputs, and pending media are
-never summarized or dropped locally. The unary compact request uses Codex's
-20-minute default deadline and is cancelled with the owning session operation
-through response-body processing, so a Stop does not leave the HTTP request
-running in the background.
+complete compact payload using a model-visible cost for inline images instead of
+counting their base64 encoding as text. Only when the payload would exceed the
+Codex-safe request window does it replace older tool outputs across the request
+with a bounded marker. Codex `rust-v0.146.0` advertises a `272000` context for the
+current ChatGPT Responses models and compacts at 90% of it, so Luna/Sol use a
+`244800` default trigger even if the general provider catalog is larger. The
+transport estimate also carries a conservative margin because OpenCode retains
+verbatim durable tool output where Codex bounds each item on insertion. The
+newest tool result keeps its image input even if its text must be bounded, so an
+active visual task can continue after compaction. User
+messages, tool calls, and pending input are never summarized or dropped locally,
+and the durable local history remains unchanged. The unary compact request uses
+Codex's 20-minute default deadline and is cancelled with the owning session
+operation through response-body processing, so a Stop does not leave the HTTP
+request running in the background.
 
 Remote output is normalized before persistence: current user/assistant messages
 and opaque compaction items are retained, while echoed developer/System,
@@ -271,23 +279,24 @@ a successful compaction.
 
 #### Compaction Policy
 
-`opencodez.responses.compaction.threshold` controls the fraction of the model's
-input window at which ChatGPT OAuth compacts. It defaults to `0.9`, matching the
-Codex default, and accepts values greater than `0` and no greater than `0.9`.
-This permits earlier compaction without allowing a less safe threshold than
-Codex.
+`opencodez.responses.compaction.threshold` controls the fraction of the
+Codex-safe ChatGPT Responses context at which compaction runs. That context is
+the smaller of the provider input limit and Codex's current `272000` window. The
+threshold defaults to `0.9`, matching Codex, and accepts values greater than `0`
+and no greater than `0.9`. This permits earlier compaction without allowing a
+less safe threshold than Codex.
 
 Optional `opencodez.responses.compaction.token_limit` is a positive integer and
 acts like Codex's absolute `model_auto_compact_token_limit`. The effective limit
 is:
 
 ```text
-min(input_window * threshold, token_limit when set, usable_input_limit)
+min(min(provider_input_window, 272000) * threshold, token_limit when set, usable_input_limit)
 ```
 
-For Luna, Terra, and Sol with an input window of `372000`, the default trigger
-is `334800` tokens. Setting `threshold` to `0.8` moves it to `297600`; setting
-`token_limit` to `250000` lowers it further to `250000`.
+For current Luna, Terra, and Sol models, the default trigger is `244800` tokens.
+Setting `threshold` to `0.8` moves it to `217600`; setting `token_limit` to
+`200000` lowers it further to `200000`.
 
 The accounting scope is the full active context, which is the Codex default.
 The advanced Codex `body_after_prefix` scope is intentionally not exposed

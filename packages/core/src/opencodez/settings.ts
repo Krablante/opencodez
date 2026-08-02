@@ -27,6 +27,9 @@ export type ModelLike =
 
 export const defaults = {
   compaction: {
+    // Codex rust-v0.146.0 advertises a 272k context window for the ChatGPT
+    // Responses models even when the general provider catalog is larger.
+    context: 272_000,
     threshold: 0.9,
   },
   system: {
@@ -66,10 +69,18 @@ export function responsesCompaction(config: ConfigLike | undefined) {
 
 export function responsesCompactionLimit(config: ConfigLike | undefined, model: { input?: number; context: number }) {
   const policy = responsesCompaction(config)
-  const base = model.input || model.context
+  const base = responsesCompactionContext(model)
   let limit = Math.max(1, Math.floor(base * policy.threshold))
   if (policy.token_limit !== undefined) limit = Math.min(limit, policy.token_limit)
   return limit
+}
+
+export function responsesCompactionContext(model: { input?: number; context: number }) {
+  return Math.min(model.input || model.context, defaults.compaction.context)
+}
+
+export function responsesCompactionPayloadLimit(model: { input?: number; context: number }) {
+  return Math.floor(responsesCompactionContext(model) * defaults.compaction.threshold)
 }
 
 function resolveModelMapping(mapping: Record<string, string>, model: ModelLike | undefined) {

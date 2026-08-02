@@ -91,11 +91,13 @@ non-persisted `rs_*` item reference. When the returned state is replayed, its
 echoed system item is discarded and the current request's system prefix remains
 first. Remote errors remain visible and still have no local fallback.
 
-The default trigger is 90% of the model input window, capped by the usable input
-limit. `opencodez.responses.compaction.threshold` may lower that percentage and
-`token_limit` may add a lower absolute cap. Both settings affect only ChatGPT
-OAuth remote compaction; other providers continue to use upstream OpenCode
-policy.
+The default trigger is 90% of the Codex-safe ChatGPT Responses context, capped
+by the model and usable input limits. Codex `rust-v0.146.0` advertises a `272000`
+context for the current models, making their default trigger `244800` even when
+the general provider catalog is larger. `opencodez.responses.compaction.threshold`
+may lower that percentage and `token_limit` may add a lower absolute cap. Both
+settings affect only ChatGPT OAuth remote compaction; other providers continue
+to use upstream OpenCode policy.
 
 Automatic compaction persists an explicit phase. Pre-turn compaction excludes
 the pending user message from compact input and replays it once after success.
@@ -107,7 +109,11 @@ automatic compaction is enabled, so it does not emit a transient session error.
 Post-sampling compaction runs only when another model request is required; a
 finished answer never causes a redundant continuation. Steering input arriving
 around compaction is withheld from both compact input and the first mandatory
-continuation, then admitted normally. A transport-boundary size check can replace
-only contiguous oversized trailing tool outputs with a bounded marker. The
-request keeps Codex's long unary deadline; manual compaction does not
-auto-continue.
+continuation, then admitted normally. Inline images are estimated at their
+model-visible cost rather than as base64 text. If the compact payload remains too
+large, a transport-boundary pass replaces older tool outputs across the request
+with a bounded marker while retaining image input from the newest result. The
+request estimate uses an additional conservative margin because OpenCode keeps
+verbatim durable tool output instead of bounding each item as Codex records it.
+The durable history is not rewritten. The request keeps Codex's long unary
+deadline; manual compaction does not auto-continue.
