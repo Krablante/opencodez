@@ -60,7 +60,7 @@ import { SessionModelContext } from "./model-context"
 import { LLMEvent } from "@opencode-ai/llm"
 import { Token } from "@/util/token"
 import { LLMRequestPrep } from "./llm/request"
-import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
+import { OpenCodezResponsesModel } from "@/opencodez/responses-model"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1214,7 +1214,7 @@ const layer = Layer.effect(
             yield* Effect.logInfo("refreshing remote compaction backend snapshot", {
               "session.id": sessionID,
               model: model.api.id,
-              compHash: OpenCodezSettings.responsesCompHash(model),
+              compHash: OpenCodezResponsesModel.resolve(model)?.compHash,
             })
             yield* compaction.create({
               sessionID,

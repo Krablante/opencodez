@@ -8,6 +8,8 @@ import { OpenAIWebSocketPool } from "./ws-pool"
 import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
+import { OpenCodezResponsesModel } from "@/opencodez/responses-model"
+import { OpenCodezResponsesRequest } from "@/opencodez/responses-request"
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 const ISSUER = "https://auth.openai.com"
@@ -275,15 +277,13 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
     },
     async event(input) {
       if (input.event.type !== "session.deleted") return
-      OpenCodezResponsesCompaction.clear(input.event.properties.info.id)
       for (const websocketFetch of websocketFetches) websocketFetch.remove(input.event.properties.info.id)
     },
     provider: {
       id: "openai",
       async models(provider, ctx) {
         if (ctx.auth?.type !== "oauth") return provider.models
-
-        return Object.fromEntries(
+        const models = Object.fromEntries(
           Object.entries(provider.models)
             .filter(([, model]) => {
               if (model.options.reasoningMode === "pro") return false
@@ -318,6 +318,10 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               },
             ]),
         )
+        return OpenCodezResponsesModel.initialize(models, {
+          auth: ctx.auth,
+          endpoint: codexApiEndpoint,
+        })
       },
     },
     auth: {
@@ -327,7 +331,17 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
         const codexWire = auth.type === "oauth" && responsesWire === "codex"
         const websocketFetch =
           options.experimentalWebSockets || codexWire
-            ? OpenAIWebSocketPool.createWebSocketFetch({ httpFetch: fetch, wire: codexWire ? "codex" : "legacy" })
+            ? OpenAIWebSocketPool.createWebSocketFetch({
+                httpFetch: fetch,
+                wire: codexWire ? "codex" : "legacy",
+                onModelsEtag(etag) {
+                  if (!OpenCodezResponsesModel.observeEtag(etag)) return
+                  void getAuth().then((value) => {
+                    if (value.type !== "oauth") return
+                    void OpenCodezResponsesModel.refresh({ auth: value, endpoint: codexApiEndpoint, force: true })
+                  })
+                },
+              })
             : undefined
         if (websocketFetch) {
           websocketFetches.push(websocketFetch)
@@ -428,20 +442,36 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 ? new URL(codexApiEndpoint)
                 : parsed
 
-            const sessionID = headers.get("x-session-affinity") ?? undefined
-            const hasRemoteCompaction = headers.get(OpenCodezResponsesCompaction.HEADER) === "1"
+            if (parsed.pathname.endsWith("/responses") && OpenCodezResponsesModel.needsRefresh(currentAuth)) {
+              await OpenCodezResponsesModel.refresh({ auth: currentAuth, endpoint: codexApiEndpoint })
+            }
+
+            const handoff = headers.get(OpenCodezResponsesCompaction.HEADER) ?? undefined
             headers.delete(OpenCodezResponsesCompaction.HEADER)
+
+            const lowered = parsed.pathname.endsWith("/responses")
+              ? OpenCodezResponsesRequest.lower(init?.body, handoff, codexWire)
+              : undefined
+            if (lowered?.responsesLite) headers.set(OpenCodezResponsesModel.RESPONSES_LITE_HEADER, "true")
 
             const requestInit = {
               ...init,
-              body:
-                hasRemoteCompaction && parsed.pathname.endsWith("/responses")
-                  ? OpenCodezResponsesCompaction.inject(init?.body, sessionID)
-                  : init?.body,
+              body: lowered?.body ?? init?.body,
               headers,
             }
-            if (websocketFetch && parsed.pathname.endsWith("/responses")) return websocketFetch(url, requestInit)
-            return fetch(url, OpenAIWebSocketPool.withoutInternalHeaders(requestInit))
+            const response =
+              websocketFetch && parsed.pathname.endsWith("/responses")
+                ? await websocketFetch(url, requestInit)
+                : await fetch(url, OpenAIWebSocketPool.withoutInternalHeaders(requestInit))
+            const modelsEtag = response.headers.get("x-models-etag") ?? undefined
+            if (OpenCodezResponsesModel.observeEtag(modelsEtag)) {
+              void OpenCodezResponsesModel.refresh({
+                auth: currentAuth,
+                endpoint: codexApiEndpoint,
+                force: true,
+              })
+            }
+            return response
           },
         }
       },

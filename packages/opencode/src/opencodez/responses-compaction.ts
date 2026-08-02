@@ -1,6 +1,6 @@
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 
-export const HEADER = "x-opencodez-responses-compaction"
+export const HEADER = "x-opencodez-responses-compaction-handoff"
 export const METADATA_KEY = "opencodez.responses.compaction"
 export const CONTINUE_MARKER = "__OPENCODEZ_REMOTE_COMPACTION_CONTINUE__"
 
@@ -11,7 +11,11 @@ type Context = {
   compHash?: string
 }
 
-const active = new Map<string, Context>()
+type Handoff = Context & { expiresAt: number }
+
+const HANDOFF_TTL = 60_000
+const HANDOFF_LIMIT = 128
+const handoffs = new Map<string, Handoff>()
 
 export function latest(messages: readonly SessionV1.WithParts[]) {
   for (let index = messages.length - 1; index >= 0; index--) {
@@ -59,65 +63,38 @@ export function withMetadata(metadata: Record<string, unknown> | undefined, mess
   }
 }
 
-export function register(sessionID: string, metadata: Record<string, unknown> | undefined) {
+export function handoff(metadata: Record<string, unknown> | undefined) {
   const value = metadata?.[METADATA_KEY]
-  if (!isContext(value)) return false
-  active.set(sessionID, value)
-  return true
+  if (!isContext(value)) return undefined
+  pruneHandoffs()
+  while (handoffs.size >= HANDOFF_LIMIT) {
+    const oldest = handoffs.keys().next().value
+    if (!oldest) break
+    handoffs.delete(oldest)
+  }
+  const id = crypto.randomUUID()
+  handoffs.set(id, { ...value, expiresAt: Date.now() + HANDOFF_TTL })
+  return id
 }
 
 export function has(metadata: Record<string, unknown> | undefined) {
   return isContext(metadata?.[METADATA_KEY])
 }
 
-export function inject(body: BodyInit | null | undefined, sessionID: string | undefined) {
-  if (!sessionID) throw new Error("Remote compaction request is missing a session ID")
-  if (typeof body !== "string") throw new Error("Remote compaction request body must be JSON text")
-  const context = active.get(sessionID)
-  if (!context) throw new Error(`Remote compaction context is unavailable for session ${sessionID}`)
-  try {
-    const parsed: unknown = JSON.parse(body)
-    if (!parsed || typeof parsed !== "object" || !("input" in parsed) || !Array.isArray(parsed.input)) {
-      throw new Error("Remote compaction request input must be an array")
-    }
-    const firstNonSystem = parsed.input.findIndex((item) => !isSystemMessage(item))
-    const split = firstNonSystem === -1 ? parsed.input.length : firstNonSystem
-    const system = parsed.input.slice(0, split)
-    const tail = parsed.input.slice(split)
-    const marker = tail.findIndex(isContinueMarker)
-    const input = marker === -1 ? tail : [...tail.slice(0, marker), ...tail.slice(marker + 1)]
-    return JSON.stringify({
-      ...parsed,
-      // Persisted compaction state never owns the current request controls.
-      // Keep the current System prefix and place opaque state immediately after it.
-      input: [...system, ...context.items.filter((item) => !isSystemMessage(item)), ...input],
-    })
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Remote compaction")) throw error
-    throw new Error("Remote compaction request body is not valid JSON", { cause: error })
+export function consume(id: string) {
+  const context = handoffs.get(id)
+  handoffs.delete(id)
+  if (!context || context.expiresAt <= Date.now()) throw new Error("Remote compaction request handoff expired")
+  const { expiresAt: _, ...value } = context
+  return value
+}
+
+function pruneHandoffs() {
+  const now = Date.now()
+  for (const [id, value] of handoffs) {
+    if (value.expiresAt > now) continue
+    handoffs.delete(id)
   }
-}
-
-function isSystemMessage(value: unknown) {
-  return !!value && typeof value === "object" && "role" in value && value.role === "system"
-}
-
-function isContinueMarker(value: unknown) {
-  if (!value || typeof value !== "object" || !("role" in value) || value.role !== "user") return false
-  if (!("content" in value) || !Array.isArray(value.content) || value.content.length !== 1) return false
-  const content = value.content[0]
-  return (
-    !!content &&
-    typeof content === "object" &&
-    "type" in content &&
-    content.type === "input_text" &&
-    "text" in content &&
-    content.text === CONTINUE_MARKER
-  )
-}
-
-export function clear(sessionID: string) {
-  active.delete(sessionID)
 }
 
 export function accountIdentity(accountID: string | undefined, accessToken?: string) {
@@ -146,7 +123,12 @@ export function compatibilityError(
 ): string | undefined {
   const context = metadata?.[METADATA_KEY]
   if (!isContext(context)) return undefined
-  if (context.modelID && context.modelID !== input.modelID) {
+  if (
+    !input.allowCompHashMismatch &&
+    context.modelID &&
+    context.modelID !== input.modelID &&
+    (!context.compHash || !input.compHash || context.compHash !== input.compHash)
+  ) {
     return `This session's OpenAI compacted state belongs to model ${context.modelID}; continue with that base model or start a new session before switching`
   }
   if (context.accountKey && context.accountKey !== input.accountKey) {

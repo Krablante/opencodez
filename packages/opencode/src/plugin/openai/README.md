@@ -30,6 +30,14 @@ Model-catalog Fast aliases already lower to the same base model with
 `service_tier: "priority"`; the product originator is the only additional
 routing requirement. API-key OpenAI requests do not pass through this adapter.
 
+The authenticated `/models` catalog supplies context, automatic-compaction
+limits, `comp_hash`, and Responses Lite capability. It refreshes every five
+minutes or when a stream reports a new `x-models-etag`, with one deduplicated
+in-flight request and a short known-profile fallback. Responses Lite models move
+tools and instructions into developer input items, use `all_turns` reasoning
+context, strip image `detail`, and carry the required HTTP header or WebSocket
+metadata marker. Legacy wire mode keeps the unmodified request shape.
+
 ## Lifetime
 
 - Connect timeout: 15 seconds.
@@ -46,9 +54,9 @@ routing requirement. API-key OpenAI requests do not pass through this adapter.
 
 ## Retries
 
-- Retry sampling WebSocket stream/setup failures up to 5 times, then use HTTP
-  until the session pool entry expires after its idle timeout. Compaction uses a
-  smaller two-retry transport budget.
+- Retry sampling WebSocket stream/setup failures up to 5 times, switch once,
+  then retry HTTP up to 5 times. This is at most 12 network requests. Compaction
+  uses a smaller two-retry budget on each transport, at most 6 requests.
 - `websocket_connection_limit_reached` consumes the same retry budget and HTTP fallback.
 - `previous_response_not_found` opens a fresh socket and retries the current
   canonical full request once without consuming the normal stream-failure
@@ -61,8 +69,8 @@ routing requirement. API-key OpenAI requests do not pass through this adapter.
   Once a tool call has been admitted, the attempt is irreversible: automatic
   replay stops so a side effect cannot run twice. Other providers keep the
   upstream partial-output policy.
-- OpenAI session retries are finite. The existing WebSocket-to-HTTP transition
-  and the session-level policy share a seven-retry end-to-end ceiling.
+- OpenAI session retries are finite. One derived policy owns both sides of the
+  WebSocket-to-HTTP transition, preventing nested retry multiplication.
 - Abort or cancel closes the socket.
 
 ## Concurrency
@@ -96,11 +104,11 @@ same session/account socket and logical turn ID, so sticky routing survives the
 request and mandatory post-compact continuation. Manual and pre-turn compact do
 not inherit state from an earlier user turn.
 
-On later turns, the request layer registers persisted items for the current
-session and adds a private header. This fetch adapter removes that header before
-network I/O and prepends the opaque items to the lowered tail. The session part
-is the only persistent state; the in-memory map is a request-local transport
-bridge and is cleared when the session is deleted.
+On later turns, the request layer creates a random one-shot handoff and adds it
+as a private header. This fetch adapter consumes and removes that header before
+network I/O, then prepends the opaque items to the lowered tail. The session part
+is the only persistent state; the request-local bridge expires after one minute,
+is capped at 128 entries, and cannot be reused.
 
 Direct mid-turn continuation has no new model-visible user input. Because the
 AI SDK rejects an empty local message list before transport, lowering inserts a
@@ -117,13 +125,14 @@ non-persisted `rs_*` item reference. When persisted state is replayed, the
 current request's System prefix remains first. Remote errors remain visible and
 still have no local fallback.
 
-The default trigger is 90% of the Codex-safe ChatGPT Responses context, capped
-by the model and usable input limits. Codex `rust-v0.146.0` advertises a `272000`
-context for the current models, making their default trigger `244800` even when
-the general provider catalog is larger. `opencodez.responses.compaction.threshold`
-may lower that percentage and `token_limit` may add a lower absolute cap. Both
-settings affect only ChatGPT OAuth remote compaction; other providers continue
-to use upstream OpenCode policy.
+The default trigger is 90% of the Codex-safe ChatGPT Responses context from the
+authenticated model catalog, capped by the model and usable input limits. The
+fallback profiles mirror Codex `rust-v0.146.0` at `272000`, making their default
+trigger `244800` during a catalog outage.
+`opencodez.responses.compaction.threshold` may lower that percentage and
+`token_limit` may add a lower absolute cap. Both settings affect only ChatGPT
+OAuth remote compaction; other providers continue to use upstream OpenCode
+policy.
 
 Automatic compaction persists an explicit phase. Pre-turn compaction excludes
 the pending user message from compact input and replays it once after success.
@@ -147,11 +156,12 @@ parallel-output batch. Only tool outputs receive a second conservative estimate,
 so ordinary text can use the full safe window. If those eligible rewrites still
 cannot fit, the request fails locally instead of sending a predictably rejected
 payload. The durable history is not rewritten. A compaction stream retries
-transient failures at most twice; manual compaction does not auto-continue.
+transient failures at most twice per transport; manual compaction does not
+auto-continue.
 
-Persisted opaque state records the source API model, account key, and Codex
+Persisted opaque state records the source API model, account key, and catalog
 `comp_hash`. A known backend-snapshot change first refreshes that state through
-the same remote compaction path, then resumes the pending user turn. When the
-pinned Codex version changes, update the model-to-`comp_hash` table in
-`packages/core/src/opencodez/settings.ts` from its model metadata before rolling
-out the fork.
+the same remote compaction path, then resumes the pending user turn. The
+authenticated model catalog refreshes every five minutes and immediately after
+an `x-models-etag` change; known fallback profiles cover temporary catalog
+failure without becoming a second live source of truth.

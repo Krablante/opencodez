@@ -5,7 +5,6 @@ import type { RuntimeFlags } from "@/effect/runtime-flags"
 import { InstanceState } from "@/effect/instance-state"
 import { Permission } from "@/permission"
 import type { Agent } from "@/agent/agent"
-import type { MessageV2 } from "../message-v2"
 import type { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
 import { SystemPrompt } from "../system"
@@ -21,6 +20,7 @@ import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
 import { OpenAIWebSocketPool } from "@/plugin/openai/ws-pool"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
+import { OpenCodezResponsesModel } from "@/opencodez/responses-model"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
@@ -79,12 +79,12 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
       input.auth?.type === "oauth"
         ? OpenCodezResponsesCompaction.accountKey(input.auth.accountId, input.auth.access)
         : undefined,
-    compHash: OpenCodezSettings.responsesCompHash(input.model),
+    compHash: OpenCodezResponsesModel.resolve(input.model)?.compHash,
     allowCompHashMismatch: input.allowCompHashMismatch,
   })
   if (compatibilityError) return yield* Effect.fail(new Error(compatibilityError))
-  const hasRemoteCompaction =
-    isOpenaiOauth && OpenCodezResponsesCompaction.register(input.sessionID, input.sessionMetadata)
+  const compactionHandoff =
+    isOpenaiOauth && !input.allowCompHashMismatch && OpenCodezResponsesCompaction.handoff(input.sessionMetadata)
   const opencodezPrompts = OpenCodezIdentity.enabled
     ? yield* Effect.promise(async () => {
         const opencodez = OpenCodezSession.effective({
@@ -258,7 +258,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
           }),
       ...input.model.headers,
       ...headers,
-      ...(hasRemoteCompaction ? { [OpenCodezResponsesCompaction.HEADER]: "1" } : {}),
+      ...(compactionHandoff ? { [OpenCodezResponsesCompaction.HEADER]: compactionHandoff } : {}),
     },
   }
 })

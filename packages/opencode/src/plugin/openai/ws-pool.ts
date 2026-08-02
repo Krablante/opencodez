@@ -18,6 +18,7 @@ export interface CreateWebSocketFetchOptions {
   maxConnectionAge?: number
   streamRetries?: number
   wire?: Mode
+  onModelsEtag?: (etag: string) => void
 }
 
 interface PoolEntry {
@@ -54,10 +55,9 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     const url = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url
     const internalHeaders = OpenAIWebSocket.normalizeHeaders(init?.headers)
     const httpInit = withoutInternalHeaders(init)
+    const requestKind = OpenCodezResponsesPolicy.requestKind(internalHeaders)
     const requestStreamRetries =
-      OpenCodezResponsesPolicy.requestKind(internalHeaders) === "compaction"
-        ? OpenCodezResponsesPolicy.streamRetryLimit("compaction")
-        : streamRetries
+      requestKind === "compaction" ? OpenCodezResponsesPolicy.streamRetryLimit("compaction") : streamRetries
 
     if (init?.method !== "POST" || !new URL(url).pathname.endsWith("/responses")) {
       return httpFetch(input, httpInit)
@@ -93,6 +93,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
       continuation: new Continuation(),
     }
     pool.set(key, entry)
+    trimPool()
     const turnID = internalHeaders[TURN_ID_HEADER]
 
     if (entry.fallback) {
@@ -144,6 +145,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         signal: init?.signal ?? undefined,
         onFirstEvent: (error) => resolveFirstEvent(error ?? true),
         onEvent: (event) => {
+          captureModelsEtag(event, options?.onModelsEtag)
           captureEventTurnState(entry, turnID, event)
           transaction?.event(event)
         },
@@ -208,8 +210,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
           headers: { "content-type": "application/json", ...first.headers },
         })
       }
-      if (!entry.fallback) return response
-      return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
+      return response
     } catch (error) {
       entry.busy = false
       entry.lastUsedAt = Date.now()
@@ -221,7 +222,6 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
 
       recordStreamFailure(entry, requestStreamRetries)
       invalidate(entry)
-      if (entry.fallback) return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
       return failedResponse(
         new ProviderError.ResponseStreamError(error instanceof Error ? error.message : String(error), {
           cause: error,
@@ -241,6 +241,19 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     for (const [key, entry] of pool) {
       if (entry.busy) continue
       if (now - entry.lastUsedAt < idleTimeout) continue
+      invalidate(entry)
+      if (!entry.fallback) pool.delete(key)
+    }
+    trimPool()
+  }
+
+  function trimPool() {
+    if (pool.size <= OpenCodezResponsesPolicy.SESSION_POOL_LIMIT) return
+    const candidates = [...pool.entries()]
+      .filter(([, entry]) => !entry.busy)
+      .toSorted(([, left], [, right]) => left.lastUsedAt - right.lastUsedAt)
+    for (const [key, entry] of candidates) {
+      if (pool.size <= OpenCodezResponsesPolicy.SESSION_POOL_LIMIT) break
       invalidate(entry)
       pool.delete(key)
     }
@@ -280,6 +293,12 @@ function captureEventTurnState(entry: PoolEntry, turnID: string | undefined, eve
     return
   const state = Object.entries(event.headers).find(([key]) => key.toLowerCase() === TURN_STATE_HEADER)?.[1]
   if (typeof state === "string" && state) entry.turnState = state
+}
+
+function captureModelsEtag(event: Record<string, unknown>, observe: ((etag: string) => void) | undefined) {
+  if (!observe || event.type !== "response.metadata" || !isRecord(event.headers)) return
+  const etag = Object.entries(event.headers).find(([key]) => key.toLowerCase() === "x-models-etag")?.[1]
+  if (typeof etag === "string" && etag) observe(etag)
 }
 
 function captureHeaderTurnState(entry: PoolEntry, turnID: string | undefined, headers: Record<string, string>) {

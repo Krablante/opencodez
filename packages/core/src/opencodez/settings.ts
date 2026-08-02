@@ -45,14 +45,6 @@ export const defaults = {
     "gpt-5.6-terra": "codex_gpt_5_6_luna_terra",
     "gpt-5.6-sol": "codex_gpt_5_6_sol",
   },
-  compHash: {
-    "gpt-5.4": "2911",
-    "gpt-5.4-mini": "2911",
-    "gpt-5.5": "2911",
-    "gpt-5.6-luna": "3000",
-    "gpt-5.6-terra": "3000",
-    "gpt-5.6-sol": "3000",
-  },
 }
 
 export function defaultSystem(config: ConfigLike | undefined, model: ModelLike | undefined) {
@@ -75,24 +67,24 @@ export function responsesCompaction(config: ConfigLike | undefined) {
   }
 }
 
-export function responsesCompactionLimit(config: ConfigLike | undefined, model: { input?: number; context: number }) {
+export function responsesCompactionLimit(
+  config: ConfigLike | undefined,
+  model: { input?: number; context: number },
+  responsesContext?: number,
+) {
   const policy = responsesCompaction(config)
-  const base = responsesCompactionContext(model)
+  const base = responsesCompactionContext(model, responsesContext)
   let limit = Math.max(1, Math.floor(base * policy.threshold))
   if (policy.token_limit !== undefined) limit = Math.min(limit, policy.token_limit)
   return limit
 }
 
-export function responsesCompactionContext(model: { input?: number; context: number }) {
-  return Math.min(model.input || model.context, defaults.compaction.context)
+export function responsesCompactionContext(model: { input?: number; context: number }, responsesContext?: number) {
+  return Math.min(model.input || model.context, responsesContext ?? defaults.compaction.context)
 }
 
-export function responsesCompactionPayloadLimit(model: { input?: number; context: number }) {
-  return Math.floor(responsesCompactionContext(model) * defaults.compaction.threshold)
-}
-
-export function responsesCompHash(model: ModelLike | undefined) {
-  return resolveModelMapping(defaults.compHash, model)
+export function responsesCompactionPayloadLimit(model: { input?: number; context: number }, responsesContext?: number) {
+  return Math.floor(responsesCompactionContext(model, responsesContext) * defaults.compaction.threshold)
 }
 
 function resolveModelMapping(mapping: Record<string, string>, model: ModelLike | undefined) {

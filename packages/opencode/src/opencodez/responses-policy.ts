@@ -3,10 +3,14 @@ import { isRecord } from "@/util/record"
 export type RequestKind = "sampling" | "compaction"
 
 export const REQUEST_KIND_HEADER = "x-opencodez-responses-request-kind"
-export const SESSION_RETRY_LIMIT = 7
+export const SESSION_POOL_LIMIT = 256
 
 export function streamRetryLimit(kind: RequestKind) {
   return kind === "compaction" ? 2 : 5
+}
+
+export function requestRetryLimit(kind: RequestKind) {
+  return streamRetryLimit(kind) * 2 + 1
 }
 
 export function requestKind(headers: Record<string, string>): RequestKind {

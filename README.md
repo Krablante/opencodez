@@ -216,6 +216,15 @@ interruptions, context changes, or model-setting changes. Set the value to
 `legacy` to restore the previous request flow. API-key OpenAI access and other
 providers keep their existing behavior.
 
+OpenCodez reads ChatGPT model capabilities from the authenticated Codex model
+catalog and refreshes them on the catalog ETag. GPT-5.6 models that advertise
+Responses Lite receive the Codex Lite request shape: tools and base instructions
+move into developer input items, image `detail` hints are removed, reasoning
+context covers all turns, and both HTTP and WebSocket requests carry the Lite
+marker. A small built-in profile set keeps known models usable while the catalog
+is temporarily unavailable; it is a fallback, not the primary source of model
+context, automatic-compaction limits, `comp_hash`, or Lite support.
+
 ChatGPT OAuth Fast model entries keep the same underlying model and send the
 catalog's `service_tier: "priority"` through the Codex product route. Switching
 between Standard and Fast remains a normal model change and safely starts a new
@@ -256,18 +265,18 @@ text is not globally double-counted, and `detail: "original"` images use a safe
 in the preflight limit, remote state is bound to its base API model and ChatGPT
 account, and Stop cancels the compact request through response-body processing.
 The UI reports compaction only after the returned remote state is persisted. The
-remote stream has two bounded transport retries, remains cancellable with the
-session, and still has no local-summary fallback.
+remote stream has two bounded retries on each transport, remains cancellable
+with the session, and still has no local-summary fallback.
 
 `opencodez.responses.compaction.threshold` is a fraction of the model's input
 window and defaults to the Codex policy of `0.9`. It accepts values greater than
 `0` and no greater than `0.9`, so configuration can compact earlier but never
 later than the safe default. Optional `token_limit` adds an absolute positive
 token cap. The effective trigger is the minimum of the percentage limit, the
-absolute cap, OpenCode's usable-input limit, and Codex's advertised ChatGPT
-Responses context. Codex `rust-v0.146.0` uses a `272000` context window for the
-current Luna/Sol models, so their default trigger is `244800` tokens even when a
-general provider catalog advertises a larger input limit.
+absolute cap, OpenCode's usable-input limit, and the authenticated Codex model
+catalog. The built-in fallback profiles use the `272000` context advertised by
+Codex `rust-v0.146.0` for current Luna, Terra, and Sol models, producing a
+`244800` default trigger when the catalog is temporarily unavailable.
 
 ## Commands
 

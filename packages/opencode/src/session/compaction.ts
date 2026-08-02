@@ -26,6 +26,7 @@ import { Auth } from "@/auth"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 import { OpenCodezResponsesCompact } from "@/opencodez/responses-compact"
 import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
+import { OpenCodezResponsesModel } from "@/opencodez/responses-model"
 import { SystemPrompt } from "./system"
 import { Usage } from "@opencode-ai/llm"
 import type { TaskPromptOps } from "@/tool/task"
@@ -214,7 +215,12 @@ const layer = Layer.effect(
       const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
       let limit: number | undefined
       if (input.model.providerID === "openai" && authInfo?.type === "oauth") {
-        limit = OpenCodezSettings.responsesCompactionLimit(cfg, input.model.limit)
+        const profile = OpenCodezResponsesModel.resolve(input.model)
+        limit = OpenCodezSettings.responsesCompactionLimit(
+          cfg,
+          input.model.limit,
+          profile?.autoCompactTokenLimit ?? profile?.contextWindow,
+        )
       }
       return overflow({
         cfg,
@@ -231,9 +237,9 @@ const layer = Layer.effect(
       model: Provider.Model
     }) {
       const context = OpenCodezResponsesCompaction.latest(input.messages)
-      const compHash = OpenCodezSettings.responsesCompHash(input.model)
-      if (!context || !compHash || context.compHash === compHash) return false
-      if (context.modelID && context.modelID !== input.model.api.id) return false
+      const compHash = OpenCodezResponsesModel.resolve(input.model)?.compHash
+      if (!context || !compHash) return false
+      if (context.compHash === compHash) return false
       if (input.model.providerID !== "openai") return false
       return (yield* auth.get(input.model.providerID).pipe(Effect.orDie))?.type === "oauth"
     })
@@ -733,7 +739,7 @@ const layer = Layer.effect(
               authInfo?.type === "oauth"
                 ? OpenCodezResponsesCompaction.accountKey(authInfo.accountId, authInfo.access)
                 : undefined,
-            comp_hash: OpenCodezSettings.responsesCompHash(sourceModel),
+            comp_hash: OpenCodezResponsesModel.resolve(sourceModel)?.compHash,
           },
         })
         const usage = Session.getUsage({

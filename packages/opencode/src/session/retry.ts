@@ -1,7 +1,6 @@
 import type { NamedError } from "@opencode-ai/core/util/error"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Cause, Clock, Duration, Effect, Schedule } from "effect"
-import { MessageV2 } from "./message-v2"
 import { iife } from "@/util/iife"
 import { isRecord } from "@/util/record"
 
@@ -175,7 +174,7 @@ function parseJSON(value: unknown) {
 
 export function policy(opts: {
   provider: string
-  maxAttempts?: number
+  maxAttempts?: number | (() => number | undefined)
   continue?: () => boolean
   parse: (error: unknown) => Err
   set: (input: { attempt: number; message: string; action?: Retryable["action"]; next: number }) => Effect.Effect<void>
@@ -184,11 +183,8 @@ export function policy(opts: {
     Effect.succeed((meta: Schedule.InputMetadata<unknown>) => {
       const error = opts.parse(meta.input)
       const retry = retryable(error, opts.provider)
-      if (
-        !retry ||
-        opts.continue?.() === false ||
-        (opts.maxAttempts !== undefined && meta.attempt >= opts.maxAttempts)
-      ) {
+      const maxAttempts = typeof opts.maxAttempts === "function" ? opts.maxAttempts() : opts.maxAttempts
+      if (!retry || opts.continue?.() === false || (maxAttempts !== undefined && meta.attempt >= maxAttempts)) {
         return Cause.done(meta.attempt)
       }
       return Effect.gen(function* () {

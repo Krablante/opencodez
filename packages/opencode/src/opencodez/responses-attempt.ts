@@ -1,4 +1,5 @@
 import type { PartID } from "@/session/schema"
+import { OpenCodezResponsesPolicy } from "./responses-policy"
 
 export type Rollback = {
   readonly partIDs: readonly PartID[]
@@ -43,6 +44,10 @@ export function create() {
     return enabled ? !irreversible : !input.durableOutput
   }
 
+  function retryLimit() {
+    return enabled ? OpenCodezResponsesPolicy.requestRetryLimit("sampling") : undefined
+  }
+
   function rollback(): Rollback | undefined {
     if (!enabled || irreversible) return undefined
     const result = {
@@ -67,6 +72,7 @@ export function create() {
     markModelVisible,
     markIrreversible,
     canRetry,
+    retryLimit,
     rollback,
     commit,
   }

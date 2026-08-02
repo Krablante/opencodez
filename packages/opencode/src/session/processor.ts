@@ -26,7 +26,6 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
 import { OpenCodezResponsesAttempt } from "@/opencodez/responses-attempt"
-import { OpenCodezResponsesPolicy } from "@/opencodez/responses-policy"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
@@ -713,8 +712,7 @@ const layer = Layer.effect(
             Effect.retry(
               SessionRetry.policy({
                 provider: input.model.providerID,
-                maxAttempts:
-                  input.model.providerID === "openai" ? OpenCodezResponsesPolicy.SESSION_RETRY_LIMIT : undefined,
+                maxAttempts: () => attempt.retryLimit(),
                 continue: () => attempt.canRetry({ durableOutput: ctx.producedDurableOutput }),
                 parse,
                 set: (info) =>

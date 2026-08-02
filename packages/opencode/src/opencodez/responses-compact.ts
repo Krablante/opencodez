@@ -3,11 +3,11 @@ import type { Provider } from "@/provider/provider"
 import { LLMNative } from "@/session/llm/native-request"
 import { OpenAIResponses } from "@opencode-ai/llm/protocols/openai-responses"
 import { ProviderTransform } from "@/provider/transform"
-import { Token } from "@/util/token"
 import type { ModelMessage, Tool } from "ai"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 import { OpenAIWebSocketPool } from "@/plugin/openai/ws-pool"
 import { OpenCodezResponsesPolicy } from "./responses-policy"
+import { OpenCodezResponsesModel } from "./responses-model"
 
 export type Result = {
   items: Record<string, unknown>[]
@@ -65,9 +65,13 @@ export function compact(input: {
     const body = yield* toCompactInput(input)
     if (!Array.isArray(body.input)) throw new Error("OpenAI compact input must be an array")
     const request = compactBody(body, [...input.items.filter((item) => !isSystemMessage(item)), ...body.input])
+    const profile = OpenCodezResponsesModel.resolve(input.model)
     const bounded = trimOutputs(
       request,
-      OpenCodezSettings.responsesCompactionPayloadLimit(input.model.limit),
+      OpenCodezSettings.responsesCompactionPayloadLimit(
+        input.model.limit,
+        profile?.autoCompactTokenLimit ?? profile?.contextWindow,
+      ),
       input.preserveActiveToolMedia,
     )
     if (bounded.rewritten > 0) {
@@ -121,7 +125,7 @@ export function compact(input: {
             ),
     }).pipe(
       Effect.retry({
-        times: OpenCodezResponsesPolicy.streamRetryLimit("compaction"),
+        times: OpenCodezResponsesPolicy.requestRetryLimit("compaction"),
         schedule: Schedule.exponential("500 millis"),
         while: (error) => error.retryable,
       }),
@@ -214,7 +218,7 @@ function rewriteOutput(item: Record<string, unknown>, preserveMedia: boolean) {
 }
 
 export function estimateInput(value: unknown) {
-  let estimate = Token.estimate(JSON.stringify(value))
+  let estimate = estimateText(JSON.stringify(value))
   const visit = (item: unknown): void => {
     if (Array.isArray(item)) {
       item.forEach(visit)
@@ -225,7 +229,7 @@ export function estimateInput(value: unknown) {
       const payload = inlineImagePayload(item.image_url)
       if (payload) {
         estimate =
-          Math.max(0, estimate - Token.estimate(payload)) +
+          Math.max(0, estimate - estimateText(payload)) +
           (item.detail === "original" ? ORIGINAL_IMAGE_MAX_TOKENS : IMAGE_INPUT_TOKENS)
         return
       }
@@ -386,12 +390,30 @@ function truncateMessage(item: Record<string, unknown>, tokens: number) {
       return [part]
     }
     if (part.type !== "input_text" || typeof part.text !== "string") return []
-    const chars = Math.min(part.text.length, remaining * 4)
-    const text = part.text.slice(0, chars)
-    remaining = Math.max(0, remaining - Token.estimate(text))
+    const text = truncateText(part.text, remaining)
+    remaining = Math.max(0, remaining - estimateText(text))
     return text ? [{ ...part, text }] : []
   })
   return content.length > 0 ? { ...item, content } : undefined
+}
+
+export function estimateText(value: string) {
+  return Math.max(0, Math.ceil(Buffer.byteLength(value, "utf8") / 4))
+}
+
+function truncateText(value: string, tokens: number) {
+  const maxBytes = tokens * 4
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value
+  let bytes = 0
+  let end = 0
+  for (const character of value) {
+    const point = character.codePointAt(0) ?? 0
+    const width = point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4
+    if (bytes + width > maxBytes) break
+    bytes += width
+    end += character.length
+  }
+  return value.slice(0, end)
 }
 
 function isCompactionItem(value: unknown): value is Record<string, unknown> {
