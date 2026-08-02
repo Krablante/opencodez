@@ -47,7 +47,7 @@ export function withMetadata(metadata: Record<string, unknown> | undefined, mess
   const context = latest(messages)
   if (!context) return metadata
   return {
-    ...(metadata ?? {}),
+    ...metadata,
     [METADATA_KEY]: {
       items: context.items,
       modelID: context.modelID,
@@ -73,8 +73,10 @@ export function inject(body: BodyInit | null | undefined, sessionID: string | un
   const context = active.get(sessionID)
   if (!context) throw new Error(`Remote compaction context is unavailable for session ${sessionID}`)
   try {
-    const parsed = JSON.parse(body) as Record<string, unknown>
-    if (!Array.isArray(parsed.input)) throw new Error("Remote compaction request input must be an array")
+    const parsed: unknown = JSON.parse(body)
+    if (!parsed || typeof parsed !== "object" || !("input" in parsed) || !Array.isArray(parsed.input)) {
+      throw new Error("Remote compaction request input must be an array")
+    }
     const firstNonSystem = parsed.input.findIndex((item) => !isSystemMessage(item))
     const split = firstNonSystem === -1 ? parsed.input.length : firstNonSystem
     const system = parsed.input.slice(0, split)
@@ -83,9 +85,8 @@ export function inject(body: BodyInit | null | undefined, sessionID: string | un
     const input = marker === -1 ? tail : [...tail.slice(0, marker), ...tail.slice(marker + 1)]
     return JSON.stringify({
       ...parsed,
-      // /compact echoes the system item it received, but Codex rejects that
-      // stale item when the compacted context is replayed. Keep the current
-      // request's system prefix and place compacted state immediately after it.
+      // Persisted compaction state never owns the current request controls.
+      // Keep the current System prefix and place opaque state immediately after it.
       input: [...system, ...context.items.filter((item) => !isSystemMessage(item)), ...input],
     })
   } catch (error) {
@@ -141,7 +142,7 @@ export function compatibilityError(
   input: { modelID: string; accountKey?: string },
 ): string | undefined {
   const context = metadata?.[METADATA_KEY]
-  if (!isContext(context)) return
+  if (!isContext(context)) return undefined
   if (context.modelID && context.modelID !== input.modelID) {
     return `This session's OpenAI compacted state belongs to model ${context.modelID}; continue with that base model or start a new session before switching`
   }
@@ -149,6 +150,52 @@ export function compatibilityError(
     return "This session's OpenAI compacted state belongs to a different ChatGPT account"
   }
   return undefined
+}
+
+export function repeatedOverflow(messages: readonly SessionV1.WithParts[], turnID: string) {
+  const current = messages.find(
+    (message): message is SessionV1.WithParts & { info: SessionV1.User } =>
+      message.info.role === "user" && message.info.id === turnID,
+  )
+  if (!current) return false
+  const marker = messages.findLast((message) => {
+    if (message.info.role !== "user" || message.info.id >= current.info.id) return false
+    return message.parts.some(
+      (part) =>
+        part.type === "compaction" &&
+        part.auto &&
+        part.phase === "pre-turn" &&
+        part.overflow === true &&
+        part.remote?.providerID === "openai" &&
+        part.turn_id !== undefined,
+    )
+  })
+  const part = marker?.parts.find(
+    (item): item is SessionV1.CompactionPart =>
+      item.type === "compaction" &&
+      item.auto &&
+      item.phase === "pre-turn" &&
+      item.overflow === true &&
+      item.remote?.providerID === "openai" &&
+      item.turn_id !== undefined,
+  )
+  if (!part?.turn_id) return false
+  const original = messages.find(
+    (message): message is SessionV1.WithParts & { info: SessionV1.User } =>
+      message.info.role === "user" && message.info.id === part.turn_id,
+  )
+  if (!original) return false
+  return JSON.stringify(comparableParts(original.parts)) === JSON.stringify(comparableParts(current.parts))
+}
+
+function comparableParts(parts: readonly SessionV1.Part[]) {
+  return parts
+    .filter((part) => part.type !== "compaction")
+    .map((part) =>
+      Object.fromEntries(
+        Object.entries(part).filter(([key]) => key !== "id" && key !== "messageID" && key !== "sessionID"),
+      ),
+    )
 }
 
 function isContext(value: unknown): value is Context {

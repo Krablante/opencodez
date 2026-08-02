@@ -1,4 +1,4 @@
-import { Cause, Effect } from "effect"
+import { Cause, Effect, Schedule } from "effect"
 import type { Provider } from "@/provider/provider"
 import { LLMNative } from "@/session/llm/native-request"
 import { OpenAIResponses } from "@opencode-ai/llm/protocols/openai-responses"
@@ -9,7 +9,7 @@ import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 import { OpenAIWebSocketPool } from "@/plugin/openai/ws-pool"
 
 export type Result = {
-  items: unknown[]
+  items: Record<string, unknown>[]
   trimmedOutputs: number
   usage: {
     total: number
@@ -24,10 +24,9 @@ const TRUNCATED_OUTPUT = "Output exceeded the available model context and was tr
 // Counting inline base64 as text can overstate one screenshot by hundreds of
 // thousands of tokens and trigger compaction while the provider still has room.
 const IMAGE_INPUT_TOKENS = 1_844
-// Codex calls its byte-based history estimate a lower bound and also caps every
-// tool output when recording it. OpenCode keeps the durable output verbatim, so
-// apply the missing safety margin only to the disposable compact request copy.
-const COMPACT_ESTIMATE_SAFETY_FACTOR = 2
+const ORIGINAL_IMAGE_MAX_TOKENS = 10_000
+const RETAINED_MESSAGE_TOKEN_BUDGET = 64_000
+const COMPACTION_STREAM_RETRIES = 2
 
 function toCompactInput(input: {
   model: Provider.Model
@@ -41,8 +40,8 @@ function toCompactInput(input: {
     system: input.system,
     messages: input.messages,
     tools: input.tools,
-    // Compact input must remain self-contained under ZDR. Referencing
-    // non-persisted reasoning items by rs_* id makes /responses/compact 404.
+    // Compact input must remain self-contained under ZDR. A streamed V2
+    // compaction cannot rehydrate non-persisted reasoning items by rs_* id.
     providerOptions: ProviderTransform.providerOptions(input.model, { ...input.options, store: false }),
     headers: {},
   })
@@ -92,7 +91,7 @@ export function compact(input: {
       typeof input.provider.options.fetch === "function" ? input.provider.options.fetch : fetch
     const payload = yield* Effect.tryPromise({
       try: (signal) =>
-        fetcher(`${baseURL}/responses/compact`, {
+        fetcher(`${baseURL}/responses`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -101,60 +100,49 @@ export function compact(input: {
           },
           body: JSON.stringify(request),
           signal: AbortSignal.any([signal, input.abort]),
-        }).then((response) => {
+        }).then(async (response) => {
           if (!response.ok) {
-            return response
-              .text()
-              .catch(() => "")
-              .then((detail) => {
-                throw new Error(`OpenAI remote compaction failed (${response.status})${detail ? `: ${detail}` : ""}`)
-              })
+            const detail = await response.text().catch(() => "")
+            throw new RemoteCompactionError(
+              `OpenAI remote compaction failed (${response.status})${detail ? `: ${detail}` : ""}`,
+              response.status === 429 || response.status >= 500,
+            )
           }
-          return response.json().catch((cause) => {
-            throw new Error("OpenAI remote compaction returned invalid JSON", { cause })
-          }) as Promise<unknown>
+          const stream = await response.text()
+          return parseCompactionStream(stream, request.input)
         }),
       catch: (cause) =>
-        cause instanceof Error && cause.message.startsWith("OpenAI remote compaction")
+        cause instanceof RemoteCompactionError
           ? cause
-          : new Error("OpenAI remote compaction request failed", { cause }),
-    })
-    if (!isRecord(payload) || !Array.isArray(payload.output) || payload.output.length === 0) {
-      throw new Error("OpenAI remote compaction returned no output items")
-    }
-    const items = payload.output.filter(keepOutputItem)
-    if (items.length === 0) throw new Error("OpenAI remote compaction returned no supported output items")
-    const usage = isRecord(payload.usage) ? payload.usage : {}
-    const outputDetails = isRecord(usage.output_tokens_details) ? usage.output_tokens_details : {}
+          : new RemoteCompactionError(
+              "OpenAI remote compaction request failed",
+              !(cause instanceof DOMException && cause.name === "AbortError"),
+              { cause },
+            ),
+    }).pipe(
+      Effect.retry({
+        times: COMPACTION_STREAM_RETRIES,
+        schedule: Schedule.exponential("500 millis"),
+        while: (error) => error.retryable,
+      }),
+    )
     return {
-      items,
+      items: payload.items,
       trimmedOutputs: bounded.rewritten,
-      usage: {
-        total: number(usage.total_tokens),
-        input: number(usage.input_tokens),
-        output: number(usage.output_tokens),
-        reasoning: number(outputDetails.reasoning_tokens),
-      },
+      usage: payload.usage,
     } satisfies Result
   }).pipe(Effect.catchCause((cause) => Effect.fail(Cause.squash(cause))))
 }
 
 function compactBody(body: Record<string, unknown>, items: unknown[]) {
   const result: Record<string, unknown> & { input: unknown[] } = {
-    model: body.model,
-    input: items,
+    ...body,
+    input: [...items, { type: "compaction_trigger" }],
+    store: false,
+    stream: true,
   }
-  for (const key of [
-    "instructions",
-    "tools",
-    "parallel_tool_calls",
-    "reasoning",
-    "service_tier",
-    "prompt_cache_key",
-    "text",
-  ]) {
-    if (body[key] !== undefined) result[key] = body[key]
-  }
+  delete result.background
+  delete result.previous_response_id
   return result
 }
 
@@ -164,7 +152,14 @@ function trimOutputs(
   preserveActiveToolMedia: boolean,
 ) {
   if (contextWindow <= 0) return { rewritten: 0, estimate: 0, limit: contextWindow }
-  let estimate = estimateInput(body) * COMPACT_ESTIMATE_SAFETY_FACTOR
+  // The coarse JSON estimate is reliable for ordinary text and media after
+  // image adjustment. Only tool output gets a second conservative charge:
+  // unlike Codex, OpenCode stores those items verbatim without a hard cap.
+  let estimate =
+    estimateInput(body) +
+    body.input
+      .map((item) => (isToolOutput(item) ? estimateInput(item) : 0))
+      .reduce((total, tokens) => total + tokens, 0)
   let rewritten = 0
   const indexes = body.input.flatMap((item, index) => (isToolOutput(item) ? [index] : []))
   const latest = indexes.at(-1)
@@ -180,7 +175,7 @@ function trimOutputs(
         {
           index,
           replacement,
-          saved: (estimateInput(item) - estimateInput(replacement)) * COMPACT_ESTIMATE_SAFETY_FACTOR,
+          saved: (estimateInput(item) - estimateInput(replacement)) * 2,
         },
       ]
     })
@@ -231,6 +226,15 @@ export function estimateInput(value: unknown) {
       return
     }
     if (!isRecord(item)) return
+    if (item.type === "input_image" && typeof item.image_url === "string") {
+      const payload = inlineImagePayload(item.image_url)
+      if (payload) {
+        estimate =
+          Math.max(0, estimate - Token.estimate(payload)) +
+          (item.detail === "original" ? ORIGINAL_IMAGE_MAX_TOKENS : IMAGE_INPUT_TOKENS)
+        return
+      }
+    }
     Object.values(item).forEach(visit)
   }
   visit(value)
@@ -257,18 +261,112 @@ function isSystemMessage(value: unknown) {
   return isRecord(value) && value.type === "message" && value.role === "system"
 }
 
-function keepOutputItem(value: unknown) {
-  if (!isRecord(value)) return false
-  // The ChatGPT legacy compact endpoint serializes Codex's context-compaction
-  // item as compaction_summary. Keep both current and legacy wire names.
-  if (
-    value.type === "compaction" ||
-    value.type === "compaction_summary" ||
-    value.type === "context_compaction" ||
-    value.type === "agent_message"
+function parseCompactionStream(stream: string, input: unknown[]) {
+  const events = stream.split(/\r?\n\r?\n/).flatMap((block) => {
+    const data = block
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n")
+    if (!data || data === "[DONE]") return []
+    try {
+      const event: unknown = JSON.parse(data)
+      return isRecord(event) ? [event] : []
+    } catch (cause) {
+      throw new RemoteCompactionError("OpenAI remote compaction returned invalid event JSON", false, { cause })
+    }
+  })
+  const failed = events.find((event) =>
+    ["error", "response.failed", "response.incomplete"].includes(typeof event.type === "string" ? event.type : ""),
   )
-    return true
-  return value.type === "message" && (value.role === "user" || value.role === "assistant")
+  if (failed) {
+    const detail =
+      isRecord(failed.error) && typeof failed.error.message === "string"
+        ? failed.error.message
+        : typeof failed.type === "string"
+          ? failed.type
+          : "unknown error"
+    throw new RemoteCompactionError(`OpenAI remote compaction failed: ${detail}`, false)
+  }
+  const output = events.flatMap((event) =>
+    event.type === "response.output_item.done" && isCompactionItem(event.item) ? [event.item] : [],
+  )
+  if (output.length !== 1) {
+    throw new RemoteCompactionError(
+      `OpenAI remote compaction expected exactly one compaction item, received ${output.length}`,
+      false,
+    )
+  }
+  const completed = events.findLast((event) => event.type === "response.completed" || event.type === "response.done")
+  if (!completed) throw new RemoteCompactionError("OpenAI remote compaction stream ended before completion", true)
+  const response = isRecord(completed.response) ? completed.response : {}
+  const usage = isRecord(response.usage) ? response.usage : {}
+  const outputDetails = isRecord(usage.output_tokens_details) ? usage.output_tokens_details : {}
+  return {
+    items: [...retainUserMessages(input.slice(0, -1)), output[0]],
+    usage: {
+      total: number(usage.total_tokens),
+      input: number(usage.input_tokens),
+      output: number(usage.output_tokens),
+      reasoning: number(outputDetails.reasoning_tokens),
+    },
+  }
+}
+
+function retainUserMessages(input: unknown[]): Record<string, unknown>[] {
+  let remaining = RETAINED_MESSAGE_TOKEN_BUDGET
+  const retained: Record<string, unknown>[] = []
+  for (const item of input.toReversed()) {
+    if (!isRecord(item) || item.type !== "message" || item.role !== "user") continue
+    if (remaining <= 0) break
+    const estimate = Math.max(1, estimateInput(item))
+    if (estimate <= remaining) {
+      retained.push(item)
+      remaining -= estimate
+      continue
+    }
+    const truncated = truncateMessage(item, remaining)
+    if (truncated) retained.push(truncated)
+    remaining = 0
+  }
+  return retained.reverse()
+}
+
+function truncateMessage(item: Record<string, unknown>, tokens: number) {
+  if (!Array.isArray(item.content) || tokens <= 0) return undefined
+  let remaining = tokens
+  const content = item.content.flatMap((part) => {
+    if (!isRecord(part) || remaining <= 0) return []
+    if (part.type === "input_image") {
+      const estimate = Math.max(1, estimateInput(part))
+      if (estimate > remaining) return []
+      remaining -= estimate
+      return [part]
+    }
+    if (part.type !== "input_text" || typeof part.text !== "string") return []
+    const chars = Math.min(part.text.length, remaining * 4)
+    const text = part.text.slice(0, chars)
+    remaining = Math.max(0, remaining - Token.estimate(text))
+    return text ? [{ ...part, text }] : []
+  })
+  return content.length > 0 ? { ...item, content } : undefined
+}
+
+function isCompactionItem(value: unknown): value is Record<string, unknown> {
+  return (
+    isRecord(value) &&
+    (value.type === "compaction" || value.type === "context_compaction" || value.type === "compaction_summary")
+  )
+}
+
+class RemoteCompactionError extends Error {
+  constructor(
+    message: string,
+    readonly retryable: boolean,
+    options?: ErrorOptions,
+  ) {
+    super(message, options)
+  }
 }
 
 export * as OpenCodezResponsesCompact from "./responses-compact"

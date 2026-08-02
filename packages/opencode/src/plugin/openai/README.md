@@ -16,9 +16,13 @@ The upstream full-request WebSocket transport is enabled by default on `local`,
 6. In `legacy` mode, send the complete `response.create` body.
 7. In `codex` mode, send the first request in full. Later matching requests send
    only new input items with `previous_response_id`.
-8. Keep `x-codex-turn-state` in `client_metadata` for follow-ups within the same
-   user turn, then clear it at the next turn without discarding compatible
-   continuation state.
+8. Capture `x-codex-turn-state` from response metadata or HTTP fallback
+   headers, plus WebSocket upgrade headers when the runtime exposes them. Bun's
+   client does not expose upgrade response headers, so the standalone binary
+   uses backend metadata without adding another handshake. Keep the state in
+   `client_metadata` for follow-ups within the same logical user turn,
+   including compaction, then clear it at the next turn without discarding
+   compatible continuation state.
 9. Return WebSocket events as SSE.
 
 For ChatGPT OAuth, the fetch adapter supplies the Codex product originator.
@@ -47,7 +51,13 @@ routing requirement. API-key OpenAI requests do not pass through this adapter.
 - `previous_response_not_found` opens a fresh socket and retries the current
   canonical full request once without consuming the normal stream-failure
   budget. A repeated failure is returned normally.
-- If a WebSocket fails after its first event, fail it as retryable rather than replaying partial output in transport.
+- A service/control event does not block `previous_response_not_found` recovery;
+  only the first model-output event closes that safe retry window.
+- If a stream fails after OpenCode has persisted text, reasoning, or a tool
+  call, the session keeps that partial result and surfaces the failure instead
+  of replaying the request and duplicating output.
+- OpenAI session retries are finite. The existing WebSocket-to-HTTP transition
+  and the session-level policy share a seven-retry end-to-end ceiling.
 - Abort or cancel closes the socket.
 
 ## Concurrency
@@ -70,14 +80,16 @@ message IDs, so their reverts cannot mutate the original session.
 
 ## Remote Compaction
 
-ChatGPT OAuth compaction uses `POST /responses/compact` regardless of the
-selected Responses wire mode. The session layer builds the request through the
-same context preparation and Responses lowering as normal model turns. The
-effective System, plugin transforms, model options, and model-visible tool
-schemas therefore match the turn being compacted. The returned canonical items
-are stored in `CompactionPart.remote`, and continuation starts a new full request
-chain. Mid-turn compact also receives the current turn's sticky-routing token;
-manual and pre-turn compact do not inherit state from an earlier user turn.
+ChatGPT OAuth compaction uses Codex Remote Compaction V2. The session layer
+builds a normal streamed `/responses` request through the same context
+preparation and lowering as sampling, then appends exactly one
+`compaction_trigger`. The transport requires exactly one completed opaque
+compaction item. That item plus at most 64,000 estimated tokens of newest
+retained user messages is stored in `CompactionPart.remote`; stale reasoning,
+tool, and instruction artifacts are not installed. Mid-turn compact uses the
+same session/account socket and logical turn ID, so sticky routing survives the
+request and mandatory post-compact continuation. Manual and pre-turn compact do
+not inherit state from an earlier user turn.
 
 On later turns, the request layer registers persisted items for the current
 session and adds a private header. This fetch adapter removes that header before
@@ -94,11 +106,11 @@ synthetic continuation message.
 Remote endpoint errors are returned as session errors. There is no local-summary
 fallback for ChatGPT OAuth.
 
-For Zero Data Retention credentials, compact input is lowered with `store:
-false`. Encrypted reasoning state is therefore sent inline instead of as a
-non-persisted `rs_*` item reference. When the returned state is replayed, its
-echoed system item is discarded and the current request's system prefix remains
-first. Remote errors remain visible and still have no local fallback.
+For Zero Data Retention credentials, compact input uses `store: false`.
+Encrypted reasoning state is therefore sent inline instead of as a
+non-persisted `rs_*` item reference. When persisted state is replayed, the
+current request's System prefix remains first. Remote errors remain visible and
+still have no local fallback.
 
 The default trigger is 90% of the Codex-safe ChatGPT Responses context, capped
 by the model and usable input limits. Codex `rust-v0.146.0` advertises a `272000`
@@ -110,6 +122,8 @@ to use upstream OpenCode policy.
 
 Automatic compaction persists an explicit phase. Pre-turn compaction excludes
 the pending user message from compact input and replays it once after success.
+If that exact replay still overflows, the session stops with a size error instead
+of entering another compact/replay cycle.
 Mid-turn compaction includes the complete active turn—current user input,
 assistant work, tool calls, and tool results—and continues from the returned
 opaque state in the same model loop, without a synthetic continuation message or
@@ -119,12 +133,12 @@ Post-sampling compaction runs only when another model request is required; a
 finished answer never causes a redundant continuation. Steering input arriving
 around compaction is withheld from both compact input and the first mandatory
 continuation, then admitted normally. Inline images are estimated at their
-model-visible cost rather than as base64 text. If the compact payload remains too
-large, a transport-boundary pass replaces older tool outputs across the request
-with a bounded marker while retaining image input from every result in the
-active parallel-output batch. If those eligible rewrites still cannot fit the
-safe window, the request fails locally instead of sending a predictably rejected
-payload. The request estimate uses an additional conservative margin because
-OpenCode keeps verbatim durable tool output instead of bounding each item as
-Codex records it. The durable history is not rewritten. The request keeps
-Codex's long unary deadline; manual compaction does not auto-continue.
+model-visible cost rather than as base64 text; `detail: "original"` uses the
+provider's 10,000-patch maximum. If the compact payload remains too large, a
+transport-boundary pass replaces older tool outputs across the request with a
+bounded marker while retaining image input from every result in the active
+parallel-output batch. Only tool outputs receive a second conservative estimate,
+so ordinary text can use the full safe window. If those eligible rewrites still
+cannot fit, the request fails locally instead of sending a predictably rejected
+payload. The durable history is not rewritten. A compaction stream retries
+transient failures at most twice; manual compaction does not auto-continue.

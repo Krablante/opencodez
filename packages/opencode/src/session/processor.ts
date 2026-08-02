@@ -26,6 +26,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
 
+const OPENAI_STREAM_RETRY_LIMIT = 7
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
 
@@ -671,6 +672,11 @@ const layer = Layer.effect(
             Effect.retry(
               SessionRetry.policy({
                 provider: input.model.providerID,
+                maxAttempts: input.model.providerID === "openai" ? OPENAI_STREAM_RETRY_LIMIT : undefined,
+                // OpenCode persists streaming deltas immediately. Replaying a
+                // failed request after any durable output would duplicate text,
+                // reasoning, or tool calls instead of resuming them safely.
+                continue: () => !ctx.producedDurableOutput,
                 parse,
                 set: (info) => {
                   return status.set(ctx.sessionID, {

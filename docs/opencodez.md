@@ -159,14 +159,25 @@ response, context compaction, history edit, or relevant model-setting change.
 The existing HTTP fallback also receives the original full request rather than
 an incremental body.
 
-Within one tool-driven turn, OpenCodez also captures the Codex
-`x-codex-turn-state` sticky-routing token and returns it in subsequent sampling
-and remote-compaction requests. The token is intentionally cleared when the next
-user turn begins, while the compatible WebSocket and `previous_response_id` may
-remain reusable. If the server can no longer resolve a `previous_response_id`,
-the transport internally opens a fresh socket and retries that request once with
-the complete canonical input. The intermediate routing error is not rendered as
-a failed user turn; a second failure is surfaced normally.
+Within one tool-driven turn, OpenCodez captures the Codex
+`x-codex-turn-state` sticky-routing token from response metadata or HTTP
+fallback headers, plus WebSocket upgrade headers when the runtime exposes them,
+and returns it in subsequent sampling and remote-compaction requests. Bun's
+client does not expose upgrade response headers, so standalone binaries use the
+backend metadata event without adding another handshake or socket stack. The
+logical turn ID survives synthetic compaction markers and is intentionally
+cleared only when the next real user turn begins, while the compatible WebSocket
+and `previous_response_id` may remain reusable. If the server can no longer
+resolve a `previous_response_id`, the transport internally opens a fresh socket
+and retries that request once with the complete canonical input. Service
+metadata before the error does not block recovery; the retry window closes only
+after model output begins.
+
+OpenCode persists streaming deltas immediately, unlike Codex's completed-item
+history. A failed stream is therefore not replayed after text, reasoning, or a
+tool call becomes durable, preventing duplicated partial output. Before durable
+output, OpenAI retries remain bounded to seven session retries including the
+WebSocket-to-HTTP transition; the terminal error is then surfaced normally.
 
 Continuation state is keyed by both the local session and the ChatGPT account.
 Changing accounts therefore opens a fresh chain and sends one full request
@@ -193,40 +204,46 @@ not modify its original session.
 
 ### Server-Side Compaction
 
-Automatic and manual compaction use OpenAI's documented
-[`responses/compact`](https://developers.openai.com/api/docs/guides/compaction)
-endpoint for ChatGPT OAuth. OpenCodez keeps the existing provider-aware overflow
-threshold, but the compaction operation itself runs on the OpenAI server instead
-of asking the model for a local text summary.
+Automatic and manual compaction use Codex Remote Compaction V2 for ChatGPT
+OAuth. OpenCodez sends a normal streamed `/responses` request through the same
+transport as sampling and appends exactly one `compaction_trigger` input item.
+The server must complete the stream with exactly one opaque compaction item.
+This is the default ChatGPT wire implementation in Codex `rust-v0.146.0`; the
+public [OpenAI compaction guide](https://developers.openai.com/api/docs/guides/compaction)
+documents the related public API through `context_management` and standalone
+`/responses/compact`, not this Codex-specific trigger. OpenCodez does not ask the
+model for a local text summary.
 
-The returned canonical response items are stored in the session's compaction
-part. Later model requests discard the pre-compaction local history, prepend the
-opaque items to the new tail, and then use the normal Responses transport. This
-survives process restart and WebSocket reconnect without a second state store.
-The original session history remains available locally for audit, but is no
-longer sent to the model.
+The returned compaction item and at most 64,000 estimated tokens of newest
+retained user messages are stored in the session's compaction part. Later model
+requests discard the pre-compaction model-visible history, prepend this bounded
+state to the new tail, and use the normal Responses transport. This survives
+process restart and WebSocket reconnect without a second state store. The
+original session history remains available locally for audit, but is no longer
+sent to the model.
 
-Remote compaction is independent of `opencodez.responses.wire`: explicit
-`legacy` mode still uses server-side compaction over HTTP. Other providers keep
-upstream OpenCode local compaction. A session that already contains OpenAI opaque
-compaction state must continue through ChatGPT OAuth; switching to an
-incompatible provider produces a clear error instead of silently dropping the
-old context. Remote API failures are also surfaced directly and never fall back
-to a local summary.
+Remote compaction participates in `opencodez.responses.wire`: `codex` mode can
+reuse the session/account WebSocket and incremental chain, while explicit
+`legacy` mode sends the same trigger request through the existing HTTP flow.
+Other providers keep upstream OpenCode local compaction. A session that already
+contains OpenAI opaque compaction state must continue through ChatGPT OAuth;
+switching to an incompatible provider produces a clear error instead of silently
+dropping the old context. Remote API failures are surfaced directly and never
+fall back to a local summary.
 
-For OpenAI Zero Data Retention credentials, remote compaction lowers its input
-with `store: false`: encrypted reasoning state is included inline and
-non-persisted `rs_*` IDs are not sent as item references. OpenAI's compact output
-echoes the system item it received;
-OpenCodez removes that stale copy during replay, keeps the current request's
-system prefix first, and then inserts the opaque compacted state before the new
+For OpenAI Zero Data Retention credentials, remote compaction uses `store:
+false`: encrypted reasoning state is included inline and non-persisted `rs_*`
+IDs are not sent as item references. Replay always keeps the current request's
+System prefix first, then inserts the bounded persisted state before the new
 tail. Remote errors remain session-visible and never silently fall back to local
 summarization.
 
 Automatic compaction records whether pressure occurred before or during the
 active turn. Pre-turn compaction keeps the pending user message outside the
 compact request and replays it once after success without replacing media
-attachments. Mid-turn compaction sends the complete active turn to OpenAI,
+attachments. If that exact replay still exceeds the provider context, OpenCodez
+stops with a clear size error instead of repeating compact and replay. Mid-turn
+compaction sends the complete active turn to OpenAI,
 including the current user request, assistant work, tool calls, and tool results.
 The returned opaque state therefore contains the work already completed, and the
 same loop continues without replaying the original task or adding a synthetic
@@ -256,33 +273,37 @@ active turn even if preflight underestimates the request and the provider itself
 reports overflow; frozen request controls are then combined with history that
 still excludes the pending steer. Before transport, OpenCodez estimates the
 complete compact payload using a model-visible cost for inline images instead of
-counting their base64 encoding as text. Only when the payload would exceed the
-Codex-safe request window does it replace older tool outputs across the request
-with a bounded marker. Codex `rust-v0.146.0` advertises a `272000` context for the
+counting their base64 encoding as text. Automatically resized images use Codex's
+1,844-token estimate; `detail: "original"` uses the provider's conservative
+10,000-patch maximum. Only when the payload would exceed the Codex-safe request
+window does OpenCodez replace older tool outputs across the request with a
+bounded marker. Codex `rust-v0.146.0` advertises a `272000` context for the
 current ChatGPT Responses models and compacts at 90% of it, so Luna/Sol use a
-`244800` default trigger even if the general provider catalog is larger. The
-transport estimate also carries a conservative margin because OpenCode retains
-verbatim durable tool output where Codex bounds each item on insertion. Every
-tool result in the active parallel-output batch keeps its image input even if
-its text must be bounded, so the latest visual state cannot be lost merely
-because a short sibling result was serialized later. If bounding all eligible
-tool outputs still cannot fit the safe request window, OpenCodez fails before
-network I/O with a clear remote-compaction input error. User
+`244800` default trigger even if the general provider catalog is larger. Only
+verbatim tool outputs receive a second conservative estimate because Codex caps
+them on insertion while OpenCode preserves them durably. Ordinary text is not
+globally doubled and can use the full safe window. Every tool result in the
+active parallel-output batch keeps its image input even if its text must be
+bounded, so the latest visual state cannot be lost merely because a short sibling
+result was serialized later. If bounding all eligible tool outputs still cannot
+fit the safe request window, OpenCodez fails before network I/O with a clear
+remote-compaction input error. User
 messages, tool calls, and pending input are never summarized or dropped locally,
-and the durable local history remains unchanged. The unary compact request uses
-Codex's 20-minute default deadline and is cancelled with the owning session
-operation through response-body processing, so a Stop does not leave the HTTP
-request running in the background.
+and the durable local history remains unchanged. Each compaction stream retries
+transient transport failure at most twice inside one 20-minute cancellable
+operation, so Stop does not leave a request running in the background.
 
-Remote output is normalized before persistence: current user/assistant messages
-and opaque compaction items are retained, while echoed developer/System,
-reasoning, and tool artifacts are discarded. New compaction state also records
-the source API model and a one-way ChatGPT account key when either an account id
-or standard OAuth subject is available. Standard, Fast, and Pro aliases that
-resolve to the same API model remain compatible; a different base model or
-account fails locally with a clear error instead of sending opaque state to an
-incompatible provider context. Older stored state without these identity fields
-remains readable.
+Remote output follows pinned Codex V2 semantics: additional stream output items
+are ignored, exactly one completed opaque compaction item is installed as-is,
+and newest user messages are retained within the bounded budget. Current System
+instructions are regenerated for each request instead of being owned by opaque
+state; assistant, reasoning, and tool artifacts are not retained beside it. New
+compaction state also records the source API model and a one-way ChatGPT account
+key when either an account id or standard OAuth subject is available. Standard,
+Fast, and Pro aliases that resolve to the same API model remain compatible; a
+different base model or account fails locally with a clear error instead of
+sending opaque state to an incompatible provider context. Older stored state
+without these identity fields remains readable.
 
 If the provider itself reports context overflow while automatic compaction is
 enabled, that error is treated as an internal recovery trigger rather than
@@ -334,8 +355,9 @@ OpenCodez config boundary:
   response item normalization, `previous_response_id`, and continuation
   invalidation.
 - `packages/opencode/src/opencodez/responses-compact.ts` builds the canonical
-  compact request with the existing Responses lowering, bounds only oversized
-  trailing tool output, and calls the remote endpoint.
+  V2 trigger request with the existing Responses lowering, bounds only
+  oversized tool output, validates the streamed compaction result, and installs
+  bounded retained user context.
 - `packages/opencode/src/opencodez/responses-compaction.ts` finds persisted
   compaction items, exposes them to the current request without writing a second
   state store, and injects them into the wire body. Direct mid-turn continuation
@@ -354,9 +376,12 @@ OpenCodez config boundary:
   session-and-account-affine socket, the turn-scoped sticky-routing token, and
   the single full-request recovery for an unavailable previous response.
   Continuation resets on reconnect, login change, abort, failure, or concurrent
-  HTTP fallback; sticky routing resets independently at the next user turn.
+  HTTP fallback; sticky routing is accepted from metadata events, HTTP response
+  headers, and WebSocket upgrade headers on runtimes that expose them, then
+  resets independently at the next logical user turn.
 - `packages/opencode/src/plugin/openai/ws.ts` remains the low-level WebSocket to
-  SSE adapter and exposes raw response events to the continuation state.
+  SSE adapter, distinguishes service events from model output for safe recovery,
+  and exposes raw response events to the continuation state.
 
 The shared provider and `packages/llm` abstractions are unchanged, keeping this
 custom layer small and easy to rebase onto future OpenCode versions.
@@ -364,14 +389,11 @@ custom layer small and easy to rebase onto future OpenCode versions.
 Pinned Codex also contains WebSocket prewarming, which is a latency optimization
 rather than a correctness requirement. OpenCodez keeps its existing lazy,
 session-affine pool to avoid an idle connection and additional lifecycle state.
-It uses the explicit `responses/compact` endpoint from pinned Codex rather than
-the newer `context_management` request field because explicit output items can
-be persisted and restored deterministically by the existing session model.
-Pinned Codex still verifies semantic parity for this endpoint. Adopting Remote
-Compaction V2 is therefore treated as a separate wire-contract migration, not as
-an incidental change to the current recovery path. Persisted opaque state is
-bound to the available account identity and base API model; OpenCodez does not
-guess compatibility across an unannounced backend snapshot change.
+Remote Compaction V2 uses the same `/responses` transport and
+`compaction_trigger` contract as pinned Codex while adapting installed history
+to OpenCode's durable session model. Persisted opaque state is bound to the
+available account identity and base API model; OpenCodez does not guess
+compatibility across an unannounced backend snapshot change.
 
 ## Session Behavior
 
@@ -452,8 +474,9 @@ The OpenAPI document and JavaScript SDK are generated from the server contract.
 ## Release Verification
 
 A release should confirm the mapped System prompts, both Responses wire modes,
-default and configured compaction thresholds, remote
-compaction persistence across restart, generated SDK, one production Linux
-build, embedded web UI startup, and desktop/mobile System selector behavior. The
-public release must contain all platform archives plus one SHA-256 file per
-archive.
+default and configured compaction thresholds, one streamed V2 compaction trigger
+with exactly one opaque result, logical-turn sticky routing, bounded retry and
+oversized-replay failure, remote state persistence across restart, generated
+SDK, one production Linux build, embedded web UI startup, and desktop/mobile
+System selector behavior. The public release must contain all platform archives
+plus one SHA-256 file per archive.

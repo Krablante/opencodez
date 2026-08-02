@@ -427,10 +427,8 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               requestInput instanceof URL
                 ? requestInput
                 : new URL(typeof requestInput === "string" ? requestInput : requestInput.url)
-            const compact = parsed.pathname.endsWith("/responses/compact")
-            const url = compact
-              ? new URL(`${codexApiEndpoint}/compact`)
-              : parsed.pathname.includes("/v1/responses") || parsed.pathname.includes("/chat/completions")
+            const url =
+              parsed.pathname.includes("/v1/responses") || parsed.pathname.includes("/chat/completions")
                 ? new URL(codexApiEndpoint)
                 : parsed
 
@@ -447,10 +445,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               headers,
             }
             if (websocketFetch && parsed.pathname.endsWith("/responses")) return websocketFetch(url, requestInit)
-            if (websocketFetch && compact) websocketFetch.applyTurnState(headers)
-            const response = await fetch(url, OpenAIWebSocketPool.withoutInternalHeaders(requestInit))
-            if (websocketFetch && compact) websocketFetch.captureTurnState(headers, response.headers)
-            return response
+            return fetch(url, OpenAIWebSocketPool.withoutInternalHeaders(requestInit))
           },
         }
       },

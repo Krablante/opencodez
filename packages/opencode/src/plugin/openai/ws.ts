@@ -15,6 +15,7 @@ export interface ConnectResponsesWebSocketOptions {
   headers: Record<string, string>
   timeout?: number
   signal?: AbortSignal
+  onUpgrade?: (headers: Record<string, string>) => void
 }
 
 export interface StreamResponsesWebSocketOptions {
@@ -94,6 +95,10 @@ export function connectResponsesWebSocket(options: ConnectResponsesWebSocketOpti
         : ProxyEnv.getProxyForUrl(options.url.replace(/^wss:/, "https:").replace(/^ws:/, "http:"))
     const connect = { headers, ...(proxy ? { proxy } : {}) }
     const socket = new WebSocket(options.url, connect)
+    // Bun's native client does not expose upgrade response headers. Its backend
+    // metadata event remains the production path; Node's npm ws can additionally
+    // capture the header without changing request flow.
+    const supportsUpgradeHeaders = typeof Bun === "undefined"
     const timeout = options.timeout
       ? setTimeout(() => {
           cleanup()
@@ -106,6 +111,7 @@ export function connectResponsesWebSocket(options: ConnectResponsesWebSocketOpti
     function cleanup() {
       if (timeout) clearTimeout(timeout)
       socket.off("open", onOpen)
+      if (supportsUpgradeHeaders) socket.off("upgrade", onUpgrade)
       socket.off("error", onError)
       socket.off("close", onClose)
       options.signal?.removeEventListener("abort", onAbort)
@@ -114,6 +120,20 @@ export function connectResponsesWebSocket(options: ConnectResponsesWebSocketOpti
     function onOpen() {
       cleanup()
       resolve(socket)
+    }
+
+    function onUpgrade(response: { headers: Record<string, string | string[] | undefined> }) {
+      options.onUpgrade?.(
+        Object.fromEntries(
+          Object.entries(response.headers).flatMap(([key, value]) =>
+            typeof value === "string"
+              ? [[key.toLowerCase(), value]]
+              : Array.isArray(value)
+                ? [[key.toLowerCase(), value.join(", ")]]
+                : [],
+          ),
+        ),
+      )
     }
 
     function onError(error: unknown) {
@@ -135,6 +155,7 @@ export function connectResponsesWebSocket(options: ConnectResponsesWebSocketOpti
     }
 
     socket.once("open", onOpen)
+    if (supportsUpgradeHeaders) socket.once("upgrade", onUpgrade)
     socket.once("error", onError)
     socket.once("close", onClose)
     options.signal?.addEventListener("abort", onAbort, { once: true })
@@ -150,6 +171,7 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
   let cleanupSocket = () => {}
   let completed = false
   let emitted = false
+  let modelVisible = false
   let idleTimer: ReturnType<typeof setTimeout> | undefined
 
   function cleanup() {
@@ -201,9 +223,12 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
       }
     })()
 
-    if (event) options.onEvent?.(event)
+    if (event) {
+      options.onEvent?.(event)
+      if (isModelVisibleEvent(event)) modelVisible = true
+    }
 
-    if (event?.type === "error" && !emitted && options.onRetryableTerminal) {
+    if (event?.type === "error" && !modelVisible && options.onRetryableTerminal) {
       cleanupSocket()
       if (idleTimer) clearTimeout(idleTimer)
       idleTimer = undefined
@@ -349,10 +374,24 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
   )
 }
 
-function parseWrappedError(event: Record<string, unknown> | undefined, body: string) {
-  if (event?.type !== "error") return
+function isModelVisibleEvent(event: Record<string, unknown>) {
+  if (typeof event.type !== "string") return false
+  return (
+    event.type.startsWith("response.output_item.") ||
+    event.type.startsWith("response.output_text.") ||
+    event.type.startsWith("response.reasoning_") ||
+    event.type.startsWith("response.function_call_arguments.") ||
+    event.type.startsWith("response.custom_tool_call_input.")
+  )
+}
+
+function parseWrappedError(
+  event: Record<string, unknown> | undefined,
+  body: string,
+): (WrappedError & { message: string }) | undefined {
+  if (event?.type !== "error") return undefined
   const status = event.status ?? event.status_code
-  if (typeof status !== "number" || (status >= 200 && status < 300)) return
+  if (typeof status !== "number" || (status >= 200 && status < 300)) return undefined
   return {
     status,
     headers: isRecord(event.headers)

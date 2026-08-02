@@ -1330,6 +1330,7 @@ const layer = Layer.effect(
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({
               user: lastUser,
+              turnID: activeTurnID,
               agent,
               permission: session.permission,
               sessionID,
@@ -1384,6 +1385,23 @@ const layer = Layer.effect(
             if (result === "compact") {
               const needsFollowUp =
                 modelNeedsFollowUp || directRemoteCompaction || handle.needsFollowUp || handle.producedDurableOutput
+              if (
+                !handle.producedDurableOutput &&
+                OpenCodezResponsesCompaction.repeatedOverflow(
+                  yield* sessions.messages({ sessionID }).pipe(Effect.orDie),
+                  activeTurnID,
+                )
+              ) {
+                handle.message.error = new SessionV1.ContextOverflowError({
+                  message:
+                    "The current input still exceeds the provider context after server-side compaction. Reduce the message or its attachments and try again.",
+                }).toObject()
+                handle.message.finish = "error"
+                handle.message.time.completed = Date.now()
+                yield* sessions.updateMessage(handle.message)
+                yield* events.publish(Session.Event.Error, { sessionID, error: handle.message.error })
+                return "break" as const
+              }
               yield* compaction.create({
                 sessionID,
                 agent: lastUser.agent,

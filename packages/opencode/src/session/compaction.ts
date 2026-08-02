@@ -47,8 +47,8 @@ const PRUNE_PROTECTED_TOOLS = ["skill"]
 const DEFAULT_TAIL_TURNS = 2
 const MIN_PRESERVE_RECENT_TOKENS = 2_000
 const MAX_PRESERVE_RECENT_TOKENS = 8_000
-// Codex allows four default five-minute stream idle windows for the unary
-// compact request. Large histories regularly need longer than two minutes.
+// Keep one overall operation deadline above the bounded transport retry budget.
+// Each streamed attempt still uses the WebSocket pool's five-minute idle limit.
 const REMOTE_COMPACTION_TIMEOUT_MS = 20 * 60_000
 type Turn = {
   start: number
@@ -626,6 +626,7 @@ const layer = Layer.effect(
                 )
                 return yield* LLMRequestPrep.prepare({
                   user: requestUser,
+                  turnID: phase === "mid-turn" ? turnID : undefined,
                   sessionID: input.sessionID,
                   parentSessionID: sessionInfo.parentID,
                   sessionMetadata: OpenCodezResponsesCompaction.withMetadata(sessionInfo.metadata, history),

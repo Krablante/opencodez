@@ -34,6 +34,7 @@ export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
 export type StreamInput = {
   user: SessionV1.User
+  turnID?: string
   sessionID: string
   parentSessionID?: string
   sessionMetadata?: Record<string, unknown>

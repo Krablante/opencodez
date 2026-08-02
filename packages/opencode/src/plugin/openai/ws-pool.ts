@@ -88,16 +88,19 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
       continuation: new Continuation(),
     }
     pool.set(key, entry)
+    const turnID = internalHeaders[TURN_ID_HEADER]
 
     if (entry.fallback) {
-      return httpFetch(input, httpInit)
+      if (turnID !== entry.turnID) {
+        entry.turnID = turnID
+        entry.turnState = undefined
+      }
+      return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
     }
     if (entry.busy) {
       entry.continuation.reset()
       return httpFetch(input, httpInit)
     }
-
-    const turnID = internalHeaders[TURN_ID_HEADER]
     if (turnID !== entry.turnID) {
       entry.turnID = turnID
       entry.turnState = undefined
@@ -113,6 +116,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         connectTimeout,
         maxConnectionAge,
         init?.signal,
+        (headers) => captureHeaderTurnState(entry, turnID, headers),
       )
       let resolveFirstEvent: (event: boolean | OpenAIWebSocket.WrappedError) => void = () => {}
       let rejectFirstEvent: (error: Error) => void = () => {}
@@ -144,7 +148,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
             invalidate(entry)
           }
         },
-        onConnectionInvalid: (error) => {
+        onConnectionInvalid: () => {
           transaction?.fail()
           entry.busy = false
           entry.lastUsedAt = Date.now()
@@ -177,6 +181,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
               connectTimeout,
               maxConnectionAge,
               init?.signal,
+              (headers) => captureHeaderTurnState(entry, turnID, headers),
             )
             transaction = entry.continuation.transaction(body)
             return { socket: entry.socket, body: withTurnState(body, entry.turnState) }
@@ -195,7 +200,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         })
       }
       if (!entry.fallback) return response
-      return httpFetch(input, httpInit)
+      return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
     } catch (error) {
       entry.busy = false
       entry.lastUsedAt = Date.now()
@@ -207,7 +212,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
 
       recordStreamFailure(entry)
       invalidate(entry)
-      if (entry.fallback) return httpFetch(input, httpInit)
+      if (entry.fallback) return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
       return failedResponse(
         new ProviderError.ResponseStreamError(error instanceof Error ? error.message : String(error), {
           cause: error,
@@ -248,31 +253,17 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     }
   }
 
-  function applyTurnState(headers: Headers) {
-    const entry = entryForHeaders(pool, OpenAIWebSocket.normalizeHeaders(headers))
-    if (!entry?.turnState) return
-    headers.set(TURN_STATE_HEADER, entry.turnState)
-  }
-
-  function captureTurnState(requestHeaders: Headers, responseHeaders: Headers) {
-    const headers = OpenAIWebSocket.normalizeHeaders(requestHeaders)
-    const entry = entryForHeaders(pool, headers)
-    if (!entry || entry.turnState || headers[TURN_ID_HEADER] !== entry.turnID) return
-    const state = responseHeaders.get(TURN_STATE_HEADER)
-    if (state) entry.turnState = state
-  }
-
-  return Object.assign(websocketFetch, { close, remove, applyTurnState, captureTurnState })
+  return Object.assign(websocketFetch, { close, remove })
 }
 
 function connectionLimitError(event: Record<string, unknown>): Error | undefined {
-  if (errorCode(event) !== CONNECTION_LIMIT_REACHED_CODE) return
+  if (errorCode(event) !== CONNECTION_LIMIT_REACHED_CODE) return undefined
   const error = isRecord(event.error) ? event.error : {}
   return new Error(typeof error.message === "string" ? error.message : CONNECTION_LIMIT_REACHED_CODE)
 }
 
 function errorCode(event: Record<string, unknown>): string | undefined {
-  if (event.type !== "error" || !isRecord(event.error) || typeof event.error.code !== "string") return
+  if (event.type !== "error" || !isRecord(event.error) || typeof event.error.code !== "string") return undefined
   return event.error.code
 }
 
@@ -281,6 +272,27 @@ function captureEventTurnState(entry: PoolEntry, turnID: string | undefined, eve
     return
   const state = Object.entries(event.headers).find(([key]) => key.toLowerCase() === TURN_STATE_HEADER)?.[1]
   if (typeof state === "string" && state) entry.turnState = state
+}
+
+function captureHeaderTurnState(entry: PoolEntry, turnID: string | undefined, headers: Record<string, string>) {
+  if (entry.turnState || entry.turnID !== turnID) return
+  const state = headers[TURN_STATE_HEADER]
+  if (state) entry.turnState = state
+}
+
+async function fallbackFetch(
+  fetcher: typeof globalThis.fetch,
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  entry: PoolEntry,
+  turnID: string | undefined,
+) {
+  const response = await fetcher(input, {
+    ...init,
+    headers: withTurnStateHeader(OpenAIWebSocket.normalizeHeaders(init?.headers), entry.turnState),
+  })
+  captureHeaderTurnState(entry, turnID, OpenAIWebSocket.normalizeHeaders(response.headers))
+  return response
 }
 
 function withTurnState(body: Record<string, unknown>, turnState: string | undefined) {
@@ -296,12 +308,6 @@ function withTurnState(body: Record<string, unknown>, turnState: string | undefi
 
 function withTurnStateHeader(headers: Record<string, string>, turnState: string | undefined) {
   return turnState ? { ...headers, [TURN_STATE_HEADER]: turnState } : headers
-}
-
-function entryForHeaders(pool: Map<string, PoolEntry>, headers: Record<string, string>): PoolEntry | undefined {
-  const sessionID = headers["x-session-affinity"] ?? headers["session-id"]
-  if (!sessionID) return
-  return pool.get(`${sessionID}:conversation:${accountAffinity(headers)}`)
 }
 
 function accountAffinity(headers: Record<string, string>) {
@@ -329,6 +335,7 @@ async function socket(
   connectTimeout: number,
   maxConnectionAge: number,
   signal?: AbortSignal | null,
+  onUpgrade?: (headers: Record<string, string>) => void,
 ) {
   if (
     entry.socket?.readyState === WebSocket.OPEN &&
@@ -344,6 +351,7 @@ async function socket(
     headers,
     timeout: connectTimeout,
     signal: signal ?? undefined,
+    onUpgrade,
   })
   entry.connectedAt = Date.now()
   return next

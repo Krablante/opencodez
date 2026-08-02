@@ -222,19 +222,22 @@ between Standard and Fast remains a normal model change and safely starts a new
 full continuation chain. Changing the logged-in ChatGPT account does the same;
 response and reasoning IDs are never reused across account boundaries.
 
-For ChatGPT OAuth, automatic and manual compaction use OpenAI's
-`responses/compact` endpoint instead of a local summarization turn. OpenCodez
-stores the returned opaque items in the session and restores them before later
-Responses requests, including after a process restart. Compaction failures are
-reported directly and do not silently fall back to a lower-quality local
-summary. After remote compaction, that session must continue through ChatGPT
-OAuth because other providers cannot interpret OpenAI's opaque state.
+For ChatGPT OAuth, automatic and manual compaction use Codex Remote Compaction
+V2: a normal streamed `/responses` request whose final input item is
+`compaction_trigger`. OpenCodez persists the returned opaque compaction item and
+a bounded set of retained user messages in the session, then restores that state
+before later Responses requests, including after a process restart. Compaction
+failures are reported directly and do not silently fall back to a lower-quality
+local summary. After remote compaction, that session must continue through
+ChatGPT OAuth because other providers cannot interpret OpenAI's opaque state.
 Zero Data Retention is supported by sending encrypted reasoning state inline
 instead of referencing non-persisted reasoning item IDs. Continuation keeps the
 current System metadata ahead of the replayed compacted state.
 Automatic compaction distinguishes pre-turn from mid-turn pressure. A pre-turn
 compact preserves and replays the pending user message once, including its
-media attachments. A mid-turn compact includes the current user request,
+media attachments. If the same input still overflows after that recovery,
+OpenCodez stops with a clear size error instead of compacting it repeatedly. A
+mid-turn compact includes the current user request,
 assistant work, tool calls, and tool results, then continues the same model loop
 directly from OpenAI's opaque compacted state without a replacement user message
 or replayed task.
@@ -245,15 +248,16 @@ schemas as sampling; steering input waits until the mandatory post-compact
 continuation even when provider-side overflow recovery follows a rejected
 request. Inline images use model-visible token estimates rather than their
 base64 text size. If the complete compact payload is still too large, older tool
-outputs are bounded across the request while the newest tool image is preserved;
-the disposable request estimate includes a conservative margin because the
-durable OpenCode history is not item-bounded like Codex. The durable local
-history is unchanged. Newly completed tool output is included
+outputs are bounded across the request while images from the complete active
+parallel-tool batch are preserved.
+Only verbatim tool output receives an additional estimation margin; ordinary
+text is not globally double-counted, and `detail: "original"` images use a safe
+10,000-token maximum. The durable local history is unchanged. Newly completed tool output is included
 in the preflight limit, remote state is bound to its base API model and ChatGPT
 account, and Stop cancels the compact request through response-body processing.
 The UI reports compaction only after the returned remote state is persisted. The
-remote request allows the same long unary deadline as Codex and still has no
-local-summary fallback.
+remote stream has two bounded transport retries, remains cancellable with the
+session, and still has no local-summary fallback.
 
 `opencodez.responses.compaction.threshold` is a fraction of the model's input
 window and defaults to the Codex policy of `0.9`. It accepts values greater than
