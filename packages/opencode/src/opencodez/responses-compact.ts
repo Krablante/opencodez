@@ -6,6 +6,7 @@ import { ProviderTransform } from "@/provider/transform"
 import { Token } from "@/util/token"
 import type { ModelMessage, Tool } from "ai"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
+import { OpenAIWebSocketPool } from "@/plugin/openai/ws-pool"
 
 export type Result = {
   items: unknown[]
@@ -56,19 +57,31 @@ export function compact(input: {
   tools: Record<string, Tool>
   options: Record<string, unknown>
   items: unknown[]
+  sessionID: string
+  turnID?: string
+  preserveActiveToolMedia: boolean
   abort: AbortSignal
 }) {
   return Effect.gen(function* () {
     const body = yield* toCompactInput(input)
     if (!Array.isArray(body.input)) throw new Error("OpenAI compact input must be an array")
     const request = compactBody(body, [...input.items.filter((item) => !isSystemMessage(item)), ...body.input])
-    const bounded = trimOutputs(request, OpenCodezSettings.responsesCompactionPayloadLimit(input.model.limit))
+    const bounded = trimOutputs(
+      request,
+      OpenCodezSettings.responsesCompactionPayloadLimit(input.model.limit),
+      input.preserveActiveToolMedia,
+    )
     if (bounded.rewritten > 0) {
       yield* Effect.logInfo("bounded remote compaction tool outputs", {
         count: bounded.rewritten,
         estimated_tokens: bounded.estimate,
         limit: bounded.limit,
       })
+    }
+    if (bounded.estimate > bounded.limit) {
+      throw new Error(
+        `OpenAI remote compaction input exceeds the safe request window after bounding tool outputs (${bounded.estimate} > ${bounded.limit} tokens)`,
+      )
     }
 
     const baseURL =
@@ -81,7 +94,11 @@ export function compact(input: {
       try: (signal) =>
         fetcher(`${baseURL}/responses/compact`, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            "x-session-affinity": input.sessionID,
+            ...(input.turnID ? { [OpenAIWebSocketPool.TURN_ID_HEADER]: input.turnID } : {}),
+          },
           body: JSON.stringify(request),
           signal: AbortSignal.any([signal, input.abort]),
         }).then((response) => {
@@ -141,17 +158,24 @@ function compactBody(body: Record<string, unknown>, items: unknown[]) {
   return result
 }
 
-function trimOutputs(body: Record<string, unknown> & { input: unknown[] }, contextWindow: number) {
+function trimOutputs(
+  body: Record<string, unknown> & { input: unknown[] },
+  contextWindow: number,
+  preserveActiveToolMedia: boolean,
+) {
   if (contextWindow <= 0) return { rewritten: 0, estimate: 0, limit: contextWindow }
   let estimate = estimateInput(body) * COMPACT_ESTIMATE_SAFETY_FACTOR
   let rewritten = 0
   const indexes = body.input.flatMap((item, index) => (isToolOutput(item) ? [index] : []))
   const latest = indexes.at(-1)
+  const activeTurn = preserveActiveToolMedia
+    ? body.input.findLastIndex((item) => isRecord(item) && item.type === "message" && item.role === "user")
+    : -1
   const candidates = indexes
     .flatMap((index) => {
       const item = body.input[index]
       if (!isRecord(item)) return []
-      const replacement = rewriteOutput(item, index === latest)
+      const replacement = rewriteOutput(item, index === latest || (activeTurn >= 0 && index > activeTurn))
       return [
         {
           index,

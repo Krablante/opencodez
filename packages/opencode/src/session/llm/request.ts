@@ -19,6 +19,7 @@ import { OpenCodezPromptLibrary } from "@/opencodez/prompt-library"
 import { OpenCodezSession } from "@opencode-ai/core/opencodez/session"
 import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
+import { OpenAIWebSocketPool } from "@/plugin/openai/ws-pool"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
@@ -70,7 +71,9 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   const compatibilityError = OpenCodezResponsesCompaction.compatibilityError(input.sessionMetadata, {
     modelID: input.model.api.id,
     accountKey:
-      input.auth?.type === "oauth" ? OpenCodezResponsesCompaction.accountKey(input.auth.accountId) : undefined,
+      input.auth?.type === "oauth"
+        ? OpenCodezResponsesCompaction.accountKey(input.auth.accountId, input.auth.access)
+        : undefined,
   })
   if (compatibilityError) return yield* Effect.fail(new Error(compatibilityError))
   const hasRemoteCompaction =
@@ -241,6 +244,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         : {
             "x-session-affinity": input.sessionID,
             "X-Session-Id": input.sessionID,
+            ...(isOpenaiOauth ? { [OpenAIWebSocketPool.TURN_ID_HEADER]: input.user.id } : {}),
             ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
             "User-Agent": USER_AGENT,
           }),

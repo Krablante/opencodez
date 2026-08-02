@@ -26,9 +26,14 @@ export interface StreamResponsesWebSocketOptions {
   onEvent?: (event: Record<string, unknown>) => void
   onComplete?: (event: Record<string, unknown>) => void
   onTerminal?: (event: Record<string, unknown>) => void
-  onRetryableTerminal?: (event: Record<string, unknown>) => Promise<WebSocket | undefined>
+  onRetryableTerminal?: (event: Record<string, unknown>) => Promise<RetryableWebSocket | undefined>
   onConnectionInvalid?: (error: ProviderError.ResponseStreamError) => void
   onAbort?: (error: Error) => void
+}
+
+export interface RetryableWebSocket {
+  socket: WebSocket
+  body?: Record<string, unknown>
 }
 
 export interface WrappedError {
@@ -140,6 +145,7 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
   const encoder = new TextEncoder()
 
   let socket = options.socket
+  let body = options.body
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined
   let cleanupSocket = () => {}
   let completed = false
@@ -197,18 +203,19 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
 
     if (event) options.onEvent?.(event)
 
-    if (event?.type === "error" && options.onRetryableTerminal) {
+    if (event?.type === "error" && !emitted && options.onRetryableTerminal) {
       cleanupSocket()
       if (idleTimer) clearTimeout(idleTimer)
       idleTimer = undefined
       try {
         const next = await options.onRetryableTerminal(event)
         if (completed) {
-          if (next) terminateSocket(next)
+          if (next) terminateSocket(next.socket)
           return
         }
         if (next) {
-          attach(next)
+          body = next.body ?? body
+          attach(next.socket)
           return
         }
       } catch (error) {
@@ -231,7 +238,7 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
         new APICallError({
           message: wrappedError.message,
           url: socket.url,
-          requestBodyValues: options.body,
+          requestBodyValues: body,
           statusCode: wrappedError.status,
           responseHeaders: wrappedError.headers,
           responseBody: wrappedError.body,
@@ -309,7 +316,7 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
       socket.off("error", onError)
       socket.off("close", onClose)
     }
-    const { stream: _stream, background: _background, ...payload } = options.body
+    const { stream: _stream, background: _background, ...payload } = body
     resetIdleTimeout("idle timeout sending websocket request")
     socket.send(JSON.stringify({ type: "response.create", ...payload }), (error) => {
       if (completed) return

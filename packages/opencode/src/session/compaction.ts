@@ -651,6 +651,9 @@ const layer = Layer.effect(
             tools: prepared.tools,
             options: prepared.params.options,
             items: active.items,
+            sessionID: input.sessionID,
+            turnID: phase === "mid-turn" ? turnID : undefined,
+            preserveActiveToolMedia: phase === "mid-turn",
             abort: input.abort ?? AbortSignal.timeout(REMOTE_COMPACTION_TIMEOUT_MS),
           })
         }).pipe(
@@ -699,7 +702,9 @@ const layer = Layer.effect(
             items: compacted.value.items,
             model_id: sourceModel.api.id,
             account_key:
-              authInfo?.type === "oauth" ? OpenCodezResponsesCompaction.accountKey(authInfo.accountId) : undefined,
+              authInfo?.type === "oauth"
+                ? OpenCodezResponsesCompaction.accountKey(authInfo.accountId, authInfo.access)
+                : undefined,
           },
         })
         const usage = Session.getUsage({

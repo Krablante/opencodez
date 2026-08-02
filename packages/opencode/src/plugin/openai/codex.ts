@@ -417,6 +417,11 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
             if (authWithAccount.accountId) {
               headers.set("ChatGPT-Account-Id", authWithAccount.accountId)
             }
+            const accountAffinity = OpenCodezResponsesCompaction.accountIdentity(
+              authWithAccount.accountId,
+              currentAuth.access,
+            )
+            if (accountAffinity) headers.set(OpenAIWebSocketPool.ACCOUNT_AFFINITY_HEADER, accountAffinity)
 
             const parsed =
               requestInput instanceof URL
@@ -442,7 +447,10 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               headers,
             }
             if (websocketFetch && parsed.pathname.endsWith("/responses")) return websocketFetch(url, requestInit)
-            return fetch(url, OpenAIWebSocketPool.withoutInternalHeaders(requestInit))
+            if (websocketFetch && compact) websocketFetch.applyTurnState(headers)
+            const response = await fetch(url, OpenAIWebSocketPool.withoutInternalHeaders(requestInit))
+            if (websocketFetch && compact) websocketFetch.captureTurnState(headers, response.headers)
+            return response
           },
         }
       },

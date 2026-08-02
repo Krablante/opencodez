@@ -116,9 +116,24 @@ export function clear(sessionID: string) {
   active.delete(sessionID)
 }
 
-export function accountKey(accountID: string | undefined) {
-  if (!accountID) return undefined
-  return new Bun.CryptoHasher("sha256").update(accountID).digest("hex")
+export function accountIdentity(accountID: string | undefined, accessToken?: string) {
+  if (accountID) return accountID
+  const payload = accessToken?.split(".")[1]
+  if (!payload) return undefined
+  try {
+    const claims: unknown = JSON.parse(Buffer.from(payload, "base64url").toString())
+    return claims && typeof claims === "object" && "sub" in claims && typeof claims.sub === "string"
+      ? claims.sub
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function accountKey(accountID: string | undefined, accessToken?: string) {
+  const identity = accountIdentity(accountID, accessToken)
+  if (!identity) return undefined
+  return new Bun.CryptoHasher("sha256").update(identity).digest("hex")
 }
 
 export function compatibilityError(

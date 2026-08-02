@@ -16,7 +16,10 @@ The upstream full-request WebSocket transport is enabled by default on `local`,
 6. In `legacy` mode, send the complete `response.create` body.
 7. In `codex` mode, send the first request in full. Later matching requests send
    only new input items with `previous_response_id`.
-8. Return WebSocket events as SSE.
+8. Keep `x-codex-turn-state` in `client_metadata` for follow-ups within the same
+   user turn, then clear it at the next turn without discarding compatible
+   continuation state.
+9. Return WebSocket events as SSE.
 
 For ChatGPT OAuth, the fetch adapter supplies the Codex product originator.
 Model-catalog Fast aliases already lower to the same base model with
@@ -33,12 +36,17 @@ routing requirement. API-key OpenAI requests do not pass through this adapter.
   fails.
 - Scope pool entries to both session ID and ChatGPT account ID. A login change
   therefore starts a full request chain instead of reusing account-scoped
-  response or reasoning IDs.
+  response or reasoning IDs. If the account id claim is absent, the OAuth
+  subject is used only as an internal affinity fallback and is stripped before
+  network I/O.
 
 ## Retries
 
 - Retry WebSocket stream/setup failures up to 5 times, then use HTTP for that session until the pool entry is idle-pruned.
 - `websocket_connection_limit_reached` consumes the same retry budget and HTTP fallback.
+- `previous_response_not_found` opens a fresh socket and retries the current
+  canonical full request once without consuming the normal stream-failure
+  budget. A repeated failure is returned normally.
 - If a WebSocket fails after its first event, fail it as retryable rather than replaying partial output in transport.
 - Abort or cancel closes the socket.
 
@@ -68,7 +76,8 @@ same context preparation and Responses lowering as normal model turns. The
 effective System, plugin transforms, model options, and model-visible tool
 schemas therefore match the turn being compacted. The returned canonical items
 are stored in `CompactionPart.remote`, and continuation starts a new full request
-chain.
+chain. Mid-turn compact also receives the current turn's sticky-routing token;
+manual and pre-turn compact do not inherit state from an earlier user turn.
 
 On later turns, the request layer registers persisted items for the current
 session and adds a private header. This fetch adapter removes that header before
@@ -112,8 +121,10 @@ around compaction is withheld from both compact input and the first mandatory
 continuation, then admitted normally. Inline images are estimated at their
 model-visible cost rather than as base64 text. If the compact payload remains too
 large, a transport-boundary pass replaces older tool outputs across the request
-with a bounded marker while retaining image input from the newest result. The
-request estimate uses an additional conservative margin because OpenCode keeps
-verbatim durable tool output instead of bounding each item as Codex records it.
-The durable history is not rewritten. The request keeps Codex's long unary
-deadline; manual compaction does not auto-continue.
+with a bounded marker while retaining image input from every result in the
+active parallel-output batch. If those eligible rewrites still cannot fit the
+safe window, the request fails locally instead of sending a predictably rejected
+payload. The request estimate uses an additional conservative margin because
+OpenCode keeps verbatim durable tool output instead of bounding each item as
+Codex records it. The durable history is not rewritten. The request keeps
+Codex's long unary deadline; manual compaction does not auto-continue.

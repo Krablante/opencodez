@@ -5,6 +5,9 @@ import { Continuation, type Mode } from "./responses-wire"
 import { OpenAIWebSocket } from "./ws"
 
 export const TITLE_HEADER = "x-opencode-title"
+export const TURN_ID_HEADER = "x-opencodez-turn-id"
+export const ACCOUNT_AFFINITY_HEADER = "x-opencodez-account-affinity"
+export const TURN_STATE_HEADER = "x-codex-turn-state"
 
 export interface CreateWebSocketFetchOptions {
   httpFetch?: typeof globalThis.fetch
@@ -24,12 +27,15 @@ interface PoolEntry {
   fallback: boolean
   streamFailures: number
   continuation: Continuation
+  turnID?: string
+  turnState?: string
 }
 
 const DEFAULT_CONNECT_TIMEOUT = 15_000
 const DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000
 const DEFAULT_MAX_CONNECTION_AGE = 55 * 60 * 1000
 const CONNECTION_LIMIT_REACHED_CODE = "websocket_connection_limit_reached"
+const PREVIOUS_RESPONSE_NOT_FOUND_CODE = "previous_response_not_found"
 
 export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
   const httpFetch = options?.httpFetch ?? globalThis.fetch
@@ -72,7 +78,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     }
     // ChatGPT response and reasoning IDs are account-scoped. A login change
     // must start a fresh continuation even when the local session stays open.
-    const key = `${sessionID}:conversation:${internalHeaders["chatgpt-account-id"] ?? ""}`
+    const key = `${sessionID}:conversation:${accountAffinity(internalHeaders)}`
 
     const entry = pool.get(key) ?? {
       lastUsedAt: Date.now(),
@@ -91,13 +97,19 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
       return httpFetch(input, httpInit)
     }
 
+    const turnID = internalHeaders[TURN_ID_HEADER]
+    if (turnID !== entry.turnID) {
+      entry.turnID = turnID
+      entry.turnState = undefined
+    }
+
     entry.busy = true
     entry.lastUsedAt = Date.now()
     try {
       entry.socket = await socket(
         entry,
         options?.url ?? url,
-        OpenAIWebSocket.normalizeHeaders(httpInit?.headers),
+        withTurnStateHeader(OpenAIWebSocket.normalizeHeaders(httpInit?.headers), entry.turnState),
         connectTimeout,
         maxConnectionAge,
         init?.signal,
@@ -109,15 +121,20 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         rejectFirstEvent = reject
       })
       const prepared = options?.wire === "codex" ? entry.continuation.prepare(body) : undefined
-      const transaction = options?.wire === "codex" ? entry.continuation.transaction(body) : undefined
+      let transaction = options?.wire === "codex" ? entry.continuation.transaction(body) : undefined
+      const requestBody = withTurnState(prepared ?? body, entry.turnState)
+      let recoveredPreviousResponse = false
       const response = OpenAIWebSocket.streamResponsesWebSocket({
         socket: entry.socket,
-        body: prepared ?? body,
+        body: requestBody,
         idleTimeout,
         signal: init?.signal ?? undefined,
         onFirstEvent: (error) => resolveFirstEvent(error ?? true),
-        onEvent: transaction?.event,
-        onComplete: transaction?.complete,
+        onEvent: (event) => {
+          captureEventTurnState(entry, turnID, event)
+          transaction?.event(event)
+        },
+        onComplete: (event) => transaction?.complete(event),
         onTerminal: (event) => {
           entry.busy = false
           entry.lastUsedAt = Date.now()
@@ -144,6 +161,26 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
           rejectFirstEvent(error)
         },
         onRetryableTerminal: async (event) => {
+          if (
+            options?.wire === "codex" &&
+            !recoveredPreviousResponse &&
+            typeof prepared?.previous_response_id === "string" &&
+            errorCode(event) === PREVIOUS_RESPONSE_NOT_FOUND_CODE
+          ) {
+            recoveredPreviousResponse = true
+            transaction?.fail()
+            invalidate(entry)
+            entry.socket = await socket(
+              entry,
+              options?.url ?? url,
+              withTurnStateHeader(OpenAIWebSocket.normalizeHeaders(httpInit?.headers), entry.turnState),
+              connectTimeout,
+              maxConnectionAge,
+              init?.signal,
+            )
+            transaction = entry.continuation.transaction(body)
+            return { socket: entry.socket, body: withTurnState(body, entry.turnState) }
+          }
           const error = connectionLimitError(event)
           if (!error) return undefined
           throw error
@@ -211,12 +248,64 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     }
   }
 
-  return Object.assign(websocketFetch, { close, remove })
+  function applyTurnState(headers: Headers) {
+    const entry = entryForHeaders(pool, OpenAIWebSocket.normalizeHeaders(headers))
+    if (!entry?.turnState) return
+    headers.set(TURN_STATE_HEADER, entry.turnState)
+  }
+
+  function captureTurnState(requestHeaders: Headers, responseHeaders: Headers) {
+    const headers = OpenAIWebSocket.normalizeHeaders(requestHeaders)
+    const entry = entryForHeaders(pool, headers)
+    if (!entry || entry.turnState || headers[TURN_ID_HEADER] !== entry.turnID) return
+    const state = responseHeaders.get(TURN_STATE_HEADER)
+    if (state) entry.turnState = state
+  }
+
+  return Object.assign(websocketFetch, { close, remove, applyTurnState, captureTurnState })
 }
 
-function connectionLimitError(event: Record<string, unknown>) {
-  if (event.type !== "error" || !isRecord(event.error) || event.error.code !== CONNECTION_LIMIT_REACHED_CODE) return
-  return new Error(typeof event.error.message === "string" ? event.error.message : CONNECTION_LIMIT_REACHED_CODE)
+function connectionLimitError(event: Record<string, unknown>): Error | undefined {
+  if (errorCode(event) !== CONNECTION_LIMIT_REACHED_CODE) return
+  const error = isRecord(event.error) ? event.error : {}
+  return new Error(typeof error.message === "string" ? error.message : CONNECTION_LIMIT_REACHED_CODE)
+}
+
+function errorCode(event: Record<string, unknown>): string | undefined {
+  if (event.type !== "error" || !isRecord(event.error) || typeof event.error.code !== "string") return
+  return event.error.code
+}
+
+function captureEventTurnState(entry: PoolEntry, turnID: string | undefined, event: Record<string, unknown>) {
+  if (entry.turnState || entry.turnID !== turnID || event.type !== "response.metadata" || !isRecord(event.headers))
+    return
+  const state = Object.entries(event.headers).find(([key]) => key.toLowerCase() === TURN_STATE_HEADER)?.[1]
+  if (typeof state === "string" && state) entry.turnState = state
+}
+
+function withTurnState(body: Record<string, unknown>, turnState: string | undefined) {
+  if (!turnState) return body
+  return {
+    ...body,
+    client_metadata: {
+      ...(isRecord(body.client_metadata) ? body.client_metadata : {}),
+      [TURN_STATE_HEADER]: turnState,
+    },
+  }
+}
+
+function withTurnStateHeader(headers: Record<string, string>, turnState: string | undefined) {
+  return turnState ? { ...headers, [TURN_STATE_HEADER]: turnState } : headers
+}
+
+function entryForHeaders(pool: Map<string, PoolEntry>, headers: Record<string, string>): PoolEntry | undefined {
+  const sessionID = headers["x-session-affinity"] ?? headers["session-id"]
+  if (!sessionID) return
+  return pool.get(`${sessionID}:conversation:${accountAffinity(headers)}`)
+}
+
+function accountAffinity(headers: Record<string, string>) {
+  return headers[ACCOUNT_AFFINITY_HEADER] ?? headers["chatgpt-account-id"] ?? ""
 }
 
 function failedResponse(error: ProviderError.ResponseStreamError) {
@@ -275,16 +364,33 @@ export function withoutInternalHeaders<T extends { headers?: HeadersInit }>(init
   if (init.headers instanceof Headers) {
     const headers = new Headers(init.headers)
     headers.delete(TITLE_HEADER)
+    headers.delete(TURN_ID_HEADER)
+    headers.delete(ACCOUNT_AFFINITY_HEADER)
     return { ...init, headers }
   }
 
   if (Array.isArray(init.headers)) {
-    return { ...init, headers: init.headers.filter((item) => item[0].toLowerCase() !== TITLE_HEADER) }
+    return {
+      ...init,
+      headers: init.headers.filter(
+        (item) =>
+          item[0].toLowerCase() !== TITLE_HEADER &&
+          item[0].toLowerCase() !== TURN_ID_HEADER &&
+          item[0].toLowerCase() !== ACCOUNT_AFFINITY_HEADER,
+      ),
+    }
   }
 
   return {
     ...init,
-    headers: Object.fromEntries(Object.entries(init.headers).filter(([key]) => key.toLowerCase() !== TITLE_HEADER)),
+    headers: Object.fromEntries(
+      Object.entries(init.headers).filter(
+        ([key]) =>
+          key.toLowerCase() !== TITLE_HEADER &&
+          key.toLowerCase() !== TURN_ID_HEADER &&
+          key.toLowerCase() !== ACCOUNT_AFFINITY_HEADER,
+      ),
+    ),
   }
 }
 
