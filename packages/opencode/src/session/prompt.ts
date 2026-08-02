@@ -1136,21 +1136,24 @@ const layer = Layer.effect(
             ) ?? false
           const modelNeedsFollowUp =
             hasToolCalls || lastAssistant?.finish === "tool-calls" || lastAssistant?.finish === "unknown"
-          const directRemoteCompaction =
+          const directRemoteCompactionPart =
             lastAssistant?.summary === true &&
             lastAssistant.parentID === lastUser.id &&
-            lastAssistantMsg?.info.role === "assistant" &&
-            msgs.some(
-              (message) =>
-                message.info.id === lastUser.id &&
-                message.parts.some(
-                  (part) =>
-                    part.type === "compaction" &&
-                    part.auto &&
-                    part.phase === "mid-turn" &&
-                    part.remote?.providerID === "openai",
-                ),
-            )
+            lastAssistantMsg?.info.role === "assistant"
+              ? msgs
+                  .find((message) => message.info.id === lastUser.id)
+                  ?.parts.find(
+                    (part): part is SessionV1.CompactionPart =>
+                      part.type === "compaction" &&
+                      part.auto &&
+                      part.phase === "mid-turn" &&
+                      part.remote?.providerID === "openai",
+                  )
+              : undefined
+          const directRemoteCompaction = directRemoteCompactionPart !== undefined
+          const activeTurnID = modelNeedsFollowUp
+            ? (lastFinished?.parentID ?? lastUser.id)
+            : (directRemoteCompactionPart?.turn_id ?? lastUser.id)
 
           if (
             lastAssistant?.finish &&
@@ -1230,7 +1233,7 @@ const layer = Layer.effect(
               model: lastUser.model,
               auto: true,
               phase: modelNeedsFollowUp ? "mid-turn" : "pre-turn",
-              turnID: modelNeedsFollowUp ? lastFinished.parentID : lastUser.id,
+              turnID: activeTurnID,
             })
             continue
           }
@@ -1376,14 +1379,15 @@ const layer = Layer.effect(
             if (directRemoteCompaction) yield* compaction.releasePending({ sessionID })
             if (result === "stop") return "break" as const
             if (result === "compact") {
+              const needsFollowUp =
+                modelNeedsFollowUp || directRemoteCompaction || handle.needsFollowUp || handle.producedDurableOutput
               yield* compaction.create({
                 sessionID,
                 agent: lastUser.agent,
                 model: lastUser.model,
                 auto: true,
-                phase:
-                  modelNeedsFollowUp || handle.needsFollowUp || handle.producedDurableOutput ? "mid-turn" : "pre-turn",
-                turnID: handle.message.parentID,
+                phase: needsFollowUp ? "mid-turn" : "pre-turn",
+                turnID: activeTurnID,
                 overflow: !handle.producedDurableOutput,
               })
             }

@@ -388,10 +388,15 @@ const layer = Layer.effect(
       phase?: Phase
       direct?: boolean
       overflow?: boolean
+      replaceReplayMedia?: boolean
     }) {
       if (input.result === "continue" && input.auto) {
         if (input.replay) {
-          yield* replayUser({ sessionID: input.sessionID, message: input.replay, replaceMedia: true })
+          yield* replayUser({
+            sessionID: input.sessionID,
+            message: input.replay,
+            replaceMedia: input.replaceReplayMedia ?? true,
+          })
         }
 
         if (!input.replay && !input.direct) {
@@ -594,7 +599,7 @@ const layer = Layer.effect(
           const snapshot = input.prepared
           const prepared = snapshot
             ? yield* Effect.gen(function* () {
-                if (phase === "mid-turn" && input.overflow) return snapshot
+                if (phase === "mid-turn" && input.overflow && pending.length === 0) return snapshot
                 const messages = structuredClone(active.messages)
                 yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages })
                 return {
@@ -720,6 +725,7 @@ const layer = Layer.effect(
           phase,
           direct: phase === "mid-turn",
           overflow: input.overflow,
+          replaceReplayMedia: false,
         })
       }
 

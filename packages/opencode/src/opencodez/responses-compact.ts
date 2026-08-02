@@ -61,24 +61,30 @@ export function compact(input: {
         : "https://api.openai.com/v1"
     const fetcher: typeof fetch =
       typeof input.provider.options.fetch === "function" ? input.provider.options.fetch : fetch
-    const response = yield* Effect.tryPromise({
+    const payload = yield* Effect.tryPromise({
       try: (signal) =>
         fetcher(`${baseURL}/responses/compact`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(request),
           signal: AbortSignal.any([signal, input.abort]),
+        }).then((response) => {
+          if (!response.ok) {
+            return response
+              .text()
+              .catch(() => "")
+              .then((detail) => {
+                throw new Error(`OpenAI remote compaction failed (${response.status})${detail ? `: ${detail}` : ""}`)
+              })
+          }
+          return response.json().catch((cause) => {
+            throw new Error("OpenAI remote compaction returned invalid JSON", { cause })
+          }) as Promise<unknown>
         }),
-      catch: (cause) => new Error("OpenAI remote compaction request failed", { cause }),
-    })
-    if (!response.ok) {
-      const detail = yield* Effect.promise(() => response.text()).pipe(Effect.orElseSucceed(() => ""))
-      throw new Error(`OpenAI remote compaction failed (${response.status})${detail ? `: ${detail}` : ""}`)
-    }
-
-    const payload = yield* Effect.tryPromise({
-      try: () => response.json() as Promise<unknown>,
-      catch: (cause) => new Error("OpenAI remote compaction returned invalid JSON", { cause }),
+      catch: (cause) =>
+        cause instanceof Error && cause.message.startsWith("OpenAI remote compaction")
+          ? cause
+          : new Error("OpenAI remote compaction request failed", { cause }),
     })
     if (!isRecord(payload) || !Array.isArray(payload.output) || payload.output.length === 0) {
       throw new Error("OpenAI remote compaction returned no output items")

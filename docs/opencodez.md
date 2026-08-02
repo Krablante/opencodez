@@ -213,13 +213,13 @@ summarization.
 
 Automatic compaction records whether pressure occurred before or during the
 active turn. Pre-turn compaction keeps the pending user message outside the
-compact request and replays it once after success. Mid-turn compaction sends the
-complete active turn to OpenAI, including the current user request, assistant
-work, tool calls, and tool results. The returned opaque state therefore contains
-the work already completed, and the same loop continues without replaying the
-original task or adding a synthetic continuation message. Both paths start a
-safe full Responses request after the history replacement; later compatible
-turns can resume incremental continuation.
+compact request and replays it once after success without replacing media
+attachments. Mid-turn compaction sends the complete active turn to OpenAI,
+including the current user request, assistant work, tool calls, and tool results.
+The returned opaque state therefore contains the work already completed, and the
+same loop continues without replaying the original task or adding a synthetic
+continuation message. Both paths start a safe full Responses request after the
+history replacement; later compatible turns can resume incremental continuation.
 
 The post-sampling trigger also follows Codex: crossing the token limit starts
 automatic compaction only when the model requires another sampling request,
@@ -239,13 +239,17 @@ tool work. Manual compaction and restart recovery reconstruct the same context
 through the shared preparation boundary because no in-memory sampling snapshot
 exists. If user steering arrives around compaction, it remains pending: it is
 excluded from both compact input and the first mandatory post-compact
-continuation, then admitted normally. Before transport, OpenCodez estimates the
+continuation, then admitted normally. This boundary remains tied to the original
+active turn even if preflight underestimates the request and the provider itself
+reports overflow; frozen request controls are then combined with history that
+still excludes the pending steer. Before transport, OpenCodez estimates the
 complete compact payload and, only when it would exceed the model window,
-replaces contiguous oversized trailing tool outputs with the same bounded
-marker used by Codex. User messages, tool calls, and ordinary outputs are never
-summarized or dropped locally. The unary compact request uses Codex's 20-minute
-default deadline and is cancelled with the owning session operation, so a Stop
-does not leave the HTTP request running in the background.
+replaces contiguous oversized trailing tool outputs with the same bounded marker
+used by Codex. User messages, tool calls, ordinary outputs, and pending media are
+never summarized or dropped locally. The unary compact request uses Codex's
+20-minute default deadline and is cancelled with the owning session operation
+through response-body processing, so a Stop does not leave the HTTP request
+running in the background.
 
 Remote output is normalized before persistence: current user/assistant messages
 and opaque compaction items are retained, while echoed developer/System,

@@ -233,20 +233,22 @@ Zero Data Retention is supported by sending encrypted reasoning state inline
 instead of referencing non-persisted reasoning item IDs. Continuation keeps the
 current System metadata ahead of the replayed compacted state.
 Automatic compaction distinguishes pre-turn from mid-turn pressure. A pre-turn
-compact preserves and replays the pending user message once. A mid-turn compact
-includes the current user request, assistant work, tool calls, and tool results,
-then continues the same model loop directly from OpenAI's opaque compacted state
-without a replacement user message or replayed task.
+compact preserves and replays the pending user message once, including its
+media attachments. A mid-turn compact includes the current user request,
+assistant work, tool calls, and tool results, then continues the same model loop
+directly from OpenAI's opaque compacted state without a replacement user message
+or replayed task.
 A provider context-overflow used to trigger recovery is not surfaced as a failed
 turn. Final answers do not trigger a redundant compact-and-continue merely for
 crossing the threshold. Compact requests use the same effective System and tool
 schemas as sampling; steering input waits until the mandatory post-compact
-continuation, and only oversized trailing tool outputs may be replaced to fit
-the request window. Newly completed tool output is included in the preflight
-limit, remote state is bound to its base API model and ChatGPT account, and Stop
-cancels the compact request. The UI reports compaction only after success. The
-remote request allows the same long unary deadline as Codex and still has no
-local-summary fallback.
+continuation even when provider-side overflow recovery follows a rejected
+request, and only oversized trailing tool outputs may be replaced to fit the
+request window. Newly completed tool output is included in the preflight limit,
+remote state is bound to its base API model and ChatGPT account, and Stop cancels
+the compact request through response-body processing. The UI reports compaction
+only after success. The remote request allows the same long unary deadline as
+Codex and still has no local-summary fallback.
 
 `opencodez.responses.compaction.threshold` is a fraction of the model's input
 window and defaults to the Codex policy of `0.9`. It accepts values greater than
