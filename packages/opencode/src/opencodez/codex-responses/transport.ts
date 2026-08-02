@@ -1,9 +1,12 @@
 import WebSocket from "ws"
 import { ProviderError } from "@/provider/error"
 import { isRecord } from "@/util/record"
-import { Continuation, type Mode } from "./responses-wire"
-import { OpenAIWebSocket } from "./ws"
-import { OpenCodezResponsesPolicy } from "@/opencodez/responses-policy"
+import { Continuation } from "./continuation"
+import { OpenAIWebSocket } from "@/plugin/openai/ws"
+import { CodexResponsesAttempt } from "./attempt"
+import { CodexResponsesProtocol } from "./protocol"
+
+export type Mode = "legacy" | "codex"
 
 export const TITLE_HEADER = "x-opencode-title"
 export const TURN_ID_HEADER = "x-opencodez-turn-id"
@@ -18,7 +21,7 @@ export interface CreateWebSocketFetchOptions {
   maxConnectionAge?: number
   streamRetries?: number
   wire?: Mode
-  onModelsEtag?: (etag: string) => void
+  onModelsEtag?: (etag: string, accountKey: string | undefined) => void
 }
 
 interface PoolEntry {
@@ -45,7 +48,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
   const connectTimeout = options?.connectTimeout ?? DEFAULT_CONNECT_TIMEOUT
   const idleTimeout = options?.idleTimeout ?? DEFAULT_IDLE_TIMEOUT
   const maxConnectionAge = options?.maxConnectionAge ?? DEFAULT_MAX_CONNECTION_AGE
-  const streamRetries = options?.streamRetries ?? OpenCodezResponsesPolicy.streamRetryLimit("sampling")
+  const streamRetries = options?.streamRetries ?? CodexResponsesAttempt.streamRetryLimit("sampling")
   const pruneTimer = setInterval(() => prune(), Math.min(idleTimeout, 60_000))
   if (typeof pruneTimer === "object" && "unref" in pruneTimer && typeof pruneTimer.unref === "function") {
     pruneTimer.unref()
@@ -55,9 +58,9 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     const url = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url
     const internalHeaders = OpenAIWebSocket.normalizeHeaders(init?.headers)
     const httpInit = withoutInternalHeaders(init)
-    const requestKind = OpenCodezResponsesPolicy.requestKind(internalHeaders)
+    const requestKind = CodexResponsesAttempt.requestKind(internalHeaders)
     const requestStreamRetries =
-      requestKind === "compaction" ? OpenCodezResponsesPolicy.streamRetryLimit("compaction") : streamRetries
+      requestKind === "compaction" ? CodexResponsesAttempt.streamRetryLimit("compaction") : streamRetries
 
     if (init?.method !== "POST" || !new URL(url).pathname.endsWith("/responses")) {
       return httpFetch(input, httpInit)
@@ -79,6 +82,9 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
 
     const sessionID = internalHeaders["x-session-affinity"] ?? internalHeaders["session-id"]
     if (!sessionID) {
+      return httpFetch(input, httpInit)
+    }
+    if (options?.wire === "codex" && !internalHeaders[ACCOUNT_AFFINITY_HEADER]) {
       return httpFetch(input, httpInit)
     }
     // ChatGPT response and reasoning IDs are account-scoped. A login change
@@ -145,7 +151,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         signal: init?.signal ?? undefined,
         onFirstEvent: (error) => resolveFirstEvent(error ?? true),
         onEvent: (event) => {
-          captureModelsEtag(event, options?.onModelsEtag)
+          captureModelsEtag(event, internalHeaders[ACCOUNT_AFFINITY_HEADER], options?.onModelsEtag)
           captureEventTurnState(entry, turnID, event)
           transaction?.event(event)
         },
@@ -205,6 +211,10 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
       const first = await firstEvent
       if (first !== false) {
         if (first === true || first.status < 200 || first.status > 599) return response
+        if (first.status === 426) {
+          entry.fallback = true
+          return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
+        }
         return new Response(first.body, {
           status: first.status,
           headers: { "content-type": "application/json", ...first.headers },
@@ -218,6 +228,25 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         entry.streamFailures = 0
         invalidate(entry)
         throw error
+      }
+
+      const upgrade = OpenAIWebSocket.upgradeResponse(error)
+      if (upgrade?.status === 426) {
+        entry.fallback = true
+        invalidate(entry)
+        return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
+      }
+      if (upgrade) {
+        invalidate(entry)
+        return new Response(upgrade.body, { status: upgrade.status, headers: upgrade.headers })
+      }
+      // Bun exposes non-101 handshakes as one opaque error. Falling back now
+      // handles 426 without spending retries; HTTP then preserves the real
+      // status for OAuth refresh and normal provider errors.
+      if (OpenAIWebSocket.isOpaqueUpgradeRejection(error)) {
+        entry.fallback = true
+        invalidate(entry)
+        return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
       }
 
       recordStreamFailure(entry, requestStreamRetries)
@@ -248,12 +277,12 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
   }
 
   function trimPool() {
-    if (pool.size <= OpenCodezResponsesPolicy.SESSION_POOL_LIMIT) return
+    if (pool.size <= CodexResponsesAttempt.SESSION_POOL_LIMIT) return
     const candidates = [...pool.entries()]
       .filter(([, entry]) => !entry.busy)
       .toSorted(([, left], [, right]) => left.lastUsedAt - right.lastUsedAt)
     for (const [key, entry] of candidates) {
-      if (pool.size <= OpenCodezResponsesPolicy.SESSION_POOL_LIMIT) break
+      if (pool.size <= CodexResponsesAttempt.SESSION_POOL_LIMIT) break
       invalidate(entry)
       pool.delete(key)
     }
@@ -289,16 +318,18 @@ function errorCode(event: Record<string, unknown>): string | undefined {
 }
 
 function captureEventTurnState(entry: PoolEntry, turnID: string | undefined, event: Record<string, unknown>) {
-  if (entry.turnState || entry.turnID !== turnID || event.type !== "response.metadata" || !isRecord(event.headers))
-    return
-  const state = Object.entries(event.headers).find(([key]) => key.toLowerCase() === TURN_STATE_HEADER)?.[1]
-  if (typeof state === "string" && state) entry.turnState = state
+  if (entry.turnState || entry.turnID !== turnID) return
+  entry.turnState = CodexResponsesProtocol.headerValue(event, TURN_STATE_HEADER)
 }
 
-function captureModelsEtag(event: Record<string, unknown>, observe: ((etag: string) => void) | undefined) {
-  if (!observe || event.type !== "response.metadata" || !isRecord(event.headers)) return
-  const etag = Object.entries(event.headers).find(([key]) => key.toLowerCase() === "x-models-etag")?.[1]
-  if (typeof etag === "string" && etag) observe(etag)
+function captureModelsEtag(
+  event: Record<string, unknown>,
+  accountKey: string | undefined,
+  observe: ((etag: string, accountKey: string | undefined) => void) | undefined,
+) {
+  if (!observe) return
+  const etag = CodexResponsesProtocol.headerValue(event, "x-models-etag")
+  if (etag) observe(etag, accountKey)
 }
 
 function captureHeaderTurnState(entry: PoolEntry, turnID: string | undefined, headers: Record<string, string>) {
@@ -339,7 +370,7 @@ function withTurnStateHeader(headers: Record<string, string>, turnState: string 
 }
 
 function accountAffinity(headers: Record<string, string>) {
-  return headers[ACCOUNT_AFFINITY_HEADER] ?? headers["chatgpt-account-id"] ?? ""
+  return headers[ACCOUNT_AFFINITY_HEADER] ?? ""
 }
 
 function failedResponse(error: ProviderError.ResponseStreamError) {
@@ -402,35 +433,33 @@ export function withoutInternalHeaders<T extends { headers?: HeadersInit }>(init
     headers.delete(TITLE_HEADER)
     headers.delete(TURN_ID_HEADER)
     headers.delete(ACCOUNT_AFFINITY_HEADER)
-    headers.delete(OpenCodezResponsesPolicy.REQUEST_KIND_HEADER)
+    headers.delete(CodexResponsesAttempt.REQUEST_KIND_HEADER)
+    CodexResponsesProtocol.internalHeaders.forEach((key) => headers.delete(key))
     return { ...init, headers }
   }
 
   if (Array.isArray(init.headers)) {
     return {
       ...init,
-      headers: init.headers.filter(
-        (item) =>
-          item[0].toLowerCase() !== TITLE_HEADER &&
-          item[0].toLowerCase() !== TURN_ID_HEADER &&
-          item[0].toLowerCase() !== ACCOUNT_AFFINITY_HEADER &&
-          item[0].toLowerCase() !== OpenCodezResponsesPolicy.REQUEST_KIND_HEADER,
-      ),
+      headers: init.headers.filter((item) => !isInternalHeader(item[0])),
     }
   }
 
   return {
     ...init,
-    headers: Object.fromEntries(
-      Object.entries(init.headers).filter(
-        ([key]) =>
-          key.toLowerCase() !== TITLE_HEADER &&
-          key.toLowerCase() !== TURN_ID_HEADER &&
-          key.toLowerCase() !== ACCOUNT_AFFINITY_HEADER &&
-          key.toLowerCase() !== OpenCodezResponsesPolicy.REQUEST_KIND_HEADER,
-      ),
-    ),
+    headers: Object.fromEntries(Object.entries(init.headers).filter(([key]) => !isInternalHeader(key))),
   }
 }
 
-export * as OpenAIWebSocketPool from "./ws-pool"
+function isInternalHeader(value: string) {
+  const key = value.toLowerCase()
+  return (
+    key === TITLE_HEADER ||
+    key === TURN_ID_HEADER ||
+    key === ACCOUNT_AFFINITY_HEADER ||
+    key === CodexResponsesAttempt.REQUEST_KIND_HEADER ||
+    CodexResponsesProtocol.internalHeaders.includes(key)
+  )
+}
+
+export * as CodexResponsesTransport from "./transport"

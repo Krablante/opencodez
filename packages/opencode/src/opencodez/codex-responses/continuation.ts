@@ -1,12 +1,12 @@
 import { isRecord } from "@/util/record"
 
-export type Mode = "legacy" | "codex"
-
 type CompletedResponse = {
   request: Record<string, unknown>
   responseID: string
   outputItems: unknown[]
 }
+
+export * as CodexResponsesContinuation from "./continuation"
 
 export class Continuation {
   private previous?: CompletedResponse

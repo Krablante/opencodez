@@ -6,7 +6,7 @@ import WebSocket, { WebSocketServer } from "ws"
 import { APICallError } from "ai"
 import { ProviderError } from "../../src/provider/error"
 import { OpenAIWebSocket } from "../../src/plugin/openai/ws"
-import { OpenAIWebSocketPool, TITLE_HEADER } from "../../src/plugin/openai/ws-pool"
+import { CodexResponsesTransport, TITLE_HEADER } from "../../src/opencodez/codex-responses/transport"
 
 describe("plugin.openai.ws", () => {
   test("derives websocket URLs and sends auth plus protocol headers", async () => {
@@ -152,7 +152,7 @@ describe("plugin.openai.ws-pool", () => {
         socket.send(JSON.stringify({ type: "response.completed", response: { id: `resp_${messages}` } }))
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
     })
 
@@ -174,7 +174,7 @@ describe("plugin.openai.ws-pool", () => {
         socket.send(JSON.stringify({ type: "response.completed", response: { id: `resp_${connections}` } }))
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
       maxConnectionAge: 0,
     })
@@ -191,7 +191,7 @@ describe("plugin.openai.ws-pool", () => {
   test("falls back to HTTP after websocket setup retries are exhausted", async () => {
     const attempts: string[] = []
     await using server = await createRejectingWebSocketServer(() => attempts.push("websocket"))
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
       connectTimeout: 100,
       streamRetries: 1,
@@ -214,7 +214,7 @@ describe("plugin.openai.ws-pool", () => {
   test("expires HTTP fallback after its idle timeout", async () => {
     let websocketAttempts = 0
     await using server = await createRejectingWebSocketServer(() => websocketAttempts++)
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
       connectTimeout: 100,
       idleTimeout: 20,
@@ -235,7 +235,7 @@ describe("plugin.openai.ws-pool", () => {
   test("removes HTTP fallback when its session is deleted", async () => {
     let websocketAttempts = 0
     await using server = await createRejectingWebSocketServer(() => websocketAttempts++)
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
       connectTimeout: 100,
       streamRetries: 0,
@@ -264,7 +264,7 @@ describe("plugin.openai.ws-pool", () => {
         socket.send(JSON.stringify({ type: "response.completed", response: { id: "resp_after_remove" } }))
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
     })
 
@@ -290,7 +290,7 @@ describe("plugin.openai.ws-pool", () => {
         socket.send(JSON.stringify({ type: "response.completed", response: { id: `resp_${connections}` } }))
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
       idleTimeout: 20,
     })
@@ -314,7 +314,7 @@ describe("plugin.openai.ws-pool", () => {
         socket.send(JSON.stringify({ type: connections === 1 ? "response.failed" : "response.completed" }))
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
     })
 
@@ -347,7 +347,7 @@ describe("plugin.openai.ws-pool", () => {
         socket.send(JSON.stringify(event))
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
     })
 
@@ -379,7 +379,7 @@ describe("plugin.openai.ws-pool", () => {
         socket.send(JSON.stringify(event))
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
     })
 
@@ -418,7 +418,7 @@ describe("plugin.openai.ws-pool", () => {
         socket.send(JSON.stringify({ type: "response.completed", response: { id: "resp_retry" } }))
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
     })
 
@@ -454,7 +454,7 @@ describe("plugin.openai.ws-pool", () => {
         )
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
       streamRetries: 2,
     })
@@ -494,7 +494,7 @@ describe("plugin.openai.ws-pool", () => {
         )
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
       streamRetries: 1,
     })
@@ -515,7 +515,7 @@ describe("plugin.openai.ws-pool", () => {
       connections += 1
       socket.once("message", () => {})
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
       idleTimeout: 20,
       streamRetries: 1,
@@ -539,7 +539,7 @@ describe("plugin.openai.ws-pool", () => {
       connections += 1
       socket.once("message", () => {})
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
       idleTimeout: 500,
       streamRetries: 1,
@@ -566,7 +566,7 @@ describe("plugin.openai.ws-pool", () => {
         attempts.shift()?.(socket)
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
       streamRetries: 1,
     })
@@ -603,7 +603,7 @@ describe("plugin.openai.ws-pool", () => {
         socket.send(JSON.stringify({ type: "response.completed", response: { id: `resp_${requests}` } }))
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
       streamRetries: 1,
     })
@@ -625,7 +625,7 @@ describe("plugin.openai.ws-pool", () => {
 
   test("falls back to HTTP for missing session and title requests", async () => {
     await using server = await createWebSocketServer(() => {})
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+    const fetch = CodexResponsesTransport.createWebSocketFetch()
 
     const missingSession = await fetch(server.url, {
       method: "POST",
@@ -651,7 +651,7 @@ describe("plugin.openai.ws-pool", () => {
       })
     })
     const abort = new AbortController()
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
     })
 
@@ -671,7 +671,7 @@ describe("plugin.openai.ws-pool", () => {
   test("reserves a websocket lane while its socket is connecting", async () => {
     await using server = await createHangingTcpServer()
     await using fallback = await createHttpServer()
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
       connectTimeout: 20,
       streamRetries: 0,
@@ -696,7 +696,7 @@ describe("plugin.openai.ws-pool", () => {
         socket.close(1001, "server shutdown")
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
       streamRetries: 1,
     })
@@ -726,7 +726,7 @@ describe("plugin.openai.ws-pool", () => {
       })
     })
     const abort = new AbortController()
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
     })
 
@@ -756,7 +756,7 @@ describe("plugin.openai.ws-pool", () => {
         socket.send(JSON.stringify({ type: "response.completed", response: { id: "resp_after_cancel" } }))
       })
     })
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+    const fetch = CodexResponsesTransport.createWebSocketFetch({
       url: server.url,
     })
 

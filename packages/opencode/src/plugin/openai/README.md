@@ -9,21 +9,27 @@ The upstream full-request WebSocket transport is enabled by default on `local`,
 ## Flow
 
 1. A streamed `POST /responses` request arrives.
-2. If it has no `session-id` or `x-session-affinity` header, use HTTP.
-3. Title requests use HTTP.
-4. If that session's socket is busy or already in fallback mode, use HTTP.
-5. Otherwise, reuse its open socket or open a new one.
-6. In `legacy` mode, send the complete `response.create` body.
-7. In `codex` mode, send the first request in full. Later matching requests send
+2. The request adapter installs one canonical Codex metadata snapshot in
+   `client_metadata`, with compatible HTTP/WS projections derived from it.
+3. If it has no `session-id` or `x-session-affinity` header, use HTTP.
+   Codex mode also uses HTTP when no verified account identity is available,
+   preventing reusable response state from crossing an unknown account boundary.
+4. Title requests use HTTP.
+5. If that session's socket is busy or already in fallback mode, use HTTP.
+6. Otherwise, reuse its open socket or open a new one.
+7. In `legacy` mode, send the complete `response.create` body.
+8. In `codex` mode, send the first request in full. Later matching requests send
    only new input items with `previous_response_id`.
-8. Capture `x-codex-turn-state` from response metadata or HTTP fallback
+9. Capture `x-codex-turn-state` from response metadata or HTTP fallback
    headers, plus WebSocket upgrade headers when the runtime exposes them. Bun's
    client does not expose upgrade response headers, so the standalone binary
    uses backend metadata without adding another handshake. Keep the state in
    `client_metadata` for follow-ups within the same logical user turn,
    including compaction, then clear it at the next turn without discarding
    compatible continuation state.
-9. Return WebSocket events as SSE.
+10. Return WebSocket events as SSE. Server-selected model, reasoning, rate-limit,
+    moderation, verification, and safety metadata remains on that stream; it is
+    advisory and is not persisted as local conversation state.
 
 For ChatGPT OAuth, the fetch adapter supplies the Codex product originator.
 Model-catalog Fast aliases already lower to the same base model with
@@ -58,6 +64,10 @@ metadata marker. Legacy wire mode keeps the unmodified request shape.
   then retry HTTP up to 5 times. This is at most 12 network requests. Compaction
   uses a smaller two-retry budget on each transport, at most 6 requests.
 - `websocket_connection_limit_reached` consumes the same retry budget and HTTP fallback.
+- WebSocket upgrade status 426 selects sticky HTTP fallback immediately without
+  spending the WebSocket retry budget.
+- An HTTP or pre-output WebSocket 401 performs one deduplicated OAuth refresh and
+  replays the request once. A second 401 is returned normally.
 - `previous_response_not_found` opens a fresh socket and retries the current
   canonical full request once without consuming the normal stream-failure
   budget. A repeated failure is returned normally.
@@ -97,7 +107,8 @@ ChatGPT OAuth compaction uses Codex Remote Compaction V2. The session layer
 builds a normal streamed `/responses` request through the same context
 preparation and lowering as sampling, then appends exactly one
 `compaction_trigger`. The transport requires exactly one completed opaque
-compaction item. That item plus at most 64,000 estimated tokens of newest
+`compaction` or compatible `compaction_summary` item containing encrypted
+content. That item plus at most 64,000 estimated tokens of newest
 retained user messages is stored in `CompactionPart.remote`; stale reasoning,
 tool, and instruction artifacts are not installed. Mid-turn compact uses the
 same session/account socket and logical turn ID, so sticky routing survives the
@@ -165,3 +176,5 @@ the same remote compaction path, then resumes the pending user turn. The
 authenticated model catalog refreshes every five minutes and immediately after
 an `x-models-etag` change; known fallback profiles cover temporary catalog
 failure without becoming a second live source of truth.
+Persisted state without a verifiable stored and current account identity is
+rejected locally instead of being reused optimistically.

@@ -1,5 +1,6 @@
 import type { Auth } from "@/auth"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { CodexResponsesProtocol } from "./protocol"
 
 export const RESPONSES_LITE_HEADER = "x-openai-internal-codex-responses-lite"
 export const RESPONSES_LITE_METADATA = "ws_request_header_x_openai_internal_codex_responses_lite"
@@ -33,6 +34,7 @@ type Model = {
 
 const CACHE_TTL = 5 * 60 * 1000
 const FAILURE_TTL = 60 * 1000
+const CACHE_LIMIT = 8
 const FALLBACK_PROFILES: Profile[] = [
   { modelID: "gpt-5.4", contextWindow: 272_000, compHash: "2911", responsesLite: false },
   { modelID: "gpt-5.4-mini", contextWindow: 272_000, compHash: "2911", responsesLite: false },
@@ -43,8 +45,8 @@ const FALLBACK_PROFILES: Profile[] = [
 ]
 const FALLBACK = new Map(FALLBACK_PROFILES.map((profile) => [profile.modelID, profile]))
 
-let cache: Catalog | undefined
-let pending: { readonly accountKey: string; readonly value: Promise<Catalog> } | undefined
+const cache = new Map<string, Catalog>()
+const pending = new Map<string, Promise<Catalog>>()
 
 export async function initialize<T extends Record<string, Model>>(
   models: T,
@@ -58,16 +60,24 @@ export async function initialize<T extends Record<string, Model>>(
   return models
 }
 
-export function resolve(model: Model): Profile | undefined {
-  return resolveID(model.api.id)
+export function resolve(model: Model, accountKey?: string): Profile | undefined {
+  return resolveID(model.api.id, accountKey)
 }
 
-export function resolveID(modelID: string): Profile | undefined {
-  return cache?.profiles.get(modelID) ?? FALLBACK.get(modelID)
+export function resolveID(modelID: string, accountKey?: string): Profile | undefined {
+  const catalog = accountKey ? cache.get(accountKey) : undefined
+  if (catalog && accountKey) {
+    cache.delete(accountKey)
+    cache.set(accountKey, catalog)
+  }
+  return catalog?.profiles.get(modelID) ?? FALLBACK.get(modelID)
 }
 
 export function needsRefresh(auth: Extract<Auth.Info, { type: "oauth" }>) {
-  return !cache || cache.accountKey !== identityKey(auth) || cache.expiresAt <= Date.now()
+  const key = CodexResponsesProtocol.accountKey(auth.accountId, auth.access)
+  if (!key) return true
+  const current = cache.get(key)
+  return !current || current.expiresAt <= Date.now()
 }
 
 export async function refresh(input: {
@@ -76,29 +86,35 @@ export async function refresh(input: {
   readonly fetcher?: typeof fetch
   readonly force?: boolean
 }) {
-  const accountKey = identityKey(input.auth)
-  if (!input.force && cache?.accountKey === accountKey && cache.expiresAt > Date.now()) return cache
-  if (pending?.accountKey === accountKey) return pending.value
-  const value = load({ ...input, accountKey }).finally(() => {
-    if (pending?.value === value) pending = undefined
+  const key = CodexResponsesProtocol.accountKey(input.auth.accountId, input.auth.access)
+  if (!key) return load({ ...input, accountKey: "", store: false })
+  const current = cache.get(key)
+  if (!input.force && current && current.expiresAt > Date.now()) return current
+  const active = pending.get(key)
+  if (active) return active
+  const value = load({ ...input, accountKey: key, store: true }).finally(() => {
+    if (pending.get(key) === value) pending.delete(key)
   })
-  pending = { accountKey, value }
+  pending.set(key, value)
   return value
 }
 
-export function observeEtag(value: string | undefined) {
-  if (!value || !cache || cache.etag === value) return false
-  cache = { ...cache, expiresAt: 0 }
+export function observeEtag(value: string | undefined, accountKey: string | undefined) {
+  if (!value || !accountKey) return false
+  const current = cache.get(accountKey)
+  if (!current || current.etag === value) return false
+  cache.set(accountKey, { ...current, expiresAt: 0 })
   return true
 }
 
 async function load(input: {
   readonly auth: Extract<Auth.Info, { type: "oauth" }>
   readonly accountKey: string
+  readonly store: boolean
   readonly endpoint: string
   readonly fetcher?: typeof fetch
 }) {
-  const previous = cache?.accountKey === input.accountKey ? cache : undefined
+  const previous = input.store ? cache.get(input.accountKey) : undefined
   const url = new URL(input.endpoint)
   url.pathname = url.pathname.replace(/responses\/?$/, "models")
   url.searchParams.set("client_version", InstallationVersion)
@@ -113,28 +129,33 @@ async function load(input: {
     () => undefined,
   )
   if (response?.status === 304 && previous) {
-    cache = { ...previous, expiresAt: Date.now() + CACHE_TTL }
-    return cache
+    return store({ ...previous, expiresAt: Date.now() + CACHE_TTL })
   }
   if (!response?.ok) {
-    cache = {
+    return store({
       accountKey: input.accountKey,
       profiles: previous?.profiles ?? FALLBACK,
       etag: previous?.etag,
       expiresAt: Date.now() + FAILURE_TTL,
-    }
-    return cache
+    })
   }
 
   const body: unknown = await response.json().catch(() => undefined)
   const models = isRecord(body) && Array.isArray(body.models) ? body.models.flatMap(parseModel) : []
-  cache = {
+  return store({
     accountKey: input.accountKey,
     profiles: models.length > 0 ? new Map(models.map((model) => [model.modelID, model])) : FALLBACK,
     etag: response.headers.get("etag") ?? undefined,
     expiresAt: Date.now() + CACHE_TTL,
+  })
+
+  function store(value: Catalog) {
+    if (!input.store) return value
+    cache.delete(input.accountKey)
+    cache.set(input.accountKey, value)
+    while (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!)
+    return value
   }
-  return cache
 }
 
 function parseModel(value: unknown): Profile[] {
@@ -153,24 +174,8 @@ function parseModel(value: unknown): Profile[] {
   ]
 }
 
-function identityKey(auth: Extract<Auth.Info, { type: "oauth" }>) {
-  const subject = tokenSubject(auth.access)
-  return new Bun.CryptoHasher("sha256").update(auth.accountId ?? subject ?? "unknown").digest("hex")
-}
-
-function tokenSubject(access: string) {
-  const payload = access.split(".")[1]
-  if (!payload) return undefined
-  try {
-    const claims: unknown = JSON.parse(Buffer.from(payload, "base64url").toString())
-    return isRecord(claims) && typeof claims.sub === "string" ? claims.sub : undefined
-  } catch {
-    return undefined
-  }
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
 }
 
-export * as OpenCodezResponsesModel from "./responses-model"
+export * as CodexResponsesCatalog from "./catalog"

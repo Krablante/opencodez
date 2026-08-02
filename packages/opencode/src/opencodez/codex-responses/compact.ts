@@ -5,9 +5,11 @@ import { OpenAIResponses } from "@opencode-ai/llm/protocols/openai-responses"
 import { ProviderTransform } from "@/provider/transform"
 import type { ModelMessage, Tool } from "ai"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
-import { OpenAIWebSocketPool } from "@/plugin/openai/ws-pool"
-import { OpenCodezResponsesPolicy } from "./responses-policy"
-import { OpenCodezResponsesModel } from "./responses-model"
+import { CodexResponsesTransport } from "./transport"
+import { CodexResponsesAttempt } from "./attempt"
+import { CodexResponsesCatalog } from "./catalog"
+import { CodexResponsesProtocol } from "./protocol"
+import { CodexResponsesCompaction } from "./compaction"
 
 export type Result = {
   items: Record<string, unknown>[]
@@ -57,7 +59,14 @@ export function compact(input: {
   options: Record<string, unknown>
   items: unknown[]
   sessionID: string
+  accountKey: string
+  windowID: string
   turnID?: string
+  compaction: {
+    trigger: "manual" | "auto"
+    reason: "user_requested" | "context_limit" | "comp_hash_changed"
+    phase: "standalone_turn" | "pre_turn" | "mid_turn"
+  }
   preserveActiveToolMedia: boolean
   abort: AbortSignal
 }) {
@@ -65,7 +74,7 @@ export function compact(input: {
     const body = yield* toCompactInput(input)
     if (!Array.isArray(body.input)) throw new Error("OpenAI compact input must be an array")
     const request = compactBody(body, [...input.items.filter((item) => !isSystemMessage(item)), ...body.input])
-    const profile = OpenCodezResponsesModel.resolve(input.model)
+    const profile = CodexResponsesCatalog.resolve(input.model, input.accountKey)
     const bounded = trimOutputs(
       request,
       OpenCodezSettings.responsesCompactionPayloadLimit(
@@ -100,8 +109,12 @@ export function compact(input: {
           headers: {
             "content-type": "application/json",
             "x-session-affinity": input.sessionID,
-            ...(input.turnID ? { [OpenAIWebSocketPool.TURN_ID_HEADER]: input.turnID } : {}),
-            [OpenCodezResponsesPolicy.REQUEST_KIND_HEADER]: "compaction",
+            ...(input.turnID ? { [CodexResponsesTransport.TURN_ID_HEADER]: input.turnID } : {}),
+            [CodexResponsesAttempt.REQUEST_KIND_HEADER]: "compaction",
+            [CodexResponsesProtocol.INTERNAL_WINDOW_ID_HEADER]: input.windowID,
+            [CodexResponsesProtocol.INTERNAL_COMPACTION_TRIGGER_HEADER]: input.compaction.trigger,
+            [CodexResponsesProtocol.INTERNAL_COMPACTION_REASON_HEADER]: input.compaction.reason,
+            [CodexResponsesProtocol.INTERNAL_COMPACTION_PHASE_HEADER]: input.compaction.phase,
           },
           body: JSON.stringify(request),
           signal: AbortSignal.any([signal, input.abort]),
@@ -125,7 +138,7 @@ export function compact(input: {
             ),
     }).pipe(
       Effect.retry({
-        times: OpenCodezResponsesPolicy.requestRetryLimit("compaction"),
+        times: CodexResponsesAttempt.requestRetryLimit("compaction"),
         schedule: Schedule.exponential("500 millis"),
         while: (error) => error.retryable,
       }),
@@ -285,10 +298,11 @@ async function parseCompactionResponse(response: Response, input: unknown[]) {
             : "unknown error"
       throw new RemoteCompactionError(
         `OpenAI remote compaction failed: ${detail}`,
-        OpenCodezResponsesPolicy.retryableEvent(event),
+        CodexResponsesAttempt.retryableEvent(event),
       )
     }
-    if (event.type === "response.output_item.done" && isCompactionItem(event.item)) output.push(event.item)
+    if (event.type === "response.output_item.done" && CodexResponsesCompaction.isOpaqueItem(event.item))
+      output.push(event.item)
     if (event.type === "response.completed" || event.type === "response.done") completed = event
   }
 
@@ -416,13 +430,6 @@ function truncateText(value: string, tokens: number) {
   return value.slice(0, end)
 }
 
-function isCompactionItem(value: unknown): value is Record<string, unknown> {
-  return (
-    isRecord(value) &&
-    (value.type === "compaction" || value.type === "context_compaction" || value.type === "compaction_summary")
-  )
-}
-
 class RemoteCompactionError extends Error {
   constructor(
     message: string,
@@ -433,4 +440,4 @@ class RemoteCompactionError extends Error {
   }
 }
 
-export * as OpenCodezResponsesCompact from "./responses-compact"
+export * as CodexResponsesCompact from "./compact"

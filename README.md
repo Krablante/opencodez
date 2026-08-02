@@ -235,6 +235,12 @@ catalog's `service_tier: "priority"` through the Codex product route. Switching
 between Standard and Fast remains a normal model change and safely starts a new
 full continuation chain. Changing the logged-in ChatGPT account does the same;
 response and reasoning IDs are never reused across account boundaries.
+Each request also carries one Codex-compatible metadata snapshot for its
+installation, session/thread, logical turn, compacted window, and request kind.
+An expired OAuth token gets one response-driven refresh and safe retry before any
+model output; WebSocket upgrade status 426 switches that session to HTTP
+immediately. If account identity cannot be verified, OpenCodez uses uncached HTTP
+and refuses to reuse account-scoped continuation or compacted state.
 
 For ChatGPT OAuth, automatic and manual compaction use Codex Remote Compaction
 V2: a normal streamed `/responses` request whose final input item is

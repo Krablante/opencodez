@@ -13,8 +13,8 @@ import { Provider } from "@/provider/provider"
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
-import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
-import { OpenCodezResponsesCompact } from "@/opencodez/responses-compact"
+import { CodexResponsesCompaction } from "@/opencodez/codex-responses/compaction"
+import { CodexResponsesCompact } from "@/opencodez/codex-responses/compact"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
@@ -60,7 +60,7 @@ import { SessionModelContext } from "./model-context"
 import { LLMEvent } from "@opencode-ai/llm"
 import { Token } from "@/util/token"
 import { LLMRequestPrep } from "./llm/request"
-import { OpenCodezResponsesModel } from "@/opencodez/responses-model"
+import { CodexResponsesCatalog } from "@/opencodez/codex-responses/catalog"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1214,7 +1214,7 @@ const layer = Layer.effect(
             yield* Effect.logInfo("refreshing remote compaction backend snapshot", {
               "session.id": sessionID,
               model: model.api.id,
-              compHash: OpenCodezResponsesModel.resolve(model)?.compHash,
+              compHash: CodexResponsesCatalog.resolve(model)?.compHash,
             })
             yield* compaction.create({
               sessionID,
@@ -1235,7 +1235,7 @@ const layer = Layer.effect(
                     total +
                     Token.estimate(part.state.output) +
                     (model.providerID === "openai"
-                      ? OpenCodezResponsesCompact.estimateInput(part.state.attachments ?? [])
+                      ? CodexResponsesCompact.estimateInput(part.state.attachments ?? [])
                       : Token.estimate(JSON.stringify(part.state.attachments ?? [])))
                   )
                 }
@@ -1353,7 +1353,7 @@ const layer = Layer.effect(
               permission: session.permission,
               sessionID,
               parentSessionID: session.parentID,
-              sessionMetadata: OpenCodezResponsesCompaction.withMetadata(session.metadata, msgs),
+              sessionMetadata: CodexResponsesCompaction.withMetadata(session.metadata, msgs),
               system,
               messages: [
                 ...context.messages,
@@ -1405,7 +1405,7 @@ const layer = Layer.effect(
                 modelNeedsFollowUp || directRemoteCompaction || handle.needsFollowUp || handle.producedDurableOutput
               if (
                 !handle.producedDurableOutput &&
-                OpenCodezResponsesCompaction.repeatedOverflow(
+                CodexResponsesCompaction.repeatedOverflow(
                   yield* sessions.messages({ sessionID }).pipe(Effect.orDie),
                   activeTurnID,
                 )

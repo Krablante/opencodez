@@ -17,10 +17,11 @@ import type { Info as ConfigInfo } from "@/config/config"
 import { OpenCodezPromptLibrary } from "@/opencodez/prompt-library"
 import { OpenCodezSession } from "@opencode-ai/core/opencodez/session"
 import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
-import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
-import { OpenAIWebSocketPool } from "@/plugin/openai/ws-pool"
+import { CodexResponsesCompaction } from "@/opencodez/codex-responses/compaction"
+import { CodexResponsesTransport } from "@/opencodez/codex-responses/transport"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
-import { OpenCodezResponsesModel } from "@/opencodez/responses-model"
+import { CodexResponsesCatalog } from "@/opencodez/codex-responses/catalog"
+import { CodexResponsesProtocol } from "@/opencodez/codex-responses/protocol"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
@@ -68,23 +69,24 @@ const mergeOptions = (target: Record<string, any>, source: Record<string, any> |
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
   const codexResponses = isOpenaiOauth && OpenCodezSettings.responsesWire(input.config) === "codex"
-  if (OpenCodezResponsesCompaction.has(input.sessionMetadata) && !isOpenaiOauth) {
+  const accountKey =
+    input.auth?.type === "oauth"
+      ? CodexResponsesProtocol.accountKey(input.auth.accountId, input.auth.access)
+      : undefined
+  if (CodexResponsesCompaction.has(input.sessionMetadata) && !isOpenaiOauth) {
     return yield* Effect.fail(
       new Error("This session contains OpenAI remote compaction state and must continue with ChatGPT OAuth"),
     )
   }
-  const compatibilityError = OpenCodezResponsesCompaction.compatibilityError(input.sessionMetadata, {
+  const compatibilityError = CodexResponsesCompaction.compatibilityError(input.sessionMetadata, {
     modelID: input.model.api.id,
-    accountKey:
-      input.auth?.type === "oauth"
-        ? OpenCodezResponsesCompaction.accountKey(input.auth.accountId, input.auth.access)
-        : undefined,
-    compHash: OpenCodezResponsesModel.resolve(input.model)?.compHash,
+    accountKey,
+    compHash: CodexResponsesCatalog.resolve(input.model, accountKey)?.compHash,
     allowCompHashMismatch: input.allowCompHashMismatch,
   })
   if (compatibilityError) return yield* Effect.fail(new Error(compatibilityError))
   const compactionHandoff =
-    isOpenaiOauth && !input.allowCompHashMismatch && OpenCodezResponsesCompaction.handoff(input.sessionMetadata)
+    isOpenaiOauth && !input.allowCompHashMismatch && CodexResponsesCompaction.handoff(input.sessionMetadata)
   const opencodezPrompts = OpenCodezIdentity.enabled
     ? yield* Effect.promise(async () => {
         const opencodez = OpenCodezSession.effective({
@@ -252,13 +254,21 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         : {
             "x-session-affinity": input.sessionID,
             "X-Session-Id": input.sessionID,
-            ...(isOpenaiOauth ? { [OpenAIWebSocketPool.TURN_ID_HEADER]: input.turnID ?? input.user.id } : {}),
+            ...(isOpenaiOauth ? { [CodexResponsesTransport.TURN_ID_HEADER]: input.turnID ?? input.user.id } : {}),
+            ...(codexResponses
+              ? {
+                  [CodexResponsesProtocol.INTERNAL_WINDOW_ID_HEADER]: CodexResponsesCompaction.windowID(
+                    input.sessionMetadata,
+                    input.sessionID,
+                  ),
+                }
+              : {}),
             ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
             "User-Agent": USER_AGENT,
           }),
       ...input.model.headers,
       ...headers,
-      ...(compactionHandoff ? { [OpenCodezResponsesCompaction.HEADER]: compactionHandoff } : {}),
+      ...(compactionHandoff ? { [CodexResponsesCompaction.HEADER]: compactionHandoff } : {}),
     },
   }
 })

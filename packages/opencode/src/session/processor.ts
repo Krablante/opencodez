@@ -25,7 +25,7 @@ import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
-import { OpenCodezResponsesAttempt } from "@/opencodez/responses-attempt"
+import { CodexResponsesAttempt } from "@/opencodez/codex-responses/attempt"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
@@ -120,7 +120,7 @@ const layer = Layer.effect(
         producedDurableOutput: false,
       }
       let aborted = false
-      const attempt = OpenCodezResponsesAttempt.create()
+      const attempt = CodexResponsesAttempt.create()
 
       const parse = (e: unknown) =>
         MessageV2.fromError(e, {

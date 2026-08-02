@@ -24,9 +24,10 @@ import { buildPrompt } from "@opencode-ai/core/session/compaction"
 import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
 import { Auth } from "@/auth"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
-import { OpenCodezResponsesCompact } from "@/opencodez/responses-compact"
-import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
-import { OpenCodezResponsesModel } from "@/opencodez/responses-model"
+import { CodexResponsesCompact } from "@/opencodez/codex-responses/compact"
+import { CodexResponsesCompaction } from "@/opencodez/codex-responses/compaction"
+import { CodexResponsesCatalog } from "@/opencodez/codex-responses/catalog"
+import { CodexResponsesProtocol } from "@/opencodez/codex-responses/protocol"
 import { SystemPrompt } from "./system"
 import { Usage } from "@opencode-ai/llm"
 import type { TaskPromptOps } from "@/tool/task"
@@ -215,7 +216,10 @@ const layer = Layer.effect(
       const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
       let limit: number | undefined
       if (input.model.providerID === "openai" && authInfo?.type === "oauth") {
-        const profile = OpenCodezResponsesModel.resolve(input.model)
+        const profile = CodexResponsesCatalog.resolve(
+          input.model,
+          CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access),
+        )
         limit = OpenCodezSettings.responsesCompactionLimit(
           cfg,
           input.model.limit,
@@ -236,12 +240,16 @@ const layer = Layer.effect(
       messages: SessionV1.WithParts[]
       model: Provider.Model
     }) {
-      const context = OpenCodezResponsesCompaction.latest(input.messages)
-      const compHash = OpenCodezResponsesModel.resolve(input.model)?.compHash
-      if (!context || !compHash) return false
-      if (context.compHash === compHash) return false
+      const context = CodexResponsesCompaction.latest(input.messages)
+      if (!context) return false
       if (input.model.providerID !== "openai") return false
-      return (yield* auth.get(input.model.providerID).pipe(Effect.orDie))?.type === "oauth"
+      const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
+      if (authInfo?.type !== "oauth") return false
+      const compHash = CodexResponsesCatalog.resolve(
+        input.model,
+        CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access),
+      )?.compHash
+      return !!compHash && context.compHash !== compHash
     })
 
     const estimate = Effect.fn("SessionCompaction.estimate")(function* (input: {
@@ -573,8 +581,13 @@ const layer = Layer.effect(
         .pipe(Effect.orDie)
       const authInfo = yield* auth.get(userMessage.model.providerID).pipe(Effect.orDie)
       const remote = sourceModel.providerID === "openai" && authInfo?.type === "oauth"
+      const accountKey =
+        authInfo?.type === "oauth" ? CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access) : undefined
+      const profile = accountKey ? CodexResponsesCatalog.resolve(sourceModel, accountKey) : undefined
+      const previousCompaction = CodexResponsesCompaction.latest(history)
 
       if (remote) {
+        if (!accountKey) throw new Error("OpenAI remote compaction requires a verified ChatGPT account identity")
         if (!compactionPart) throw new Error(`Missing compaction part for ${input.parentID}`)
         if (!input.promptOps) throw new Error(`Missing prompt operations for remote compaction ${input.parentID}`)
         const promptOps = input.promptOps
@@ -626,7 +639,7 @@ const layer = Layer.effect(
           const requestAgent = yield* agents.get(requestUser.agent)
           if (!requestAgent) throw new Error(`Agent not found for compaction: ${requestUser.agent}`)
           const sessionInfo = yield* session.get(input.sessionID).pipe(Effect.orDie)
-          const active = OpenCodezResponsesCompaction.tail(history)
+          const active = CodexResponsesCompaction.tail(history)
           const providerInfo = yield* provider.getProvider(sourceModel.providerID)
           const snapshot = input.prepared
           const prepared = snapshot
@@ -661,7 +674,7 @@ const layer = Layer.effect(
                   turnID: phase === "mid-turn" ? turnID : undefined,
                   sessionID: input.sessionID,
                   parentSessionID: sessionInfo.parentID,
-                  sessionMetadata: OpenCodezResponsesCompaction.withMetadata(sessionInfo.metadata, history),
+                  sessionMetadata: CodexResponsesCompaction.withMetadata(sessionInfo.metadata, history),
                   model: sourceModel,
                   agent: requestAgent,
                   permission: sessionInfo.permission,
@@ -677,7 +690,7 @@ const layer = Layer.effect(
                   allowCompHashMismatch: true,
                 })
               })
-          return yield* OpenCodezResponsesCompact.compact({
+          return yield* CodexResponsesCompact.compact({
             model: sourceModel,
             provider: providerInfo,
             system: prepared.system,
@@ -686,7 +699,22 @@ const layer = Layer.effect(
             options: prepared.params.options,
             items: active.items,
             sessionID: input.sessionID,
+            accountKey,
+            windowID: previousCompaction?.messageID ?? input.sessionID,
             turnID: phase === "mid-turn" ? turnID : undefined,
+            compaction: {
+              trigger: input.auto ? "auto" : "manual",
+              reason:
+                input.auto &&
+                previousCompaction?.compHash &&
+                profile?.compHash &&
+                profile.compHash !== previousCompaction.compHash
+                  ? "comp_hash_changed"
+                  : input.auto
+                    ? "context_limit"
+                    : "user_requested",
+              phase: phase === "pre-turn" ? "pre_turn" : phase === "mid-turn" ? "mid_turn" : "standalone_turn",
+            },
             preserveActiveToolMedia: phase === "mid-turn",
             abort: input.abort ?? AbortSignal.timeout(REMOTE_COMPACTION_TIMEOUT_MS),
           })
@@ -735,11 +763,8 @@ const layer = Layer.effect(
             providerID: "openai",
             items: compacted.value.items,
             model_id: sourceModel.api.id,
-            account_key:
-              authInfo?.type === "oauth"
-                ? OpenCodezResponsesCompaction.accountKey(authInfo.accountId, authInfo.access)
-                : undefined,
-            comp_hash: OpenCodezResponsesModel.resolve(sourceModel)?.compHash,
+            account_key: accountKey,
+            comp_hash: profile?.compHash,
           },
         })
         const usage = Session.getUsage({

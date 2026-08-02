@@ -1,15 +1,22 @@
-import { OpenCodezResponsesCompaction } from "./responses-compaction"
-import { OpenCodezResponsesModel } from "./responses-model"
+import { CodexResponsesCompaction } from "./compaction"
+import { CodexResponsesCatalog } from "./catalog"
+import { CodexResponsesProtocol } from "./protocol"
 
-export function lower(body: BodyInit | null | undefined, handoff: string | undefined, responsesLiteEnabled: boolean) {
+export function lower(
+  body: BodyInit | null | undefined,
+  handoff: string | undefined,
+  responsesLiteEnabled: boolean,
+  headers: Headers,
+  accountKey?: string,
+) {
   if (typeof body !== "string") throw new Error("OpenAI Responses request body must be JSON text")
   const value: unknown = JSON.parse(body)
   if (!isRecord(value) || !Array.isArray(value.input)) throw new Error("OpenAI Responses input must be an array")
 
-  const profile = typeof value.model === "string" ? OpenCodezResponsesModel.resolveID(value.model) : undefined
+  const profile = typeof value.model === "string" ? CodexResponsesCatalog.resolveID(value.model, accountKey) : undefined
   const responsesLite = responsesLiteEnabled && profile?.responsesLite === true
   const input = responsesLite ? liteInput(value.input, value.tools, value.instructions) : value.input
-  const context = handoff ? OpenCodezResponsesCompaction.consume(handoff) : undefined
+  const context = handoff ? CodexResponsesCompaction.consume(handoff) : undefined
   if (context && profile?.compHash && context.compHash !== profile.compHash) {
     throw new Error("This session's OpenAI compacted state belongs to an older backend snapshot")
   }
@@ -22,10 +29,10 @@ export function lower(body: BodyInit | null | undefined, handoff: string | undef
     result.reasoning = { ...(isRecord(result.reasoning) ? result.reasoning : {}), context: "all_turns" }
     result.client_metadata = {
       ...(isRecord(result.client_metadata) ? result.client_metadata : {}),
-      [OpenCodezResponsesModel.RESPONSES_LITE_METADATA]: "true",
+      [CodexResponsesCatalog.RESPONSES_LITE_METADATA]: "true",
     }
   }
-  return { body: JSON.stringify(result), responsesLite }
+  return { body: JSON.stringify(CodexResponsesProtocol.enrich(result, headers)), responsesLite }
 }
 
 function liteInput(input: unknown[], tools: unknown, instructions: unknown) {
@@ -61,9 +68,7 @@ function isContinueMarker(value: unknown) {
   if (!isRecord(value) || value.role !== "user" || !Array.isArray(value.content) || value.content.length !== 1)
     return false
   const content = value.content[0]
-  return (
-    isRecord(content) && content.type === "input_text" && content.text === OpenCodezResponsesCompaction.CONTINUE_MARKER
-  )
+  return isRecord(content) && content.type === "input_text" && content.text === CodexResponsesCompaction.CONTINUE_MARKER
 }
 
 function stripImageDetails(value: unknown): void {
@@ -80,4 +85,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
 }
 
-export * as OpenCodezResponsesRequest from "./responses-request"
+export * as CodexResponsesRequest from "./request"

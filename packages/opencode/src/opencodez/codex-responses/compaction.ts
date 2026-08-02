@@ -6,6 +6,7 @@ export const CONTINUE_MARKER = "__OPENCODEZ_REMOTE_COMPACTION_CONTINUE__"
 
 type Context = {
   items: unknown[]
+  windowID?: string
   modelID?: string
   accountKey?: string
   compHash?: string
@@ -26,6 +27,7 @@ export function latest(messages: readonly SessionV1.WithParts[]) {
     return {
       index,
       messageID: message.info.id,
+      windowID: message.info.id,
       items: part.remote.items,
       modelID: part.remote.model_id,
       accountKey: part.remote.account_key,
@@ -56,6 +58,7 @@ export function withMetadata(metadata: Record<string, unknown> | undefined, mess
     ...metadata,
     [METADATA_KEY]: {
       items: context.items,
+      windowID: context.windowID,
       modelID: context.modelID,
       accountKey: context.accountKey,
       compHash: context.compHash,
@@ -65,7 +68,8 @@ export function withMetadata(metadata: Record<string, unknown> | undefined, mess
 
 export function handoff(metadata: Record<string, unknown> | undefined) {
   const value = metadata?.[METADATA_KEY]
-  if (!isContext(value)) return undefined
+  if (value === undefined) return undefined
+  if (!isContext(value)) throw new Error("This session's OpenAI compacted state is malformed")
   pruneHandoffs()
   while (handoffs.size >= HANDOFF_LIMIT) {
     const oldest = handoffs.keys().next().value
@@ -78,7 +82,12 @@ export function handoff(metadata: Record<string, unknown> | undefined) {
 }
 
 export function has(metadata: Record<string, unknown> | undefined) {
-  return isContext(metadata?.[METADATA_KEY])
+  return metadata?.[METADATA_KEY] !== undefined
+}
+
+export function windowID(metadata: Record<string, unknown> | undefined, fallback: string) {
+  const context = metadata?.[METADATA_KEY]
+  return isContext(context) ? (context.windowID ?? fallback) : fallback
 }
 
 export function consume(id: string) {
@@ -97,32 +106,16 @@ function pruneHandoffs() {
   }
 }
 
-export function accountIdentity(accountID: string | undefined, accessToken?: string) {
-  if (accountID) return accountID
-  const payload = accessToken?.split(".")[1]
-  if (!payload) return undefined
-  try {
-    const claims: unknown = JSON.parse(Buffer.from(payload, "base64url").toString())
-    return claims && typeof claims === "object" && "sub" in claims && typeof claims.sub === "string"
-      ? claims.sub
-      : undefined
-  } catch {
-    return undefined
-  }
-}
-
-export function accountKey(accountID: string | undefined, accessToken?: string) {
-  const identity = accountIdentity(accountID, accessToken)
-  if (!identity) return undefined
-  return new Bun.CryptoHasher("sha256").update(identity).digest("hex")
-}
-
 export function compatibilityError(
   metadata: Record<string, unknown> | undefined,
   input: { modelID: string; accountKey?: string; compHash?: string; allowCompHashMismatch?: boolean },
 ): string | undefined {
   const context = metadata?.[METADATA_KEY]
-  if (!isContext(context)) return undefined
+  if (context === undefined) return undefined
+  if (!isContext(context)) return "This session's OpenAI compacted state is malformed"
+  if (!context.accountKey || !input.accountKey) {
+    return "This session's OpenAI compacted state cannot be continued without a verified ChatGPT account identity"
+  }
   if (
     !input.allowCompHashMismatch &&
     context.modelID &&
@@ -154,12 +147,41 @@ export function repeatedOverflow(messages: readonly SessionV1.WithParts[], turnI
   )
 }
 
+export function isOpaqueItem(value: unknown): value is Record<string, unknown> {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "type" in value &&
+    (value.type === "compaction" || value.type === "compaction_summary") &&
+    "encrypted_content" in value &&
+    typeof value.encrypted_content === "string" &&
+    value.encrypted_content.length > 0
+  )
+}
+
 function isContext(value: unknown): value is Context {
   if (!value || typeof value !== "object") return false
   if (!("items" in value) || !Array.isArray(value.items)) return false
+  if (value.items.filter(isOpaqueItem).length !== 1) return false
+  if (
+    value.items.some(
+      (item) =>
+        !isOpaqueItem(item) &&
+        (!item ||
+          typeof item !== "object" ||
+          Array.isArray(item) ||
+          !("type" in item) ||
+          item.type !== "message" ||
+          !("role" in item) ||
+          item.role !== "user"),
+    )
+  )
+    return false
   if ("modelID" in value && value.modelID !== undefined && typeof value.modelID !== "string") return false
+  if ("windowID" in value && value.windowID !== undefined && typeof value.windowID !== "string") return false
   if ("accountKey" in value && value.accountKey !== undefined && typeof value.accountKey !== "string") return false
   return !("compHash" in value) || value.compHash === undefined || typeof value.compHash === "string"
 }
 
-export * as OpenCodezResponsesCompaction from "./responses-compaction"
+export * as CodexResponsesCompaction from "./compaction"

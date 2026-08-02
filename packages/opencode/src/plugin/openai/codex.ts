@@ -4,12 +4,13 @@ import { OAUTH_DUMMY_KEY } from "../../auth"
 import os from "os"
 import { setTimeout as sleep } from "node:timers/promises"
 import { createServer } from "http"
-import { OpenAIWebSocketPool } from "./ws-pool"
+import { CodexResponsesTransport } from "@/opencodez/codex-responses/transport"
 import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
-import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
-import { OpenCodezResponsesModel } from "@/opencodez/responses-model"
-import { OpenCodezResponsesRequest } from "@/opencodez/responses-request"
+import { CodexResponsesCompaction } from "@/opencodez/codex-responses/compaction"
+import { CodexResponsesCatalog } from "@/opencodez/codex-responses/catalog"
+import { CodexResponsesRequest } from "@/opencodez/codex-responses/request"
+import { CodexResponsesProtocol } from "@/opencodez/codex-responses/protocol"
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 const ISSUER = "https://auth.openai.com"
@@ -265,7 +266,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
   const codexApiEndpoint = options.codexApiEndpoint ?? CODEX_API_ENDPOINT
   let websocketFetchInstalled = false
   let responsesWire: "legacy" | "codex" = "codex"
-  const websocketFetches: Array<ReturnType<typeof OpenAIWebSocketPool.createWebSocketFetch>> = []
+  const websocketFetches: Array<ReturnType<typeof CodexResponsesTransport.createWebSocketFetch>> = []
 
   return {
     async config(config) {
@@ -318,7 +319,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               },
             ]),
         )
-        return OpenCodezResponsesModel.initialize(models, {
+        return CodexResponsesCatalog.initialize(models, {
           auth: ctx.auth,
           endpoint: codexApiEndpoint,
         })
@@ -331,14 +332,15 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
         const codexWire = auth.type === "oauth" && responsesWire === "codex"
         const websocketFetch =
           options.experimentalWebSockets || codexWire
-            ? OpenAIWebSocketPool.createWebSocketFetch({
+            ? CodexResponsesTransport.createWebSocketFetch({
                 httpFetch: fetch,
                 wire: codexWire ? "codex" : "legacy",
-                onModelsEtag(etag) {
-                  if (!OpenCodezResponsesModel.observeEtag(etag)) return
+                onModelsEtag(etag, accountKey) {
                   void getAuth().then((value) => {
                     if (value.type !== "oauth") return
-                    void OpenCodezResponsesModel.refresh({ auth: value, endpoint: codexApiEndpoint, force: true })
+                    if (CodexResponsesProtocol.accountKey(value.accountId, value.access) !== accountKey) return
+                    if (!CodexResponsesCatalog.observeEtag(etag, accountKey)) return
+                    void CodexResponsesCatalog.refresh({ auth: value, endpoint: codexApiEndpoint, force: true })
                   })
                 },
               })
@@ -376,8 +378,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               return websocketFetch ? websocketFetch(requestInput, init) : fetch(requestInput, init)
 
             const authWithAccount = currentAuth as typeof currentAuth & { accountId?: string }
-
-            if (!currentAuth.access || currentAuth.expires < Date.now()) {
+            const refreshAuth = async () => {
               if (!refreshPromise) {
                 refreshPromise = refreshAccessToken(currentAuth.refresh, issuer)
                   .then(async (tokens) => {
@@ -401,8 +402,11 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                     refreshPromise = undefined
                   })
               }
+              return refreshPromise
+            }
 
-              const refreshed = await refreshPromise
+            if (!currentAuth.access || currentAuth.expires < Date.now()) {
+              const refreshed = await refreshAuth()
               currentAuth.access = refreshed.access
               authWithAccount.accountId = refreshed.accountId
             }
@@ -413,11 +417,11 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 init.headers.forEach((value, key) => headers.set(key, value))
               } else if (Array.isArray(init.headers)) {
                 for (const [key, value] of init.headers) {
-                  if (value !== undefined) headers.set(key, String(value))
+                  if (value !== undefined) headers.set(key, value)
                 }
               } else {
                 for (const [key, value] of Object.entries(init.headers)) {
-                  if (value !== undefined) headers.set(key, String(value))
+                  if (value !== undefined) headers.set(key, value)
                 }
               }
             }
@@ -427,11 +431,8 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
             if (authWithAccount.accountId) {
               headers.set("ChatGPT-Account-Id", authWithAccount.accountId)
             }
-            const accountAffinity = OpenCodezResponsesCompaction.accountIdentity(
-              authWithAccount.accountId,
-              currentAuth.access,
-            )
-            if (accountAffinity) headers.set(OpenAIWebSocketPool.ACCOUNT_AFFINITY_HEADER, accountAffinity)
+            const accountAffinity = CodexResponsesProtocol.accountKey(authWithAccount.accountId, currentAuth.access)
+            if (accountAffinity) headers.set(CodexResponsesTransport.ACCOUNT_AFFINITY_HEADER, accountAffinity)
 
             const parsed =
               requestInput instanceof URL
@@ -442,30 +443,57 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 ? new URL(codexApiEndpoint)
                 : parsed
 
-            if (parsed.pathname.endsWith("/responses") && OpenCodezResponsesModel.needsRefresh(currentAuth)) {
-              await OpenCodezResponsesModel.refresh({ auth: currentAuth, endpoint: codexApiEndpoint })
+            if (parsed.pathname.endsWith("/responses") && CodexResponsesCatalog.needsRefresh(currentAuth)) {
+              await CodexResponsesCatalog.refresh({ auth: currentAuth, endpoint: codexApiEndpoint })
             }
 
-            const handoff = headers.get(OpenCodezResponsesCompaction.HEADER) ?? undefined
-            headers.delete(OpenCodezResponsesCompaction.HEADER)
+            const handoff = headers.get(CodexResponsesCompaction.HEADER) ?? undefined
+            headers.delete(CodexResponsesCompaction.HEADER)
 
             const lowered = parsed.pathname.endsWith("/responses")
-              ? OpenCodezResponsesRequest.lower(init?.body, handoff, codexWire)
+              ? CodexResponsesRequest.lower(
+                  init?.body,
+                  handoff,
+                  codexWire,
+                  headers,
+                  CodexResponsesProtocol.accountKey(authWithAccount.accountId, currentAuth.access),
+                )
               : undefined
-            if (lowered?.responsesLite) headers.set(OpenCodezResponsesModel.RESPONSES_LITE_HEADER, "true")
+            if (lowered?.responsesLite) headers.set(CodexResponsesCatalog.RESPONSES_LITE_HEADER, "true")
 
             const requestInit = {
               ...init,
               body: lowered?.body ?? init?.body,
               headers,
             }
-            const response =
+            let response =
               websocketFetch && parsed.pathname.endsWith("/responses")
                 ? await websocketFetch(url, requestInit)
-                : await fetch(url, OpenAIWebSocketPool.withoutInternalHeaders(requestInit))
+                : await fetch(url, CodexResponsesTransport.withoutInternalHeaders(requestInit))
+            if (response.status === 401) {
+              await response.body?.cancel().catch(() => {})
+              const refreshed = await refreshAuth()
+              currentAuth.access = refreshed.access
+              authWithAccount.accountId = refreshed.accountId
+              headers.set("authorization", `Bearer ${refreshed.access}`)
+              if (refreshed.accountId) headers.set("ChatGPT-Account-Id", refreshed.accountId)
+              if (!refreshed.accountId) headers.delete("ChatGPT-Account-Id")
+              const affinity = CodexResponsesProtocol.accountKey(authWithAccount.accountId, currentAuth.access)
+              if (affinity) headers.set(CodexResponsesTransport.ACCOUNT_AFFINITY_HEADER, affinity)
+              if (!affinity) headers.delete(CodexResponsesTransport.ACCOUNT_AFFINITY_HEADER)
+              response =
+                websocketFetch && parsed.pathname.endsWith("/responses")
+                  ? await websocketFetch(url, requestInit)
+                  : await fetch(url, CodexResponsesTransport.withoutInternalHeaders(requestInit))
+            }
             const modelsEtag = response.headers.get("x-models-etag") ?? undefined
-            if (OpenCodezResponsesModel.observeEtag(modelsEtag)) {
-              void OpenCodezResponsesModel.refresh({
+            if (
+              CodexResponsesCatalog.observeEtag(
+                modelsEtag,
+                CodexResponsesProtocol.accountKey(authWithAccount.accountId, currentAuth.access),
+              )
+            ) {
+              void CodexResponsesCatalog.refresh({
                 auth: currentAuth,
                 endpoint: codexApiEndpoint,
                 force: true,
@@ -603,7 +631,8 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
       // Temporary fetch-layer hack: title generation currently shares the conversation
       // session ID, so the OpenAI plugin marks it for HTTP fallback until transport
       // context can be passed directly instead of smuggled through headers.
-      if (websocketFetchInstalled && input.agent === "title") output.headers[OpenAIWebSocketPool.TITLE_HEADER] = "true"
+      if (websocketFetchInstalled && input.agent === "title")
+        output.headers[CodexResponsesTransport.TITLE_HEADER] = "true"
     },
     "chat.params": async (input, output) => {
       if (input.model.providerID !== "openai") return

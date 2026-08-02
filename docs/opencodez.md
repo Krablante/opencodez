@@ -380,32 +380,44 @@ OpenCodez config boundary:
   ChatGPT OAuth, supplies the Codex product originator required by Fast routing,
   lowers the authenticated request once, and leaves API-key OpenAI access and
   other providers unchanged.
-- `packages/opencode/src/opencodez/responses-model.ts` owns one bounded model
-  catalog, refreshes it every five minutes or when `x-models-etag` changes, and
-  falls back briefly to known profiles after a failed refresh.
-- `packages/opencode/src/opencodez/responses-request.ts` is the single raw
-  request boundary for Responses Lite shaping, persisted-state injection, and
-  removal of the internal continuation marker.
-- `packages/opencode/src/plugin/openai/responses-wire.ts` owns prefix matching,
-  response item normalization, `previous_response_id`, and continuation
-  invalidation.
-- `packages/opencode/src/opencodez/responses-compact.ts` builds the canonical
-  V2 trigger request with the existing Responses lowering, bounds only
-  oversized tool output, validates the streamed compaction result, and installs
-  bounded retained user context.
-- `packages/opencode/src/opencodez/responses-compaction.ts` finds persisted
-  compaction items without writing a second state store and checks
-  model/account/backend-snapshot compatibility. A random one-shot handoff moves
-  that durable context across the AI SDK request boundary; it expires after one
+- `packages/opencode/src/opencodez/codex-responses/` is the complete
+  ChatGPT-OAuth subsystem. It has no background worker or second durable store,
+  and no other provider imports it.
+- `protocol.ts` creates one canonical Codex metadata snapshot for each request:
+  installation, session/thread, logical turn, compacted window, request kind,
+  and compaction phase. It places that snapshot in
+  `client_metadata["x-codex-turn-metadata"]` and derives the compatible HTTP/WS
+  projections from the same value. Server control metadata stays on the stream;
+  only turn state mutates the active transport lane and only model ETag mutates
+  the matching account catalog.
+- `catalog.ts` owns an eight-account least-recently-used catalog map. Each
+  account has an independent five-minute cache and in-flight refresh; a missing
+  verified identity uses an uncached request and cannot create reusable state.
+- `request.ts` is the single raw request boundary for metadata, Responses Lite
+  shaping, persisted-state injection, and removal of the internal continuation
+  marker.
+- `continuation.ts` owns prefix matching, response item normalization,
+  `previous_response_id`, and continuation invalidation.
+- `compact.ts` builds the canonical V2 trigger request with the existing
+  Responses lowering, bounds only oversized tool output, requires exactly one
+  completed `compaction`/`compaction_summary` item with encrypted content, and
+  installs bounded retained user context.
+- `compaction.ts` finds persisted compaction items without writing a second
+  state store and checks model/account/backend-snapshot compatibility. Unknown
+  current or persisted account identity fails closed. A random one-shot handoff
+  moves durable context across the AI SDK request boundary; it expires after one
   minute and the process retains at most 128 handoffs. Direct mid-turn
   continuation uses one internal non-network marker to satisfy the AI SDK's
   non-empty prompt validation; the request adapter removes it before network I/O.
-- `packages/opencode/src/opencodez/responses-attempt.ts` is the lightweight
+- `attempt.ts` owns request kinds, bounded retry policy, and the lightweight
   sampling-attempt journal. It records only part IDs, permits rollback before a
-  tool-call side-effect barrier, and leaves non-Codex providers unchanged.
-- `packages/opencode/src/opencodez/responses-policy.ts` owns request kinds and
-  derives the complete WebSocket-plus-HTTP retry budgets from one per-transport
-  limit so sampling and compaction cannot multiply nested policies.
+  tool-call side-effect barrier, and prevents nested WebSocket-plus-HTTP retry
+  multiplication.
+- `transport.ts` owns one continuation per session-and-account lane, the
+  turn-scoped sticky-routing token, finite fallback state, and the single
+  full-request recovery for an unavailable previous response. A 426 upgrade
+  response selects HTTP immediately; a 401 returns to the OAuth owner for one
+  token refresh and one safe pre-output replay.
 - `packages/opencode/src/session/model-context.ts` is the shared preparation
   boundary for effective System context, transformed history, and model-visible
   tools used by both sampling and compact requests. The active runner retains
@@ -415,11 +427,8 @@ OpenCodez config boundary:
   durable-output decision, while `packages/opencode/src/session/compaction.ts`
   owns pre-turn replay, complete mid-turn history, and the pending-input
   boundary through the first post-compact continuation.
-- `packages/opencode/src/plugin/openai/ws-pool.ts` owns one continuation per
-  session-and-account-affine socket, the turn-scoped sticky-routing token, and
-  the single full-request recovery for an unavailable previous response. The
-  pool retains at most 256 session entries; transport fallback remains sticky
-  until explicit removal or bounded eviction.
+- The transport pool retains at most 256 session entries; transport fallback
+  remains sticky until explicit removal or bounded eviction.
   Continuation resets on reconnect, login change, abort, failure, or concurrent
   HTTP fallback; sticky routing is accepted from metadata events, HTTP response
   headers, and WebSocket upgrade headers on runtimes that expose them, then
@@ -505,14 +514,14 @@ packages/core/src/filesystem/search.ts
 packages/opencode/src/opencodez/prompt-library.ts
 packages/opencode/src/opencodez/default-prompts/
 packages/opencode/src/plugin/openai/codex.ts
-packages/opencode/src/opencodez/responses-attempt.ts
-packages/opencode/src/opencodez/responses-compact.ts
-packages/opencode/src/opencodez/responses-compaction.ts
-packages/opencode/src/opencodez/responses-model.ts
-packages/opencode/src/opencodez/responses-policy.ts
-packages/opencode/src/opencodez/responses-request.ts
-packages/opencode/src/plugin/openai/responses-wire.ts
-packages/opencode/src/plugin/openai/ws-pool.ts
+packages/opencode/src/opencodez/codex-responses/attempt.ts
+packages/opencode/src/opencodez/codex-responses/catalog.ts
+packages/opencode/src/opencodez/codex-responses/compact.ts
+packages/opencode/src/opencodez/codex-responses/compaction.ts
+packages/opencode/src/opencodez/codex-responses/continuation.ts
+packages/opencode/src/opencodez/codex-responses/protocol.ts
+packages/opencode/src/opencodez/codex-responses/request.ts
+packages/opencode/src/opencodez/codex-responses/transport.ts
 packages/opencode/src/plugin/openai/ws.ts
 packages/opencode/src/session/llm/request.ts
 packages/opencode/src/server/routes/instance/httpapi/groups/opencodez.ts

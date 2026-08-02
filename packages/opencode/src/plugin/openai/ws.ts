@@ -2,6 +2,7 @@
 // fallback, and continuation state intentionally live above this file.
 
 import WebSocket from "ws"
+import type { IncomingMessage } from "node:http"
 import { APICallError } from "ai"
 import { ProviderError } from "@/provider/error"
 import { errorMessage } from "@/util/error"
@@ -43,6 +44,16 @@ export interface WrappedError {
   body: string
 }
 
+export class UpgradeResponseError extends Error {
+  constructor(
+    readonly status: number,
+    readonly headers: Record<string, string>,
+    readonly body: string,
+  ) {
+    super(`WebSocket upgrade failed (${status})`)
+  }
+}
+
 export function toWebSocketUrl(url: string) {
   return url.replace(/^http/, "ws")
 }
@@ -73,6 +84,18 @@ export function normalizeHeaders(headers: HeadersInit | undefined): Record<strin
 
 export function isAbortError(error: unknown): error is DOMException {
   return error instanceof DOMException && error.name === "AbortError"
+}
+
+export function upgradeResponse(error: unknown) {
+  return error instanceof UpgradeResponseError ? error : undefined
+}
+
+export function isOpaqueUpgradeRejection(error: unknown) {
+  return (
+    typeof Bun !== "undefined" &&
+    error instanceof Error &&
+    error.message.toLowerCase().includes("expected 101 status code")
+  )
 }
 
 export function connectResponsesWebSocket(options: ConnectResponsesWebSocketOptions) {
@@ -114,6 +137,7 @@ export function connectResponsesWebSocket(options: ConnectResponsesWebSocketOpti
       if (supportsUpgradeHeaders) socket.off("upgrade", onUpgrade)
       socket.off("error", onError)
       socket.off("close", onClose)
+      if (supportsUpgradeHeaders) socket.off("unexpected-response", onUnexpectedResponse)
       options.signal?.removeEventListener("abort", onAbort)
     }
 
@@ -147,6 +171,23 @@ export function connectResponsesWebSocket(options: ConnectResponsesWebSocketOpti
       reject(new Error(closeMessage("WebSocket closed before open", code, reason)))
     }
 
+    function onUnexpectedResponse(_request: unknown, response: IncomingMessage) {
+      const headers = Object.fromEntries(
+        Object.entries(response.headers).flatMap(([key, value]) =>
+          typeof value === "string"
+            ? [[key.toLowerCase(), value]]
+            : Array.isArray(value)
+              ? [[key.toLowerCase(), value.join(", ")]]
+              : [],
+        ),
+      )
+      cleanup()
+      response.resume()
+      socket.on("error", () => {})
+      socket.terminate()
+      reject(new UpgradeResponseError(response.statusCode ?? 500, headers, response.statusMessage ?? ""))
+    }
+
     function onAbort() {
       cleanup()
       socket.on("error", () => {})
@@ -158,6 +199,7 @@ export function connectResponsesWebSocket(options: ConnectResponsesWebSocketOpti
     if (supportsUpgradeHeaders) socket.once("upgrade", onUpgrade)
     socket.once("error", onError)
     socket.once("close", onClose)
+    if (supportsUpgradeHeaders) socket.once("unexpected-response", onUnexpectedResponse)
     options.signal?.addEventListener("abort", onAbort, { once: true })
   })
 }
