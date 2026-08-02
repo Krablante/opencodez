@@ -45,6 +45,14 @@ export const defaults = {
     "gpt-5.6-terra": "codex_gpt_5_6_luna_terra",
     "gpt-5.6-sol": "codex_gpt_5_6_sol",
   },
+  compHash: {
+    "gpt-5.4": "2911",
+    "gpt-5.4-mini": "2911",
+    "gpt-5.5": "2911",
+    "gpt-5.6-luna": "3000",
+    "gpt-5.6-terra": "3000",
+    "gpt-5.6-sol": "3000",
+  },
 }
 
 export function defaultSystem(config: ConfigLike | undefined, model: ModelLike | undefined) {
@@ -81,6 +89,10 @@ export function responsesCompactionContext(model: { input?: number; context: num
 
 export function responsesCompactionPayloadLimit(model: { input?: number; context: number }) {
   return Math.floor(responsesCompactionContext(model) * defaults.compaction.threshold)
+}
+
+export function responsesCompHash(model: ModelLike | undefined) {
+  return resolveModelMapping(defaults.compHash, model)
 }
 
 function resolveModelMapping(mapping: Record<string, string>, model: ModelLike | undefined) {

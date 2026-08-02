@@ -7,6 +7,7 @@ import { Token } from "@/util/token"
 import type { ModelMessage, Tool } from "ai"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 import { OpenAIWebSocketPool } from "@/plugin/openai/ws-pool"
+import { OpenCodezResponsesPolicy } from "./responses-policy"
 
 export type Result = {
   items: Record<string, unknown>[]
@@ -26,7 +27,6 @@ const TRUNCATED_OUTPUT = "Output exceeded the available model context and was tr
 const IMAGE_INPUT_TOKENS = 1_844
 const ORIGINAL_IMAGE_MAX_TOKENS = 10_000
 const RETAINED_MESSAGE_TOKEN_BUDGET = 64_000
-const COMPACTION_STREAM_RETRIES = 2
 
 function toCompactInput(input: {
   model: Provider.Model
@@ -97,6 +97,7 @@ export function compact(input: {
             "content-type": "application/json",
             "x-session-affinity": input.sessionID,
             ...(input.turnID ? { [OpenAIWebSocketPool.TURN_ID_HEADER]: input.turnID } : {}),
+            [OpenCodezResponsesPolicy.REQUEST_KIND_HEADER]: "compaction",
           },
           body: JSON.stringify(request),
           signal: AbortSignal.any([signal, input.abort]),
@@ -108,8 +109,7 @@ export function compact(input: {
               response.status === 429 || response.status >= 500,
             )
           }
-          const stream = await response.text()
-          return parseCompactionStream(stream, request.input)
+          return parseCompactionResponse(response, request.input)
         }),
       catch: (cause) =>
         cause instanceof RemoteCompactionError
@@ -121,7 +121,7 @@ export function compact(input: {
             ),
     }).pipe(
       Effect.retry({
-        times: COMPACTION_STREAM_RETRIES,
+        times: OpenCodezResponsesPolicy.streamRetryLimit("compaction"),
         schedule: Schedule.exponential("500 millis"),
         while: (error) => error.retryable,
       }),
@@ -216,11 +216,6 @@ function rewriteOutput(item: Record<string, unknown>, preserveMedia: boolean) {
 export function estimateInput(value: unknown) {
   let estimate = Token.estimate(JSON.stringify(value))
   const visit = (item: unknown): void => {
-    if (typeof item === "string") {
-      const payload = inlineImagePayload(item)
-      if (payload) estimate = Math.max(0, estimate - Token.estimate(payload) + IMAGE_INPUT_TOKENS)
-      return
-    }
     if (Array.isArray(item)) {
       item.forEach(visit)
       return
@@ -261,46 +256,78 @@ function isSystemMessage(value: unknown) {
   return isRecord(value) && value.type === "message" && value.role === "system"
 }
 
-function parseCompactionStream(stream: string, input: unknown[]) {
-  const events = stream.split(/\r?\n\r?\n/).flatMap((block) => {
-    const data = block
-      .split(/\r?\n/)
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trimStart())
-      .join("\n")
-    if (!data || data === "[DONE]") return []
-    try {
-      const event: unknown = JSON.parse(data)
-      return isRecord(event) ? [event] : []
-    } catch (cause) {
-      throw new RemoteCompactionError("OpenAI remote compaction returned invalid event JSON", false, { cause })
+async function parseCompactionResponse(response: Response, input: unknown[]) {
+  if (!response.body) throw new RemoteCompactionError("OpenAI remote compaction returned an empty stream", true)
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const output: Record<string, unknown>[] = []
+  let completed: Record<string, unknown> | undefined
+  let buffer = ""
+
+  const consume = (event: Record<string, unknown>) => {
+    if (
+      ["error", "response.failed", "response.incomplete"].includes(typeof event.type === "string" ? event.type : "")
+    ) {
+      const error = isRecord(event.error)
+        ? event.error
+        : isRecord(event.response) && isRecord(event.response.error)
+          ? event.response.error
+          : undefined
+      const detail =
+        typeof error?.message === "string"
+          ? error.message
+          : typeof event.type === "string"
+            ? event.type
+            : "unknown error"
+      throw new RemoteCompactionError(
+        `OpenAI remote compaction failed: ${detail}`,
+        OpenCodezResponsesPolicy.retryableEvent(event),
+      )
     }
-  })
-  const failed = events.find((event) =>
-    ["error", "response.failed", "response.incomplete"].includes(typeof event.type === "string" ? event.type : ""),
-  )
-  if (failed) {
-    const detail =
-      isRecord(failed.error) && typeof failed.error.message === "string"
-        ? failed.error.message
-        : typeof failed.type === "string"
-          ? failed.type
-          : "unknown error"
-    throw new RemoteCompactionError(`OpenAI remote compaction failed: ${detail}`, false)
+    if (event.type === "response.output_item.done" && isCompactionItem(event.item)) output.push(event.item)
+    if (event.type === "response.completed" || event.type === "response.done") completed = event
   }
-  const output = events.flatMap((event) =>
-    event.type === "response.output_item.done" && isCompactionItem(event.item) ? [event.item] : [],
-  )
+
+  const drain = (final: boolean) => {
+    while (true) {
+      const separator = /\r?\n\r?\n/.exec(buffer)
+      if (!separator) break
+      const block = buffer.slice(0, separator.index)
+      buffer = buffer.slice(separator.index + separator[0].length)
+      const event = parseEvent(block)
+      if (event) consume(event)
+    }
+    if (!final || !buffer.trim()) return
+    const event = parseEvent(buffer)
+    buffer = ""
+    if (event) consume(event)
+  }
+
+  try {
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      buffer += decoder.decode(chunk.value, { stream: true })
+      drain(false)
+    }
+    buffer += decoder.decode()
+    drain(true)
+  } catch (cause) {
+    await reader.cancel(cause).catch(() => {})
+    throw cause
+  } finally {
+    reader.releaseLock()
+  }
+
   if (output.length !== 1) {
     throw new RemoteCompactionError(
       `OpenAI remote compaction expected exactly one compaction item, received ${output.length}`,
       false,
     )
   }
-  const completed = events.findLast((event) => event.type === "response.completed" || event.type === "response.done")
   if (!completed) throw new RemoteCompactionError("OpenAI remote compaction stream ended before completion", true)
-  const response = isRecord(completed.response) ? completed.response : {}
-  const usage = isRecord(response.usage) ? response.usage : {}
+  const payload = isRecord(completed.response) ? completed.response : {}
+  const usage = isRecord(payload.usage) ? payload.usage : {}
   const outputDetails = isRecord(usage.output_tokens_details) ? usage.output_tokens_details : {}
   return {
     items: [...retainUserMessages(input.slice(0, -1)), output[0]],
@@ -310,6 +337,21 @@ function parseCompactionStream(stream: string, input: unknown[]) {
       output: number(usage.output_tokens),
       reasoning: number(outputDetails.reasoning_tokens),
     },
+  }
+}
+
+function parseEvent(block: string) {
+  const data = block
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n")
+  if (!data || data === "[DONE]") return undefined
+  try {
+    const event: unknown = JSON.parse(data)
+    return isRecord(event) ? event : undefined
+  } catch (cause) {
+    throw new RemoteCompactionError("OpenAI remote compaction returned invalid event JSON", false, { cause })
   }
 }
 

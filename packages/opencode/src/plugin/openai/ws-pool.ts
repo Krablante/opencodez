@@ -3,6 +3,7 @@ import { ProviderError } from "@/provider/error"
 import { isRecord } from "@/util/record"
 import { Continuation, type Mode } from "./responses-wire"
 import { OpenAIWebSocket } from "./ws"
+import { OpenCodezResponsesPolicy } from "@/opencodez/responses-policy"
 
 export const TITLE_HEADER = "x-opencode-title"
 export const TURN_ID_HEADER = "x-opencodez-turn-id"
@@ -43,7 +44,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
   const connectTimeout = options?.connectTimeout ?? DEFAULT_CONNECT_TIMEOUT
   const idleTimeout = options?.idleTimeout ?? DEFAULT_IDLE_TIMEOUT
   const maxConnectionAge = options?.maxConnectionAge ?? DEFAULT_MAX_CONNECTION_AGE
-  const streamRetries = options?.streamRetries ?? 5
+  const streamRetries = options?.streamRetries ?? OpenCodezResponsesPolicy.streamRetryLimit("sampling")
   const pruneTimer = setInterval(() => prune(), Math.min(idleTimeout, 60_000))
   if (typeof pruneTimer === "object" && "unref" in pruneTimer && typeof pruneTimer.unref === "function") {
     pruneTimer.unref()
@@ -53,6 +54,10 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     const url = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url
     const internalHeaders = OpenAIWebSocket.normalizeHeaders(init?.headers)
     const httpInit = withoutInternalHeaders(init)
+    const requestStreamRetries =
+      OpenCodezResponsesPolicy.requestKind(internalHeaders) === "compaction"
+        ? OpenCodezResponsesPolicy.streamRetryLimit("compaction")
+        : streamRetries
 
     if (init?.method !== "POST" || !new URL(url).pathname.endsWith("/responses")) {
       return httpFetch(input, httpInit)
@@ -99,7 +104,11 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     }
     if (entry.busy) {
       entry.continuation.reset()
-      return httpFetch(input, httpInit)
+      if (turnID !== entry.turnID) {
+        entry.turnID = turnID
+        entry.turnState = undefined
+      }
+      return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
     }
     if (turnID !== entry.turnID) {
       entry.turnID = turnID
@@ -152,7 +161,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
           transaction?.fail()
           entry.busy = false
           entry.lastUsedAt = Date.now()
-          if (!entry.fallback) recordStreamFailure(entry)
+          if (!entry.fallback) recordStreamFailure(entry, requestStreamRetries)
           invalidate(entry)
           resolveFirstEvent(false)
         },
@@ -210,7 +219,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         throw error
       }
 
-      recordStreamFailure(entry)
+      recordStreamFailure(entry, requestStreamRetries)
       invalidate(entry)
       if (entry.fallback) return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
       return failedResponse(
@@ -221,17 +230,16 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     }
   }
 
-  function recordStreamFailure(entry: PoolEntry) {
+  function recordStreamFailure(entry: PoolEntry, retries: number) {
     entry.streamFailures++
     // Codex counts retries after the initial failed WebSocket attempt.
-    if (entry.streamFailures > streamRetries) entry.fallback = true
+    if (entry.streamFailures > retries) entry.fallback = true
   }
 
   function prune() {
     const now = Date.now()
     for (const [key, entry] of pool) {
       if (entry.busy) continue
-      if (entry.fallback) continue
       if (now - entry.lastUsedAt < idleTimeout) continue
       invalidate(entry)
       pool.delete(key)
@@ -287,6 +295,7 @@ async function fallbackFetch(
   entry: PoolEntry,
   turnID: string | undefined,
 ) {
+  entry.lastUsedAt = Date.now()
   const response = await fetcher(input, {
     ...init,
     headers: withTurnStateHeader(OpenAIWebSocket.normalizeHeaders(init?.headers), entry.turnState),
@@ -374,6 +383,7 @@ export function withoutInternalHeaders<T extends { headers?: HeadersInit }>(init
     headers.delete(TITLE_HEADER)
     headers.delete(TURN_ID_HEADER)
     headers.delete(ACCOUNT_AFFINITY_HEADER)
+    headers.delete(OpenCodezResponsesPolicy.REQUEST_KIND_HEADER)
     return { ...init, headers }
   }
 
@@ -384,7 +394,8 @@ export function withoutInternalHeaders<T extends { headers?: HeadersInit }>(init
         (item) =>
           item[0].toLowerCase() !== TITLE_HEADER &&
           item[0].toLowerCase() !== TURN_ID_HEADER &&
-          item[0].toLowerCase() !== ACCOUNT_AFFINITY_HEADER,
+          item[0].toLowerCase() !== ACCOUNT_AFFINITY_HEADER &&
+          item[0].toLowerCase() !== OpenCodezResponsesPolicy.REQUEST_KIND_HEADER,
       ),
     }
   }
@@ -396,7 +407,8 @@ export function withoutInternalHeaders<T extends { headers?: HeadersInit }>(init
         ([key]) =>
           key.toLowerCase() !== TITLE_HEADER &&
           key.toLowerCase() !== TURN_ID_HEADER &&
-          key.toLowerCase() !== ACCOUNT_AFFINITY_HEADER,
+          key.toLowerCase() !== ACCOUNT_AFFINITY_HEADER &&
+          key.toLowerCase() !== OpenCodezResponsesPolicy.REQUEST_KIND_HEADER,
       ),
     ),
   }

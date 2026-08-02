@@ -198,6 +198,7 @@ export const CompactionPart = Schema.Struct({
   auto: Schema.Boolean,
   phase: Schema.optional(Schema.Literals(["pre-turn", "mid-turn"])),
   turn_id: Schema.optional(MessageID),
+  replay_id: Schema.optional(MessageID),
   overflow: Schema.optional(Schema.Boolean),
   tail_start_id: Schema.optional(MessageID),
   remote: Schema.optional(
@@ -206,6 +207,7 @@ export const CompactionPart = Schema.Struct({
       items: Schema.mutable(Schema.Array(Schema.Unknown)),
       model_id: Schema.optional(Schema.String),
       account_key: Schema.optional(Schema.String),
+      comp_hash: Schema.optional(Schema.String),
     }),
   ),
 }).annotate({ identifier: "CompactionPart" })

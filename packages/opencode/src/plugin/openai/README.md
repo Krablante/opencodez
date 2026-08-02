@@ -46,16 +46,21 @@ routing requirement. API-key OpenAI requests do not pass through this adapter.
 
 ## Retries
 
-- Retry WebSocket stream/setup failures up to 5 times, then use HTTP for that session until the pool entry is idle-pruned.
+- Retry sampling WebSocket stream/setup failures up to 5 times, then use HTTP
+  until the session pool entry expires after its idle timeout. Compaction uses a
+  smaller two-retry transport budget.
 - `websocket_connection_limit_reached` consumes the same retry budget and HTTP fallback.
 - `previous_response_not_found` opens a fresh socket and retries the current
   canonical full request once without consuming the normal stream-failure
   budget. A repeated failure is returned normally.
 - A service/control event does not block `previous_response_not_found` recovery;
   only the first model-output event closes that safe retry window.
-- If a stream fails after OpenCode has persisted text, reasoning, or a tool
-  call, the session keeps that partial result and surfaces the failure instead
-  of replaying the request and duplicating output.
+- A Codex-wire attempt journals only the part IDs it creates. If transport fails
+  after partial text or reasoning, those incomplete parts are removed before
+  retry and the retry status remains visible through the normal session UI.
+  Once a tool call has been admitted, the attempt is irreversible: automatic
+  replay stops so a side effect cannot run twice. Other providers keep the
+  upstream partial-output policy.
 - OpenAI session retries are finite. The existing WebSocket-to-HTTP transition
   and the session-level policy share a seven-retry end-to-end ceiling.
 - Abort or cancel closes the socket.
@@ -122,8 +127,9 @@ to use upstream OpenCode policy.
 
 Automatic compaction persists an explicit phase. Pre-turn compaction excludes
 the pending user message from compact input and replays it once after success.
-If that exact replay still overflows, the session stops with a size error instead
-of entering another compact/replay cycle.
+The marker stores the exact replayed message ID; if that replay still overflows,
+the session stops with a size error instead of entering another compact/replay
+cycle.
 Mid-turn compaction includes the complete active turn—current user input,
 assistant work, tool calls, and tool results—and continues from the returned
 opaque state in the same model loop, without a synthetic continuation message or
@@ -142,3 +148,10 @@ so ordinary text can use the full safe window. If those eligible rewrites still
 cannot fit, the request fails locally instead of sending a predictably rejected
 payload. The durable history is not rewritten. A compaction stream retries
 transient failures at most twice; manual compaction does not auto-continue.
+
+Persisted opaque state records the source API model, account key, and Codex
+`comp_hash`. A known backend-snapshot change first refreshes that state through
+the same remote compaction path, then resumes the pending user turn. When the
+pinned Codex version changes, update the model-to-`comp_hash` table in
+`packages/core/src/opencodez/settings.ts` from its model metadata before rolling
+out the fork.

@@ -68,11 +68,11 @@ describe("plugin.codex", () => {
       expect(extractAccountIdFromClaims(claims)).toBe("acc-root")
     })
 
-    test("extracts from organizations array as fallback", () => {
+    test("does not mistake an organization for a ChatGPT account", () => {
       const claims: IdTokenClaims = {
         organizations: [{ id: "org-123" }, { id: "org-456" }],
       }
-      expect(extractAccountIdFromClaims(claims)).toBe("org-123")
+      expect(extractAccountIdFromClaims(claims)).toBeUndefined()
     })
 
     test("returns undefined when no accountId found", () => {

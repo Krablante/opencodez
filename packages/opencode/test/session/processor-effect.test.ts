@@ -226,6 +226,45 @@ const fragmentFailureLLM = Layer.succeed(
 const fragmentFailureEnv = LayerNode.compile(root, [...replacements, [LLM.node, fragmentFailureLLM]])
 const itFragmentFailure = testEffect(fragmentFailureEnv)
 
+let codexFragmentAttempt = 0
+const codexFragmentRetryLLM = Layer.succeed(
+  LLM.Service,
+  LLM.Service.of({
+    stream: (input) => {
+      input.onPrepared?.({
+        codexResponses: true,
+        system: input.system,
+        messages: input.messages,
+        tools: input.tools,
+        params: { options: {} },
+        messageTransformOptions: {},
+        headers: {},
+      })
+      codexFragmentAttempt++
+      if (codexFragmentAttempt === 1) {
+        return Stream.make(
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.reasoningStart({ id: "reasoning-1" }),
+          LLMEvent.reasoningDelta({ id: "reasoning-1", text: "discarded thinking" }),
+          LLMEvent.textStart({ id: "text-1" }),
+          LLMEvent.textDelta({ id: "text-1", text: "discarded partial" }),
+          LLMEvent.providerError({ message: "rate limit" }),
+        )
+      }
+      return Stream.make(
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.textStart({ id: "text-2" }),
+        LLMEvent.textDelta({ id: "text-2", text: "complete" }),
+        LLMEvent.textEnd({ id: "text-2" }),
+        LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+        LLMEvent.finish({ reason: "stop" }),
+      )
+    },
+  }),
+)
+const codexFragmentRetryEnv = LayerNode.compile(root, [...replacements, [LLM.node, codexFragmentRetryLLM]])
+const itCodexFragmentRetry = testEffect(codexFragmentRetryEnv)
+
 const boot = Effect.fn("test.boot")(function* () {
   const processors = yield* SessionProcessor.Service
   const session = yield* Session.Service
@@ -1061,6 +1100,54 @@ itFragmentFailure.live("session.processor effect tests retain partial legacy par
         expect(seen).toContain(MessageV2.Event.PartUpdated.type)
         expect(seen).toContain(Session.Event.Error.type)
         expect(seen.filter((type) => type.startsWith("session.next."))).toEqual([])
+      }),
+    { config: cfg },
+  ),
+)
+
+itCodexFragmentRetry.live("session.processor replaces an incomplete Codex attempt before retry", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        codexFragmentAttempt = 0
+        const { processors, session, provider } = yield* boot()
+        const events = yield* EventV2Bridge.Service
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "provider retry")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const seen: string[] = []
+        const off = yield* events.listen((event) => {
+          seen.push(event.type)
+          return Effect.void
+        })
+        const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+
+        expect(
+          yield* handle.process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies SessionV1.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "provider retry" }],
+            tools: {},
+          }),
+        ).toBe("continue")
+        yield* off
+
+        const parts = yield* MessageV2.parts(msg.id)
+        expect(parts.filter((part) => part.type === "text").map((part) => part.text)).toEqual(["complete"])
+        expect(parts.some((part) => part.type === "reasoning")).toBe(false)
+        expect(seen.filter((type) => type === SessionV1.Event.PartRemoved.type)).toHaveLength(3)
       }),
     { config: cfg },
   ),

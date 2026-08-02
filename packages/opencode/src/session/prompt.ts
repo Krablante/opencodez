@@ -60,6 +60,7 @@ import { SessionModelContext } from "./model-context"
 import { LLMEvent } from "@opencode-ai/llm"
 import { Token } from "@/util/token"
 import { LLMRequestPrep } from "./llm/request"
+import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1206,6 +1207,23 @@ const layer = Layer.effect(
               promptOps: yield* ops(),
             })
             if (result === "stop") break
+            continue
+          }
+
+          if (yield* compaction.needsRemoteRefresh({ messages: msgs, model })) {
+            yield* Effect.logInfo("refreshing remote compaction backend snapshot", {
+              "session.id": sessionID,
+              model: model.api.id,
+              compHash: OpenCodezSettings.responsesCompHash(model),
+            })
+            yield* compaction.create({
+              sessionID,
+              agent: lastUser.agent,
+              model: lastUser.model,
+              auto: true,
+              phase: "pre-turn",
+              turnID: activeTurnID,
+            })
             continue
           }
 

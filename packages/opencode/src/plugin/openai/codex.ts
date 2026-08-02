@@ -57,11 +57,7 @@ export function parseJwtClaims(token: string): IdTokenClaims | undefined {
 }
 
 export function extractAccountIdFromClaims(claims: IdTokenClaims): string | undefined {
-  return (
-    claims.chatgpt_account_id ||
-    claims["https://api.openai.com/auth"]?.chatgpt_account_id ||
-    claims.organizations?.[0]?.id
-  )
+  return claims.chatgpt_account_id || claims["https://api.openai.com/auth"]?.chatgpt_account_id
 }
 
 export function extractAccountId(tokens: TokenResponse): string | undefined {

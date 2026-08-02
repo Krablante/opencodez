@@ -622,6 +622,7 @@ export type CompactionPart = {
   auto: boolean
   phase?: "pre-turn" | "mid-turn"
   turn_id?: string
+  replay_id?: string
   overflow?: boolean
   tail_start_id?: string
   remote?: {
@@ -629,6 +630,7 @@ export type CompactionPart = {
     items: Array<unknown>
     model_id?: string
     account_key?: string
+    comp_hash?: string
   }
 }
 

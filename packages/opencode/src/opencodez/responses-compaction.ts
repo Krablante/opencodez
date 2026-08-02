@@ -8,6 +8,7 @@ type Context = {
   items: unknown[]
   modelID?: string
   accountKey?: string
+  compHash?: string
 }
 
 const active = new Map<string, Context>()
@@ -24,6 +25,7 @@ export function latest(messages: readonly SessionV1.WithParts[]) {
       items: part.remote.items,
       modelID: part.remote.model_id,
       accountKey: part.remote.account_key,
+      compHash: part.remote.comp_hash,
     }
   }
   return undefined
@@ -52,6 +54,7 @@ export function withMetadata(metadata: Record<string, unknown> | undefined, mess
       items: context.items,
       modelID: context.modelID,
       accountKey: context.accountKey,
+      compHash: context.compHash,
     } satisfies Context,
   }
 }
@@ -139,7 +142,7 @@ export function accountKey(accountID: string | undefined, accessToken?: string) 
 
 export function compatibilityError(
   metadata: Record<string, unknown> | undefined,
-  input: { modelID: string; accountKey?: string },
+  input: { modelID: string; accountKey?: string; compHash?: string; allowCompHashMismatch?: boolean },
 ): string | undefined {
   const context = metadata?.[METADATA_KEY]
   if (!isContext(context)) return undefined
@@ -149,60 +152,32 @@ export function compatibilityError(
   if (context.accountKey && context.accountKey !== input.accountKey) {
     return "This session's OpenAI compacted state belongs to a different ChatGPT account"
   }
+  if (!input.allowCompHashMismatch && input.compHash && context.compHash !== input.compHash) {
+    return "This session's OpenAI compacted state belongs to an older backend snapshot and must be compacted again before continuing"
+  }
   return undefined
 }
 
 export function repeatedOverflow(messages: readonly SessionV1.WithParts[], turnID: string) {
-  const current = messages.find(
-    (message): message is SessionV1.WithParts & { info: SessionV1.User } =>
-      message.info.role === "user" && message.info.id === turnID,
-  )
-  if (!current) return false
-  const marker = messages.findLast((message) => {
-    if (message.info.role !== "user" || message.info.id >= current.info.id) return false
-    return message.parts.some(
+  return messages.some((message) =>
+    message.parts.some(
       (part) =>
         part.type === "compaction" &&
         part.auto &&
         part.phase === "pre-turn" &&
         part.overflow === true &&
         part.remote?.providerID === "openai" &&
-        part.turn_id !== undefined,
-    )
-  })
-  const part = marker?.parts.find(
-    (item): item is SessionV1.CompactionPart =>
-      item.type === "compaction" &&
-      item.auto &&
-      item.phase === "pre-turn" &&
-      item.overflow === true &&
-      item.remote?.providerID === "openai" &&
-      item.turn_id !== undefined,
+        part.replay_id === turnID,
+    ),
   )
-  if (!part?.turn_id) return false
-  const original = messages.find(
-    (message): message is SessionV1.WithParts & { info: SessionV1.User } =>
-      message.info.role === "user" && message.info.id === part.turn_id,
-  )
-  if (!original) return false
-  return JSON.stringify(comparableParts(original.parts)) === JSON.stringify(comparableParts(current.parts))
-}
-
-function comparableParts(parts: readonly SessionV1.Part[]) {
-  return parts
-    .filter((part) => part.type !== "compaction")
-    .map((part) =>
-      Object.fromEntries(
-        Object.entries(part).filter(([key]) => key !== "id" && key !== "messageID" && key !== "sessionID"),
-      ),
-    )
 }
 
 function isContext(value: unknown): value is Context {
   if (!value || typeof value !== "object") return false
   if (!("items" in value) || !Array.isArray(value.items)) return false
   if ("modelID" in value && value.modelID !== undefined && typeof value.modelID !== "string") return false
-  return !("accountKey" in value) || value.accountKey === undefined || typeof value.accountKey === "string"
+  if ("accountKey" in value && value.accountKey !== undefined && typeof value.accountKey !== "string") return false
+  return !("compHash" in value) || value.compHash === undefined || typeof value.compHash === "string"
 }
 
 export * as OpenCodezResponsesCompaction from "./responses-compaction"

@@ -20,6 +20,7 @@ import { OpenCodezSession } from "@opencode-ai/core/opencodez/session"
 import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import { OpenCodezResponsesCompaction } from "@/opencodez/responses-compaction"
 import { OpenAIWebSocketPool } from "@/plugin/openai/ws-pool"
+import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
@@ -42,9 +43,11 @@ type PrepareInput = {
   readonly flags: RuntimeFlags.Info
   readonly isWorkflow: boolean
   readonly config: ConfigInfo
+  readonly allowCompHashMismatch?: boolean
 }
 
 export type Prepared = {
+  readonly codexResponses: boolean
   readonly system: string[]
   readonly messages: ModelMessage[]
   readonly tools: Record<string, Tool>
@@ -64,6 +67,7 @@ const mergeOptions = (target: Record<string, any>, source: Record<string, any> |
 
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
+  const codexResponses = isOpenaiOauth && OpenCodezSettings.responsesWire(input.config) === "codex"
   if (OpenCodezResponsesCompaction.has(input.sessionMetadata) && !isOpenaiOauth) {
     return yield* Effect.fail(
       new Error("This session contains OpenAI remote compaction state and must continue with ChatGPT OAuth"),
@@ -75,6 +79,8 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
       input.auth?.type === "oauth"
         ? OpenCodezResponsesCompaction.accountKey(input.auth.accountId, input.auth.access)
         : undefined,
+    compHash: OpenCodezSettings.responsesCompHash(input.model),
+    allowCompHashMismatch: input.allowCompHashMismatch,
   })
   if (compatibilityError) return yield* Effect.fail(new Error(compatibilityError))
   const hasRemoteCompaction =
@@ -228,6 +234,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     : undefined
 
   return {
+    codexResponses,
     system,
     messages,
     tools: Object.fromEntries(Object.entries(tools).toSorted(([a], [b]) => a.localeCompare(b))),

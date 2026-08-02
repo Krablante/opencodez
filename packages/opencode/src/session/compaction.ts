@@ -153,6 +153,10 @@ export interface Interface {
     model: Provider.Model
     additionalTokens?: number
   }) => Effect.Effect<boolean>
+  readonly needsRemoteRefresh: (input: {
+    messages: SessionV1.WithParts[]
+    model: Provider.Model
+  }) => Effect.Effect<boolean>
   readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
   readonly process: (input: {
     parentID: MessageID
@@ -220,6 +224,18 @@ const layer = Layer.effect(
         limit,
         additionalTokens: input.additionalTokens,
       })
+    })
+
+    const needsRemoteRefresh = Effect.fn("SessionCompaction.needsRemoteRefresh")(function* (input: {
+      messages: SessionV1.WithParts[]
+      model: Provider.Model
+    }) {
+      const context = OpenCodezResponsesCompaction.latest(input.messages)
+      const compHash = OpenCodezSettings.responsesCompHash(input.model)
+      if (!context || !compHash || context.compHash === compHash) return false
+      if (context.modelID && context.modelID !== input.model.api.id) return false
+      if (input.model.providerID !== "openai") return false
+      return (yield* auth.get(input.model.providerID).pipe(Effect.orDie))?.type === "oauth"
     })
 
     const estimate = Effect.fn("SessionCompaction.estimate")(function* (input: {
@@ -361,6 +377,7 @@ const layer = Layer.effect(
           sessionID: input.sessionID,
         })
       }
+      return replay
     })
 
     const pendingUsers = Effect.fnUntraced(function* (input: {
@@ -389,14 +406,23 @@ const layer = Layer.effect(
       direct?: boolean
       overflow?: boolean
       replaceReplayMedia?: boolean
+      compactionPart?: SessionV1.CompactionPart
     }) {
       if (input.result === "continue" && input.auto) {
         if (input.replay) {
-          yield* replayUser({
+          const replay = yield* replayUser({
             sessionID: input.sessionID,
             message: input.replay,
             replaceMedia: input.replaceReplayMedia ?? true,
           })
+          if (input.compactionPart) {
+            const part = yield* session.getPart({
+              sessionID: input.sessionID,
+              messageID: input.compactionPart.messageID,
+              partID: input.compactionPart.id,
+            })
+            if (part?.type === "compaction") yield* session.updatePart({ ...part, replay_id: replay.id })
+          }
         }
 
         if (!input.replay && !input.direct) {
@@ -642,6 +668,7 @@ const layer = Layer.effect(
                   flags,
                   isWorkflow: false,
                   config: cfg,
+                  allowCompHashMismatch: true,
                 })
               })
           return yield* OpenCodezResponsesCompact.compact({
@@ -706,6 +733,7 @@ const layer = Layer.effect(
               authInfo?.type === "oauth"
                 ? OpenCodezResponsesCompaction.accountKey(authInfo.accountId, authInfo.access)
                 : undefined,
+            comp_hash: OpenCodezSettings.responsesCompHash(sourceModel),
           },
         })
         const usage = Session.getUsage({
@@ -732,6 +760,7 @@ const layer = Layer.effect(
           direct: phase === "mid-turn",
           overflow: input.overflow,
           replaceReplayMedia: false,
+          compactionPart,
         })
       }
 
@@ -836,6 +865,7 @@ const layer = Layer.effect(
         auto: input.auto,
         phase,
         overflow: input.overflow,
+        compactionPart,
       })
     })
 
@@ -1001,6 +1031,7 @@ const layer = Layer.effect(
 
     return Service.of({
       isOverflow,
+      needsRemoteRefresh,
       prune,
       process: processCompaction,
       create,

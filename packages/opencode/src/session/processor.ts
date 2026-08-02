@@ -25,8 +25,9 @@ import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
+import { OpenCodezResponsesAttempt } from "@/opencodez/responses-attempt"
+import { OpenCodezResponsesPolicy } from "@/opencodez/responses-policy"
 
-const OPENAI_STREAM_RETRY_LIMIT = 7
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
 
@@ -120,6 +121,7 @@ const layer = Layer.effect(
         producedDurableOutput: false,
       }
       let aborted = false
+      const attempt = OpenCodezResponsesAttempt.create()
 
       const parse = (e: unknown) =>
         MessageV2.fromError(e, {
@@ -250,6 +252,7 @@ const layer = Layer.effect(
           state: { status: "pending", input: {}, raw: "" },
           metadata: input.providerExecuted ? { providerExecuted: true } : undefined,
         } satisfies SessionV1.ToolPart)
+        attempt.track(part.id)
         ctx.toolcalls[input.id] = {
           done: yield* Deferred.make<void>(),
           partID: part.id,
@@ -296,12 +299,14 @@ const layer = Layer.effect(
               metadata: value.providerMetadata,
             }
             yield* session.updatePart(ctx.reasoningMap[value.id])
+            attempt.track(ctx.reasoningMap[value.id].id)
             return
 
           case "reasoning-delta":
             // Match dev: silently drop orphan deltas (no preceding reasoning-start).
             if (!(value.id in ctx.reasoningMap)) return
             ctx.reasoningMap[value.id].text += value.text
+            if (value.text.length > 0) attempt.markModelVisible()
             if (value.text.length > 0) ctx.producedDurableOutput = true
             if (value.providerMetadata) ctx.reasoningMap[value.id].metadata = value.providerMetadata
             yield* session.updatePartDelta({
@@ -341,6 +346,7 @@ const layer = Layer.effect(
               throw new Error(`Tool call not allowed while generating summary: ${value.name}`)
             }
             yield* ensureToolCall(value)
+            attempt.markIrreversible()
             if (!value.providerExecuted) ctx.sawToolCall = true
             ctx.producedDurableOutput = true
             const input = isRecord(value.input) ? value.input : { value: value.input }
@@ -433,13 +439,15 @@ const layer = Layer.effect(
 
           case "step-start":
             if (!ctx.snapshot) ctx.snapshot = yield* snapshot.track()
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: ctx.assistantMessage.id,
-              sessionID: ctx.sessionID,
-              snapshot: ctx.snapshot,
-              type: "step-start",
-            })
+            attempt.track(
+              (yield* session.updatePart({
+                id: PartID.ascending(),
+                messageID: ctx.assistantMessage.id,
+                sessionID: ctx.sessionID,
+                snapshot: ctx.snapshot,
+                type: "step-start",
+              })).id,
+            )
             return
 
           case "step-finish": {
@@ -506,11 +514,13 @@ const layer = Layer.effect(
               metadata: value.providerMetadata,
             }
             yield* session.updatePart(ctx.currentText)
+            attempt.track(ctx.currentText.id)
             return
 
           case "text-delta":
             if (!ctx.currentText) return
             ctx.currentText.text += value.text
+            if (value.text.length > 0) attempt.markModelVisible()
             if (value.text.length > 0) ctx.producedDurableOutput = true
             if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
             yield* session.updatePartDelta({
@@ -547,6 +557,28 @@ const layer = Layer.effect(
           case "finish":
             return
         }
+      })
+
+      const rollbackAttempt = Effect.fn("SessionProcessor.rollbackAttempt")(function* () {
+        const rollback = attempt.rollback()
+        if (!rollback) return false
+        for (const toolCallID of Object.keys(ctx.toolcalls)) yield* settleToolCall(toolCallID)
+        for (const partID of rollback.partIDs) {
+          yield* session.removePart({
+            sessionID: ctx.sessionID,
+            messageID: ctx.assistantMessage.id,
+            partID,
+          })
+        }
+        ctx.currentText = undefined
+        ctx.reasoningMap = {}
+        ctx.producedDurableOutput = rollback.durableOutput
+        yield* Effect.logWarning("rolled back incomplete Codex Responses attempt", {
+          "session.id": ctx.sessionID,
+          parts: rollback.partIDs.length,
+          model_visible: rollback.modelVisible,
+        })
+        return true
       })
 
       const cleanup = Effect.fn("SessionProcessor.cleanup")(function* () {
@@ -616,6 +648,7 @@ const layer = Layer.effect(
           error: errorMessage(e),
           stack: e instanceof Error ? e.stack : undefined,
         })
+        if (!aborted) yield* rollbackAttempt()
         const error = parse(e)
         if (SessionV1.ContextOverflowError.isInstance(error)) {
           if ((yield* config.get()).compaction?.auto === false && !ctx.assistantMessage.summary) {
@@ -646,16 +679,24 @@ const layer = Layer.effect(
 
         return yield* Effect.gen(function* () {
           yield* Effect.gen(function* () {
+            attempt.begin({ durableOutput: ctx.producedDurableOutput })
             ctx.currentText = undefined
             ctx.reasoningMap = {}
             yield* status.set(ctx.sessionID, { type: "busy" })
-            const stream = llm.stream(streamInput)
+            const stream = llm.stream({
+              ...streamInput,
+              onPrepared(prepared) {
+                attempt.prepared(prepared)
+                streamInput.onPrepared?.(prepared)
+              },
+            })
 
             yield* stream.pipe(
               Stream.tap((event) => handleEvent(event)),
               Stream.takeUntil(() => ctx.needsCompaction),
               Stream.runDrain,
             )
+            attempt.commit()
           }).pipe(
             Effect.onInterrupt(() =>
               Effect.gen(function* () {
@@ -672,21 +713,21 @@ const layer = Layer.effect(
             Effect.retry(
               SessionRetry.policy({
                 provider: input.model.providerID,
-                maxAttempts: input.model.providerID === "openai" ? OPENAI_STREAM_RETRY_LIMIT : undefined,
-                // OpenCode persists streaming deltas immediately. Replaying a
-                // failed request after any durable output would duplicate text,
-                // reasoning, or tool calls instead of resuming them safely.
-                continue: () => !ctx.producedDurableOutput,
+                maxAttempts:
+                  input.model.providerID === "openai" ? OpenCodezResponsesPolicy.SESSION_RETRY_LIMIT : undefined,
+                continue: () => attempt.canRetry({ durableOutput: ctx.producedDurableOutput }),
                 parse,
-                set: (info) => {
-                  return status.set(ctx.sessionID, {
-                    type: "retry",
-                    attempt: info.attempt,
-                    message: info.message,
-                    action: info.action,
-                    next: info.next,
-                  })
-                },
+                set: (info) =>
+                  Effect.gen(function* () {
+                    yield* rollbackAttempt()
+                    yield* status.set(ctx.sessionID, {
+                      type: "retry",
+                      attempt: info.attempt,
+                      message: info.message,
+                      action: info.action,
+                      next: info.next,
+                    })
+                  }),
               }),
             ),
             Effect.catch(halt),
