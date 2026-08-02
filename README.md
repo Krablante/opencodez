@@ -237,13 +237,19 @@ full continuation chain. Changing the logged-in ChatGPT account does the same;
 response and reasoning IDs are never reused across account boundaries.
 Each request also carries one Codex-compatible metadata snapshot for its
 installation, session/thread, logical turn, compacted window, and request kind.
+OpenCodez records a bounded history of recent turn model settings. If the
+catalog `comp_hash` changes between turns, it compacts the previous history with
+the previous model before sampling the new turn, then retries once with the
+current model only when the previous model can no longer complete the compact.
 An expired OAuth token gets one response-driven refresh and safe retry before any
 model output, provided the refreshed account identity still matches the request;
 an identity change fails the attempt so the next request starts from canonical
 session state. WebSocket upgrade status 426 switches that session to HTTP
-immediately. If account identity cannot be verified, OpenCodez uses uncached HTTP
-and the current uncached catalog response, but refuses to reuse account-scoped
-continuation or compacted state.
+immediately. A runtime that cannot expose the rejected upgrade status uses HTTP
+for the current request and waits one minute before probing WebSocket again. If
+account identity cannot be verified, OpenCodez uses uncached HTTP and the current
+uncached catalog response, but refuses to reuse account-scoped continuation or
+compacted state.
 
 For ChatGPT OAuth, automatic and manual compaction use Codex Remote Compaction
 V2: a normal streamed `/responses` request whose final input item is

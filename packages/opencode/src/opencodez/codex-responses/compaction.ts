@@ -2,6 +2,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 
 export const HEADER = "x-opencodez-responses-compaction-handoff"
 export const METADATA_KEY = "opencodez.responses.compaction"
+export const TURN_SETTINGS_METADATA_KEY = "opencodez.responses.turn-settings"
 export const CONTINUE_MARKER = "__OPENCODEZ_REMOTE_COMPACTION_CONTINUE__"
 
 type Context = {
@@ -16,7 +17,46 @@ type Handoff = Context & { expiresAt: number }
 
 const HANDOFF_TTL = 60_000
 const HANDOFF_LIMIT = 128
+const TURN_SETTINGS_LIMIT = 32
 const handoffs = new Map<string, Handoff>()
+
+export type TurnSettings = {
+  turnID: string
+  model: {
+    providerID: string
+    modelID: string
+    apiModelID?: string
+  }
+  compHash?: string
+}
+
+export function turnSettings(metadata: Record<string, unknown> | undefined) {
+  const value = metadata?.[TURN_SETTINGS_METADATA_KEY]
+  if (!Array.isArray(value)) return [] as TurnSettings[]
+  return value.filter(isTurnSettings).slice(-TURN_SETTINGS_LIMIT)
+}
+
+export function withTurnSettings(
+  metadata: Record<string, unknown> | undefined,
+  input: TurnSettings,
+): Record<string, unknown> {
+  const current = turnSettings(metadata)
+  const existing = current.find((item) => item.turnID === input.turnID)
+  if (
+    existing &&
+    existing.model.providerID === input.model.providerID &&
+    existing.model.modelID === input.model.modelID &&
+    existing.model.apiModelID === input.model.apiModelID &&
+    existing.compHash === input.compHash
+  )
+    return metadata ?? {}
+  return {
+    ...metadata,
+    [TURN_SETTINGS_METADATA_KEY]: [...current.filter((item) => item.turnID !== input.turnID), input].slice(
+      -TURN_SETTINGS_LIMIT,
+    ),
+  }
+}
 
 export function latest(messages: readonly SessionV1.WithParts[]) {
   for (let index = messages.length - 1; index >= 0; index--) {
@@ -181,6 +221,17 @@ function isContext(value: unknown): value is Context {
   if ("modelID" in value && value.modelID !== undefined && typeof value.modelID !== "string") return false
   if ("windowID" in value && value.windowID !== undefined && typeof value.windowID !== "string") return false
   if ("accountKey" in value && value.accountKey !== undefined && typeof value.accountKey !== "string") return false
+  return !("compHash" in value) || value.compHash === undefined || typeof value.compHash === "string"
+}
+
+function isTurnSettings(value: unknown): value is TurnSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  if (!("turnID" in value) || typeof value.turnID !== "string") return false
+  if (!("model" in value) || !value.model || typeof value.model !== "object" || Array.isArray(value.model)) return false
+  if (!("providerID" in value.model) || typeof value.model.providerID !== "string") return false
+  if (!("modelID" in value.model) || typeof value.model.modelID !== "string") return false
+  if ("apiModelID" in value.model && value.model.apiModelID !== undefined && typeof value.model.apiModelID !== "string")
+    return false
   return !("compHash" in value) || value.compHash === undefined || typeof value.compHash === "string"
 }
 

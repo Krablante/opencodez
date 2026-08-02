@@ -383,7 +383,7 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
       socket.off("error", onError)
       socket.off("close", onClose)
     }
-    const { stream: _stream, background: _background, ...payload } = body
+    const { background: _background, ...payload } = body
     resetIdleTimeout("idle timeout sending websocket request")
     socket.send(JSON.stringify({ type: "response.create", ...payload }), (error) => {
       if (completed) return

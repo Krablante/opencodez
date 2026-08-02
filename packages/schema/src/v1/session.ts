@@ -201,6 +201,15 @@ export const CompactionPart = Schema.Struct({
   replay_id: Schema.optional(MessageID),
   overflow: Schema.optional(Schema.Boolean),
   tail_start_id: Schema.optional(MessageID),
+  transition: Schema.optional(
+    Schema.Struct({
+      model: Schema.Struct({
+        providerID: Provider.ID,
+        modelID: Model.ID,
+      }),
+      comp_hash: Schema.String,
+    }),
+  ),
   remote: Schema.optional(
     Schema.Struct({
       providerID: Schema.Literal("openai"),

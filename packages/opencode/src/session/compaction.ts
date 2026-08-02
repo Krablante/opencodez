@@ -70,6 +70,11 @@ type CompletedCompaction = {
 }
 
 type Phase = NonNullable<SessionV1.CompactionPart["phase"]>
+type ModelRef = { providerID: ProviderV2.ID; modelID: ModelV2.ID }
+type RemoteTransition = {
+  sourceModel: ModelRef
+  targetCompHash: string
+}
 
 function summaryText(message: SessionV1.WithParts) {
   const text = message.parts
@@ -155,10 +160,17 @@ export interface Interface {
     model: Provider.Model
     additionalTokens?: number
   }) => Effect.Effect<boolean>
-  readonly needsRemoteRefresh: (input: {
+  readonly remoteTransition: (input: {
+    sessionID: SessionID
+    turnID: MessageID
     messages: SessionV1.WithParts[]
     model: Provider.Model
-  }) => Effect.Effect<boolean>
+  }) => Effect.Effect<RemoteTransition | undefined>
+  readonly recordRemoteTurn: (input: {
+    sessionID: SessionID
+    turnID: MessageID
+    model: Provider.Model
+  }) => Effect.Effect<void>
   readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
   readonly process: (input: {
     parentID: MessageID
@@ -179,6 +191,7 @@ export interface Interface {
     phase?: Phase
     turnID?: MessageID
     overflow?: boolean
+    transition?: RemoteTransition
   }) => Effect.Effect<void>
   readonly capturePending: (input: { sessionID: SessionID; messages: SessionV1.WithParts[] }) => Effect.Effect<boolean>
   readonly releasePending: (input: { sessionID: SessionID }) => Effect.Effect<void>
@@ -236,20 +249,114 @@ const layer = Layer.effect(
       })
     })
 
-    const needsRemoteRefresh = Effect.fn("SessionCompaction.needsRemoteRefresh")(function* (input: {
+    const saveTurnSettings = Effect.fnUntraced(function* (input: {
+      sessionID: SessionID
+      turnID: MessageID
+      model: ModelRef
+      apiModelID?: string
+      compHash?: string
+    }) {
+      const info = yield* session.get(input.sessionID).pipe(Effect.orDie)
+      const metadata = CodexResponsesCompaction.withTurnSettings(info.metadata, {
+        turnID: input.turnID,
+        model: { ...input.model, apiModelID: input.apiModelID },
+        compHash: input.compHash,
+      })
+      if (metadata === info.metadata) return
+      yield* session.setMetadata({ sessionID: input.sessionID, metadata })
+    })
+
+    const recordRemoteTurn = Effect.fn("SessionCompaction.recordRemoteTurn")(function* (input: {
+      sessionID: SessionID
+      turnID: MessageID
+      model: Provider.Model
+    }) {
+      if (input.model.providerID !== "openai") return
+      const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
+      if (authInfo?.type !== "oauth") return
+      const accountKey = CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access)
+      if (!accountKey) return
+      yield* saveTurnSettings({
+        sessionID: input.sessionID,
+        turnID: input.turnID,
+        model: { providerID: input.model.providerID, modelID: input.model.id },
+        apiModelID: input.model.api.id,
+        compHash: CodexResponsesCatalog.resolve(input.model, accountKey)?.compHash,
+      })
+    })
+
+    const remoteTransition = Effect.fn("SessionCompaction.remoteTransition")(function* (input: {
+      sessionID: SessionID
+      turnID: MessageID
       messages: SessionV1.WithParts[]
       model: Provider.Model
     }) {
-      const context = CodexResponsesCompaction.latest(input.messages)
-      if (!context) return false
-      if (input.model.providerID !== "openai") return false
+      if (input.model.providerID !== "openai") return undefined
       const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
-      if (authInfo?.type !== "oauth") return false
-      const compHash = CodexResponsesCatalog.resolve(
-        input.model,
-        CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access),
-      )?.compHash
-      return !!compHash && context.compHash !== compHash
+      if (authInfo?.type !== "oauth") return undefined
+      const accountKey = CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access)
+      if (!accountKey) return undefined
+      const profile = CodexResponsesCatalog.resolve(input.model, accountKey)
+      if (!profile?.compHash) return undefined
+      const info = yield* session.get(input.sessionID).pipe(Effect.orDie)
+      const settings = CodexResponsesCompaction.turnSettings(info.metadata)
+      if (settings.some((item) => item.turnID === input.turnID)) return undefined
+
+      const currentIndex = input.messages.findLastIndex((message) => message.info.id === input.turnID)
+      if (currentIndex < 0) return undefined
+      const previousUser = input.messages
+        .slice(0, currentIndex)
+        .findLast(
+          (message): message is SessionV1.WithParts & { info: SessionV1.User } =>
+            message.info.role === "user" && !message.parts.some((part) => part.type === "compaction"),
+        )
+      const exact = previousUser ? settings.findLast((item) => item.turnID === previousUser.info.id) : undefined
+      const knownTurnIDs = new Set<string>(input.messages.map((message) => message.info.id))
+      const forked = settings.length > 0 && settings.every((item) => !knownTurnIDs.has(item.turnID))
+      const previous =
+        exact ??
+        (forked && previousUser
+          ? settings.findLast(
+              (item) =>
+                item.model.providerID === previousUser.info.model.providerID &&
+                item.model.modelID === previousUser.info.model.modelID,
+            )
+          : undefined)
+      const previousRef = previous
+        ? {
+            providerID: ProviderV2.ID.make(previous.model.providerID),
+            modelID: ModelV2.ID.make(previous.model.modelID),
+          }
+        : previousUser?.info.model.providerID === "openai"
+          ? {
+              providerID: previousUser.info.model.providerID,
+              modelID: previousUser.info.model.modelID,
+            }
+          : undefined
+      const previousModel = previousRef
+        ? yield* provider.getModel(previousRef.providerID, previousRef.modelID).pipe(Effect.option)
+        : Option.none<Provider.Model>()
+      const previousCompHash =
+        previous?.compHash ??
+        (Option.isSome(previousModel)
+          ? CodexResponsesCatalog.resolve(previousModel.value, accountKey)?.compHash
+          : undefined)
+      if (previousCompHash && previousCompHash !== profile.compHash) {
+        return {
+          sourceModel: Option.isSome(previousModel)
+            ? { providerID: previousModel.value.providerID, modelID: previousModel.value.id }
+            : { providerID: input.model.providerID, modelID: input.model.id },
+          targetCompHash: profile.compHash,
+        } satisfies RemoteTransition
+      }
+
+      const context = CodexResponsesCompaction.latest(input.messages)
+      if (!context || context.compHash === profile.compHash) return undefined
+      const sourceModel =
+        Option.isSome(previousModel) && context.modelID === previousModel.value.api.id
+          ? { providerID: previousModel.value.providerID, modelID: previousModel.value.id }
+          : { providerID: input.model.providerID, modelID: input.model.id }
+      return { sourceModel, targetCompHash: profile.compHash } satisfies RemoteTransition
     })
 
     const estimate = Effect.fn("SessionCompaction.estimate")(function* (input: {
@@ -436,6 +543,21 @@ const layer = Layer.effect(
               partID: input.compactionPart.id,
             })
             if (part?.type === "compaction") yield* session.updatePart({ ...part, replay_id: replay.id })
+            if (input.compactionPart.transition) {
+              const target = yield* provider
+                .getModel(
+                  input.compactionPart.transition.model.providerID,
+                  input.compactionPart.transition.model.modelID,
+                )
+                .pipe(Effect.orDie)
+              yield* saveTurnSettings({
+                sessionID: input.sessionID,
+                turnID: replay.id,
+                model: input.compactionPart.transition.model,
+                apiModelID: target.api.id,
+                compHash: input.compactionPart.transition.comp_hash,
+              })
+            }
           }
         }
 
@@ -579,11 +701,15 @@ const layer = Layer.effect(
       const sourceModel = yield* provider
         .getModel(userMessage.model.providerID, userMessage.model.modelID)
         .pipe(Effect.orDie)
+      const transition = compactionPart?.transition
+      const targetModel = transition
+        ? yield* provider.getModel(transition.model.providerID, transition.model.modelID).pipe(Effect.orDie)
+        : sourceModel
       const authInfo = yield* auth.get(userMessage.model.providerID).pipe(Effect.orDie)
       const remote = sourceModel.providerID === "openai" && authInfo?.type === "oauth"
       const accountKey =
         authInfo?.type === "oauth" ? CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access) : undefined
-      const profile = accountKey ? CodexResponsesCatalog.resolve(sourceModel, accountKey) : undefined
+      const targetProfile = accountKey ? CodexResponsesCatalog.resolve(targetModel, accountKey) : undefined
       const previousCompaction = CodexResponsesCompaction.latest(history)
 
       if (remote) {
@@ -640,90 +766,119 @@ const layer = Layer.effect(
           if (!requestAgent) throw new Error(`Agent not found for compaction: ${requestUser.agent}`)
           const sessionInfo = yield* session.get(input.sessionID).pipe(Effect.orDie)
           const active = CodexResponsesCompaction.tail(history)
-          const providerInfo = yield* provider.getProvider(sourceModel.providerID)
-          const snapshot = input.prepared
-          const prepared = snapshot
-            ? yield* Effect.gen(function* () {
-                if (phase === "mid-turn" && input.overflow && pending.length === 0) return snapshot
-                const messages = structuredClone(active.messages)
-                yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages })
-                return {
-                  ...snapshot,
-                  messages: yield* MessageV2.toModelMessagesEffect(messages, sourceModel),
-                }
+          const abort = input.abort ?? AbortSignal.timeout(REMOTE_COMPACTION_TIMEOUT_MS)
+          const run = (attemptModel: Provider.Model, snapshot?: LLMRequestPrep.Prepared) =>
+            Effect.gen(function* () {
+              const providerInfo = yield* provider.getProvider(attemptModel.providerID)
+              const prepared = snapshot
+                ? yield* Effect.gen(function* () {
+                    if (phase === "mid-turn" && input.overflow && pending.length === 0) return snapshot
+                    const messages = structuredClone(active.messages)
+                    yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages })
+                    return {
+                      ...snapshot,
+                      messages: yield* MessageV2.toModelMessagesEffect(messages, attemptModel),
+                    }
+                  })
+                : yield* Effect.gen(function* () {
+                    const context = yield* SessionModelContext.resolve({
+                      agent: requestAgent,
+                      model: attemptModel,
+                      session: sessionInfo,
+                      messages: structuredClone(active.messages),
+                      promptOps,
+                    }).pipe(
+                      Effect.provideService(Plugin.Service, plugin),
+                      Effect.provideService(Permission.Service, permission),
+                      Effect.provideService(ToolRegistry.Service, registry),
+                      Effect.provideService(MCP.Service, mcp),
+                      Effect.provideService(Truncate.Service, truncate),
+                      Effect.provideService(RuntimeFlags.Service, flags),
+                      Effect.provideService(Instruction.Service, instruction),
+                      Effect.provideService(SystemPrompt.Service, system),
+                    )
+                    return yield* LLMRequestPrep.prepare({
+                      user: requestUser,
+                      turnID: phase === "mid-turn" ? turnID : undefined,
+                      sessionID: input.sessionID,
+                      parentSessionID: sessionInfo.parentID,
+                      sessionMetadata: CodexResponsesCompaction.withMetadata(sessionInfo.metadata, history),
+                      model: attemptModel,
+                      agent: requestAgent,
+                      permission: sessionInfo.permission,
+                      system: context.system,
+                      messages: context.messages,
+                      tools: context.tools,
+                      provider: providerInfo,
+                      auth: authInfo,
+                      plugin,
+                      flags,
+                      isWorkflow: false,
+                      config: cfg,
+                      allowCompHashMismatch: true,
+                    })
+                  })
+              return yield* CodexResponsesCompact.compact({
+                model: attemptModel,
+                provider: providerInfo,
+                system: prepared.system,
+                messages: prepared.messages,
+                tools: prepared.tools,
+                options: prepared.params.options,
+                items: active.items,
+                sessionID: input.sessionID,
+                accountKey,
+                windowID: previousCompaction?.messageID ?? input.sessionID,
+                turnID: phase === "mid-turn" ? turnID : undefined,
+                compaction: {
+                  trigger: input.auto ? "auto" : "manual",
+                  reason:
+                    transition ||
+                    (input.auto &&
+                      previousCompaction?.compHash &&
+                      targetProfile?.compHash &&
+                      targetProfile.compHash !== previousCompaction.compHash)
+                      ? "comp_hash_changed"
+                      : input.auto
+                        ? "context_limit"
+                        : "user_requested",
+                  phase: phase === "pre-turn" ? "pre_turn" : phase === "mid-turn" ? "mid_turn" : "standalone_turn",
+                },
+                preserveActiveToolMedia: phase === "mid-turn",
+                abort,
               })
-            : yield* Effect.gen(function* () {
-                const context = yield* SessionModelContext.resolve({
-                  agent: requestAgent,
-                  model: sourceModel,
-                  session: sessionInfo,
-                  messages: structuredClone(active.messages),
-                  promptOps,
-                }).pipe(
-                  Effect.provideService(Plugin.Service, plugin),
-                  Effect.provideService(Permission.Service, permission),
-                  Effect.provideService(ToolRegistry.Service, registry),
-                  Effect.provideService(MCP.Service, mcp),
-                  Effect.provideService(Truncate.Service, truncate),
-                  Effect.provideService(RuntimeFlags.Service, flags),
-                  Effect.provideService(Instruction.Service, instruction),
-                  Effect.provideService(SystemPrompt.Service, system),
-                )
-                return yield* LLMRequestPrep.prepare({
-                  user: requestUser,
-                  turnID: phase === "mid-turn" ? turnID : undefined,
-                  sessionID: input.sessionID,
-                  parentSessionID: sessionInfo.parentID,
-                  sessionMetadata: CodexResponsesCompaction.withMetadata(sessionInfo.metadata, history),
-                  model: sourceModel,
-                  agent: requestAgent,
-                  permission: sessionInfo.permission,
-                  system: context.system,
-                  messages: context.messages,
-                  tools: context.tools,
-                  provider: providerInfo,
-                  auth: authInfo,
-                  plugin,
-                  flags,
-                  isWorkflow: false,
-                  config: cfg,
-                  allowCompHashMismatch: true,
-                })
-              })
-          return yield* CodexResponsesCompact.compact({
-            model: sourceModel,
-            provider: providerInfo,
-            system: prepared.system,
-            messages: prepared.messages,
-            tools: prepared.tools,
-            options: prepared.params.options,
-            items: active.items,
-            sessionID: input.sessionID,
-            accountKey,
-            windowID: previousCompaction?.messageID ?? input.sessionID,
-            turnID: phase === "mid-turn" ? turnID : undefined,
-            compaction: {
-              trigger: input.auto ? "auto" : "manual",
-              reason:
-                input.auto &&
-                previousCompaction?.compHash &&
-                profile?.compHash &&
-                profile.compHash !== previousCompaction.compHash
-                  ? "comp_hash_changed"
-                  : input.auto
-                    ? "context_limit"
-                    : "user_requested",
-              phase: phase === "pre-turn" ? "pre_turn" : phase === "mid-turn" ? "mid_turn" : "standalone_turn",
-            },
-            preserveActiveToolMedia: phase === "mid-turn",
-            abort: input.abort ?? AbortSignal.timeout(REMOTE_COMPACTION_TIMEOUT_MS),
+            })
+          const attempt = (attemptModel: Provider.Model, snapshot?: LLMRequestPrep.Prepared) =>
+            run(attemptModel, snapshot).pipe(
+              Effect.match({
+                onFailure: (error) => ({ ok: false as const, error }),
+                onSuccess: (value) => ({ ok: true as const, value, model: attemptModel }),
+              }),
+            )
+          const primary = yield* attempt(sourceModel, transition ? undefined : input.prepared)
+          if (primary.ok) return primary
+          if (
+            !transition ||
+            sourceModel.id === targetModel.id ||
+            !CodexResponsesCompact.canRetryWithCurrentModel(primary.error)
+          )
+            return primary
+          yield* Effect.logWarning("previous-model remote compaction failed; retrying current model", {
+            "session.id": input.sessionID,
+            previousModel: sourceModel.api.id,
+            currentModel: targetModel.api.id,
+            error: errorMessage(primary.error),
           })
-        }).pipe(
-          Effect.match({
-            onFailure: (error) => ({ ok: false as const, error }),
-            onSuccess: (value) => ({ ok: true as const, value }),
-          }),
-        )
+          const fallback = yield* attempt(targetModel)
+          if (fallback.ok) return fallback
+          yield* Effect.logError("current-model remote compaction fallback failed", {
+            "session.id": input.sessionID,
+            previousModel: sourceModel.api.id,
+            currentModel: targetModel.api.id,
+            error: errorMessage(fallback.error),
+          })
+          return primary
+        })
 
         if (!compacted.ok) {
           yield* Effect.logError("remote compaction failed", {
@@ -762,13 +917,13 @@ const layer = Layer.effect(
           remote: {
             providerID: "openai",
             items: compacted.value.items,
-            model_id: sourceModel.api.id,
+            model_id: targetModel.api.id,
             account_key: accountKey,
-            comp_hash: profile?.compHash,
+            comp_hash: transition?.comp_hash ?? targetProfile?.compHash,
           },
         })
         const usage = Session.getUsage({
-          model: sourceModel,
+          model: compacted.model,
           usage: new Usage({
             totalTokens: compacted.value.usage.total,
             inputTokens: compacted.value.usage.input,
@@ -778,6 +933,8 @@ const layer = Layer.effect(
         })
         msg.cost = usage.cost
         msg.tokens = usage.tokens
+        msg.modelID = compacted.model.id
+        msg.providerID = compacted.model.providerID
         msg.finish = "stop"
         msg.time.completed = Date.now()
         yield* session.updateMessage(msg)
@@ -1014,11 +1171,12 @@ const layer = Layer.effect(
     const create = Effect.fn("SessionCompaction.create")(function* (input: {
       sessionID: SessionID
       agent: string
-      model: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
+      model: ModelRef
       auto: boolean
       phase?: Phase
       turnID?: MessageID
       overflow?: boolean
+      transition?: RemoteTransition
     }) {
       const source = input.turnID
         ? Option.getOrUndefined(
@@ -1031,7 +1189,7 @@ const layer = Layer.effect(
       const msg = yield* session.updateMessage({
         id: MessageID.ascending(),
         role: "user",
-        model: input.auto && turn ? turn.model : input.model,
+        model: input.transition?.sourceModel ?? (input.auto && turn ? turn.model : input.model),
         sessionID: input.sessionID,
         agent: turn?.agent ?? input.agent,
         format: turn?.format,
@@ -1048,6 +1206,14 @@ const layer = Layer.effect(
         phase: input.phase,
         turn_id: input.turnID,
         overflow: input.overflow,
+        ...(input.transition
+          ? {
+              transition: {
+                model: input.model,
+                comp_hash: input.transition.targetCompHash,
+              },
+            }
+          : {}),
       })
       for (const part of source?.parts ?? []) {
         if (part.type !== "agent") continue
@@ -1062,7 +1228,8 @@ const layer = Layer.effect(
 
     return Service.of({
       isOverflow,
-      needsRemoteRefresh,
+      remoteTransition,
+      recordRemoteTurn,
       prune,
       process: processCompaction,
       create,

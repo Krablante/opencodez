@@ -30,6 +30,7 @@ interface PoolEntry {
   lastUsedAt: number
   busy: boolean
   fallback: boolean
+  fallbackUntil?: number
   streamFailures: number
   continuation: Continuation
   turnID?: string
@@ -39,6 +40,7 @@ interface PoolEntry {
 const DEFAULT_CONNECT_TIMEOUT = 15_000
 const DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000
 const DEFAULT_MAX_CONNECTION_AGE = 55 * 60 * 1000
+const OPAQUE_FALLBACK_COOLDOWN = 60_000
 const CONNECTION_LIMIT_REACHED_CODE = "websocket_connection_limit_reached"
 const PREVIOUS_RESPONSE_NOT_FOUND_CODE = "previous_response_not_found"
 
@@ -102,13 +104,14 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     trimPool()
     const turnID = internalHeaders[TURN_ID_HEADER]
 
-    if (entry.fallback) {
+    if (entry.fallback || (entry.fallbackUntil ?? 0) > Date.now()) {
       if (turnID !== entry.turnID) {
         entry.turnID = turnID
         entry.turnState = undefined
       }
       return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
     }
+    entry.fallbackUntil = undefined
     if (entry.busy) {
       entry.continuation.reset()
       if (turnID !== entry.turnID) {
@@ -128,7 +131,12 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
       entry.socket = await socket(
         entry,
         options?.url ?? url,
-        withTurnStateHeader(OpenAIWebSocket.normalizeHeaders(httpInit?.headers), entry.turnState),
+        websocketHeaders(
+          OpenAIWebSocket.normalizeHeaders(httpInit?.headers),
+          sessionID,
+          entry.turnState,
+          options?.wire,
+        ),
         connectTimeout,
         maxConnectionAge,
         init?.signal,
@@ -194,7 +202,12 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
             entry.socket = await socket(
               entry,
               options?.url ?? url,
-              withTurnStateHeader(OpenAIWebSocket.normalizeHeaders(httpInit?.headers), entry.turnState),
+              websocketHeaders(
+                OpenAIWebSocket.normalizeHeaders(httpInit?.headers),
+                sessionID,
+                entry.turnState,
+                options?.wire,
+              ),
               connectTimeout,
               maxConnectionAge,
               init?.signal,
@@ -240,11 +253,11 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         invalidate(entry)
         return new Response(upgrade.body, { status: upgrade.status, headers: upgrade.headers })
       }
-      // Bun exposes non-101 handshakes as one opaque error. Falling back now
-      // handles 426 without spending retries; HTTP then preserves the real
-      // status for OAuth refresh and normal provider errors.
+      // Bun exposes non-101 handshakes as one opaque error. Use HTTP immediately,
+      // but only cool down WebSocket attempts briefly because the rejection may
+      // have been a transient auth or server response rather than a durable 426.
       if (OpenAIWebSocket.isOpaqueUpgradeRejection(error)) {
-        entry.fallback = true
+        entry.fallbackUntil = Date.now() + OPAQUE_FALLBACK_COOLDOWN
         invalidate(entry)
         return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
       }
@@ -367,6 +380,17 @@ function withTurnState(body: Record<string, unknown>, turnState: string | undefi
 
 function withTurnStateHeader(headers: Record<string, string>, turnState: string | undefined) {
   return turnState ? { ...headers, [TURN_STATE_HEADER]: turnState } : headers
+}
+
+function websocketHeaders(
+  headers: Record<string, string>,
+  sessionID: string,
+  turnState: string | undefined,
+  wire?: Mode,
+) {
+  const result = withTurnStateHeader(headers, turnState)
+  if (wire !== "codex" || result["x-client-request-id"]) return result
+  return { ...result, "x-client-request-id": sessionID }
 }
 
 function accountAffinity(headers: Record<string, string>) {

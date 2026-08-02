@@ -625,6 +625,13 @@ export type CompactionPart = {
   replay_id?: string
   overflow?: boolean
   tail_start_id?: string
+  transition?: {
+    model: {
+      providerID: string
+      modelID: string
+    }
+    comp_hash: string
+  }
   remote?: {
     providerID: "openai"
     items: Array<unknown>

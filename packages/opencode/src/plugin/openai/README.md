@@ -16,15 +16,18 @@ The upstream full-request WebSocket transport is enabled by default on `local`,
    preventing reusable response state from crossing an unknown account boundary.
 4. Title requests use HTTP.
 5. If that session's socket is busy or already in fallback mode, use HTTP.
-6. Otherwise, reuse its open socket or open a new one.
-7. In `legacy` mode, send the complete `response.create` body.
+6. Otherwise, reuse its open socket or open a new one. Codex-mode handshakes use
+   the session/thread id as `x-client-request-id`.
+7. In `legacy` mode, send the complete `response.create` body. WebSocket frames
+   retain the explicit `stream: true` request field.
 8. In `codex` mode, send the first request in full. Later matching requests send
    only new input items with `previous_response_id`.
 9. Capture `x-codex-turn-state` from response metadata or HTTP fallback
    headers, plus WebSocket upgrade headers when the runtime exposes them. Bun's
    client exposes neither rejected-upgrade status nor headers, so the standalone
-   binary switches an opaque non-101 handshake directly to HTTP and uses backend
-   metadata without adding another socket stack. Keep the state in
+   binary switches an opaque non-101 handshake directly to HTTP for that request,
+   waits one minute before trying WebSocket again, and uses backend metadata
+   without adding another socket stack. Keep the state in
    `client_metadata` for follow-ups within the same logical user turn,
    including compaction, then clear it at the next turn without discarding
    compatible continuation state.
@@ -53,6 +56,7 @@ keeps the unmodified request shape.
 - Idle timeout: 5 minutes.
 - After a completed response, keep the socket for reuse.
 - Reuse a socket for up to 55 minutes, then replace it on the next request.
+- Cool down WebSocket for one minute after an opaque Bun upgrade rejection.
 - Reset Codex continuation state whenever the socket is replaced, aborted, or
   fails.
 - Scope pool entries to both session ID and ChatGPT account ID. A login change
@@ -69,6 +73,8 @@ keeps the unmodified request shape.
 - `websocket_connection_limit_reached` consumes the same retry budget and HTTP fallback.
 - WebSocket upgrade status 426 selects sticky HTTP fallback immediately without
   spending the WebSocket retry budget.
+- An opaque Bun upgrade rejection uses HTTP immediately but is not treated as a
+  permanent 426; WebSocket becomes eligible again after the one-minute cooldown.
 - An HTTP or pre-output WebSocket 401 performs one deduplicated OAuth refresh and
   replays the request once only when account affinity is unchanged. An identity
   change or second 401 is returned normally so a later request is rebuilt from
@@ -176,8 +182,12 @@ transient failures at most twice per transport; manual compaction does not
 auto-continue.
 
 Persisted opaque state records the source API model, account key, and catalog
-`comp_hash`. A known backend-snapshot change first refreshes that state through
-the same remote compaction path, then resumes the pending user turn. The
+`comp_hash`. Session metadata also keeps the latest 32 logical-turn model/hash
+settings. A hash change therefore creates a pre-turn compact even for raw
+history: the previous model runs first, the current model is tried once if that
+model is unavailable or fails, and the pending user message remains outside the
+compact request until replay. The durable transition marker carries the target
+model and hash so restart recovery follows the same path. The
 authenticated model catalog refreshes every five minutes and immediately after
 an `x-models-etag` change; known fallback profiles cover temporary catalog
 failure without becoming a second live source of truth.

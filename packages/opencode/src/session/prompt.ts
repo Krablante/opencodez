@@ -60,7 +60,6 @@ import { SessionModelContext } from "./model-context"
 import { LLMEvent } from "@opencode-ai/llm"
 import { Token } from "@/util/token"
 import { LLMRequestPrep } from "./llm/request"
-import { CodexResponsesCatalog } from "@/opencodez/codex-responses/catalog"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1210,11 +1209,18 @@ const layer = Layer.effect(
             continue
           }
 
-          if (yield* compaction.needsRemoteRefresh({ messages: msgs, model })) {
-            yield* Effect.logInfo("refreshing remote compaction backend snapshot", {
+          const remoteTransition = yield* compaction.remoteTransition({
+            sessionID,
+            turnID: activeTurnID,
+            messages: msgs,
+            model,
+          })
+          if (remoteTransition) {
+            yield* Effect.logInfo("transitioning remote compaction backend snapshot", {
               "session.id": sessionID,
               model: model.api.id,
-              compHash: CodexResponsesCatalog.resolve(model)?.compHash,
+              sourceModel: remoteTransition.sourceModel.modelID,
+              compHash: remoteTransition.targetCompHash,
             })
             yield* compaction.create({
               sessionID,
@@ -1223,9 +1229,11 @@ const layer = Layer.effect(
               auto: true,
               phase: "pre-turn",
               turnID: activeTurnID,
+              transition: remoteTransition,
             })
             continue
           }
+          yield* compaction.recordRemoteTurn({ sessionID, turnID: activeTurnID, model })
 
           const additionalTokens = modelNeedsFollowUp
             ? (lastAssistantMsg?.parts.reduce((total, part) => {

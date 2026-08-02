@@ -415,6 +415,18 @@ export function estimateText(value: string) {
   return Math.max(0, Math.ceil(Buffer.byteLength(value, "utf8") / 4))
 }
 
+export function canRetryWithCurrentModel(cause: unknown) {
+  const seen = new Set<unknown>()
+  let current = cause
+  while (current && !seen.has(current)) {
+    seen.add(current)
+    if (current instanceof DOMException && (current.name === "AbortError" || current.name === "TimeoutError"))
+      return false
+    current = current instanceof Error ? current.cause : undefined
+  }
+  return true
+}
+
 function truncateText(value: string, tokens: number) {
   const maxBytes = tokens * 4
   if (Buffer.byteLength(value, "utf8") <= maxBytes) return value
