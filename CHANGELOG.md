@@ -24,6 +24,7 @@
 - ChatGPT OAuth compaction now follows Codex Remote Compaction V2 on the normal streamed `/responses` transport with `compaction_trigger`. One opaque compaction item plus bounded retained user context is persisted, restored after restart, and prepended to later Responses requests without resending pre-compaction history. Long text is no longer globally double-counted, original-detail images receive a safe maximum estimate, exact oversized input replay terminates instead of looping, partial durable output is never duplicated by retry, and all retry budgets are finite. Remote compaction errors remain visible and never silently downgrade to a local summary.
 - Remote compaction defaults to the Codex 90% input-window threshold. `opencodez.responses.compaction.threshold` can compact earlier, while optional `token_limit` provides a lower absolute cap.
 - Aligned the ChatGPT OAuth wire with current Codex model metadata and Responses Lite: context, automatic-compaction limits, `comp_hash`, and Lite support now come from an ETag-refreshed authenticated catalog with bounded fallback profiles; opaque compaction injection uses an expiring one-shot handoff; Unicode payload accounting is UTF-8 safe; and sampling/compaction share exact finite WebSocket-to-HTTP retry budgets with a bounded sticky-fallback pool.
+- OpenCodez binary builds now fail closed unless production mode is explicit: `OPENCODEZ_BUILD=1`, channel `latest`, and an OpenCodez version with `+opencodez.N` metadata are all required before artifact generation.
 
 ## 1.18.4+opencodez.3
 

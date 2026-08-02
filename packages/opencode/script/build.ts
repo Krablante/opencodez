@@ -4,6 +4,7 @@ import { $ } from "bun"
 import path from "path"
 import { fileURLToPath } from "url"
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
+import pkg from "../package.json"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -11,15 +12,16 @@ const dir = path.resolve(__dirname, "..")
 
 process.chdir(dir)
 
-const generated = await import("./generate.ts")
-
-import pkg from "../package.json"
-
 if (process.env.OPENCODEZ_BUILD === "1") {
-  process.env.OPENCODE_VERSION ??= pkg.version
-  process.env.OPENCODE_CHANNEL ??= "latest"
+  if (!/^\d+\.\d+\.\d+\+opencodez\.\d+$/.test(process.env.OPENCODE_VERSION ?? "")) {
+    throw new Error("OpenCodez production builds require explicit OPENCODE_VERSION=X.Y.Z+opencodez.N")
+  }
+  if (process.env.OPENCODE_CHANNEL !== "latest") {
+    throw new Error("OpenCodez production builds require explicit OPENCODE_CHANNEL=latest")
+  }
 }
 
+const generated = await import("./generate.ts")
 const { Script } = await import("@opencode-ai/script")
 
 const singleFlag = process.argv.includes("--single")
