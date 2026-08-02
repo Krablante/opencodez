@@ -13,9 +13,12 @@ export type Profile = {
   readonly responsesLite: boolean
 }
 
-type Catalog = {
-  readonly accountKey: string
+export type Snapshot = {
   readonly profiles: ReadonlyMap<string, Profile>
+}
+
+type Catalog = Snapshot & {
+  readonly accountKey: string
   readonly etag?: string
   readonly expiresAt: number
 }
@@ -56,21 +59,22 @@ export async function initialize<T extends Record<string, Model>>(
     readonly fetcher?: typeof fetch
   },
 ) {
+  if (!CodexResponsesProtocol.accountKey(input.auth.accountId, input.auth.access)) return models
   await refresh(input)
   return models
 }
 
-export function resolve(model: Model, accountKey?: string): Profile | undefined {
-  return resolveID(model.api.id, accountKey)
+export function resolve(model: Model, accountKey?: string, snapshot?: Snapshot): Profile | undefined {
+  return resolveID(model.api.id, accountKey, snapshot)
 }
 
-export function resolveID(modelID: string, accountKey?: string): Profile | undefined {
-  const catalog = accountKey ? cache.get(accountKey) : undefined
-  if (catalog && accountKey) {
+export function resolveID(modelID: string, accountKey?: string, snapshot?: Snapshot): Profile | undefined {
+  const cached = accountKey ? cache.get(accountKey) : undefined
+  if (cached && accountKey) {
     cache.delete(accountKey)
-    cache.set(accountKey, catalog)
+    cache.set(accountKey, cached)
   }
-  return catalog?.profiles.get(modelID) ?? FALLBACK.get(modelID)
+  return (cached ?? snapshot)?.profiles.get(modelID) ?? FALLBACK.get(modelID)
 }
 
 export function needsRefresh(auth: Extract<Auth.Info, { type: "oauth" }>) {

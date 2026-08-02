@@ -22,8 +22,9 @@ The upstream full-request WebSocket transport is enabled by default on `local`,
    only new input items with `previous_response_id`.
 9. Capture `x-codex-turn-state` from response metadata or HTTP fallback
    headers, plus WebSocket upgrade headers when the runtime exposes them. Bun's
-   client does not expose upgrade response headers, so the standalone binary
-   uses backend metadata without adding another handshake. Keep the state in
+   client exposes neither rejected-upgrade status nor headers, so the standalone
+   binary switches an opaque non-101 handshake directly to HTTP and uses backend
+   metadata without adding another socket stack. Keep the state in
    `client_metadata` for follow-ups within the same logical user turn,
    including compaction, then clear it at the next turn without discarding
    compatible continuation state.
@@ -42,7 +43,9 @@ minutes or when a stream reports a new `x-models-etag`, with one deduplicated
 in-flight request and a short known-profile fallback. Responses Lite models move
 tools and instructions into developer input items, use `all_turns` reasoning
 context, strip image `detail`, and carry the required HTTP header or WebSocket
-metadata marker. Legacy wire mode keeps the unmodified request shape.
+metadata marker. Without verified identity, a request can use its fresh catalog
+response but does not add it to the reusable account cache. Legacy wire mode
+keeps the unmodified request shape.
 
 ## Lifetime
 
@@ -67,7 +70,9 @@ metadata marker. Legacy wire mode keeps the unmodified request shape.
 - WebSocket upgrade status 426 selects sticky HTTP fallback immediately without
   spending the WebSocket retry budget.
 - An HTTP or pre-output WebSocket 401 performs one deduplicated OAuth refresh and
-  replays the request once. A second 401 is returned normally.
+  replays the request once only when account affinity is unchanged. An identity
+  change or second 401 is returned normally so a later request is rebuilt from
+  canonical session state.
 - `previous_response_not_found` opens a fresh socket and retries the current
   canonical full request once without consuming the normal stream-failure
   budget. A repeated failure is returned normally.

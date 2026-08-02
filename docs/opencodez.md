@@ -150,8 +150,10 @@ The authenticated Codex `/models` catalog is the live source for model context,
 automatic-compaction limits, `comp_hash`, and Responses Lite support. OpenCodez
 caches one account-scoped catalog for five minutes, deduplicates concurrent
 refreshes, and marks it stale whenever a Responses stream reports a different
-`x-models-etag`. A failed refresh uses known fallback profiles for one minute
-instead of blocking model access.
+`x-models-etag`. A request without verified account identity can use its fresh
+catalog response but never stores it for reuse. A failed account-scoped refresh
+uses known fallback profiles for one minute instead of blocking model access;
+an uncached failure applies that fallback only to its current request.
 
 When a model advertises Responses Lite, OpenCodez applies the Codex Lite shape at
 the authenticated fetch boundary. Tools become an `additional_tools` developer
@@ -178,8 +180,9 @@ Within one tool-driven turn, OpenCodez captures the Codex
 `x-codex-turn-state` sticky-routing token from response metadata or HTTP
 fallback headers, plus WebSocket upgrade headers when the runtime exposes them,
 and returns it in subsequent sampling and remote-compaction requests. Bun's
-client does not expose upgrade response headers, so standalone binaries use the
-backend metadata event without adding another handshake or socket stack. The
+client exposes neither rejected-upgrade status nor headers, so standalone
+binaries switch an opaque non-101 handshake directly to HTTP and use the backend
+metadata event for sticky state without another socket stack. The
 logical turn ID survives synthetic compaction markers and is intentionally
 cleared only when the next real user turn begins, while the compatible WebSocket
 and `previous_response_id` may remain reusable. If the server can no longer
@@ -452,6 +455,11 @@ change schedules one deduplicated refresh without a service restart. Known
 profiles remain only as a short-lived fallback for catalog outages; maintainers
 update those profiles when adding a supported base model, not for routine
 backend metadata changes.
+
+A pre-output 401 performs one deduplicated OAuth refresh. OpenCodez replays the
+already lowered request only when the refreshed account affinity is unchanged;
+if identity changed, the failed attempt returns normally and the next request is
+rebuilt from canonical session state under the new account.
 
 ## Session Behavior
 

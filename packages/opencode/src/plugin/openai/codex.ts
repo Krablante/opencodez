@@ -443,9 +443,10 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 ? new URL(codexApiEndpoint)
                 : parsed
 
-            if (parsed.pathname.endsWith("/responses") && CodexResponsesCatalog.needsRefresh(currentAuth)) {
-              await CodexResponsesCatalog.refresh({ auth: currentAuth, endpoint: codexApiEndpoint })
-            }
+            const catalog =
+              parsed.pathname.endsWith("/responses") && CodexResponsesCatalog.needsRefresh(currentAuth)
+                ? await CodexResponsesCatalog.refresh({ auth: currentAuth, endpoint: codexApiEndpoint })
+                : undefined
 
             const handoff = headers.get(CodexResponsesCompaction.HEADER) ?? undefined
             headers.delete(CodexResponsesCompaction.HEADER)
@@ -457,6 +458,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                   codexWire,
                   headers,
                   CodexResponsesProtocol.accountKey(authWithAccount.accountId, currentAuth.access),
+                  catalog,
                 )
               : undefined
             if (lowered?.responsesLite) headers.set(CodexResponsesCatalog.RESPONSES_LITE_HEADER, "true")
@@ -471,14 +473,18 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 ? await websocketFetch(url, requestInit)
                 : await fetch(url, CodexResponsesTransport.withoutInternalHeaders(requestInit))
             if (response.status === 401) {
-              await response.body?.cancel().catch(() => {})
               const refreshed = await refreshAuth()
               currentAuth.access = refreshed.access
               authWithAccount.accountId = refreshed.accountId
+              const affinity = CodexResponsesProtocol.accountKey(authWithAccount.accountId, currentAuth.access)
+              // The lowered body may contain account-scoped catalog or compacted
+              // state. Let the caller retry from canonical session state instead
+              // of replaying that body after an unexpected identity change.
+              if (affinity !== accountAffinity) return response
+              await response.body?.cancel().catch(() => {})
               headers.set("authorization", `Bearer ${refreshed.access}`)
               if (refreshed.accountId) headers.set("ChatGPT-Account-Id", refreshed.accountId)
               if (!refreshed.accountId) headers.delete("ChatGPT-Account-Id")
-              const affinity = CodexResponsesProtocol.accountKey(authWithAccount.accountId, currentAuth.access)
               if (affinity) headers.set(CodexResponsesTransport.ACCOUNT_AFFINITY_HEADER, affinity)
               if (!affinity) headers.delete(CodexResponsesTransport.ACCOUNT_AFFINITY_HEADER)
               response =

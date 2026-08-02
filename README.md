@@ -238,9 +238,12 @@ response and reasoning IDs are never reused across account boundaries.
 Each request also carries one Codex-compatible metadata snapshot for its
 installation, session/thread, logical turn, compacted window, and request kind.
 An expired OAuth token gets one response-driven refresh and safe retry before any
-model output; WebSocket upgrade status 426 switches that session to HTTP
+model output, provided the refreshed account identity still matches the request;
+an identity change fails the attempt so the next request starts from canonical
+session state. WebSocket upgrade status 426 switches that session to HTTP
 immediately. If account identity cannot be verified, OpenCodez uses uncached HTTP
-and refuses to reuse account-scoped continuation or compacted state.
+and the current uncached catalog response, but refuses to reuse account-scoped
+continuation or compacted state.
 
 For ChatGPT OAuth, automatic and manual compaction use Codex Remote Compaction
 V2: a normal streamed `/responses` request whose final input item is
