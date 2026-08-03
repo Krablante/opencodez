@@ -1,4 +1,5 @@
 import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { CodexResponsesCatalog, type Profile } from "./catalog"
 
 export const HEADER = "x-opencodez-responses-compaction-handoff"
 export const METADATA_KEY = "opencodez.responses.compaction"
@@ -27,6 +28,9 @@ export type TurnSettings = {
     apiModelID?: string
   }
   compHash?: string
+  accountKey?: string
+  profile?: Profile
+  serverReasoningIncluded?: boolean
 }
 
 export function turnSettings(metadata: Record<string, unknown> | undefined) {
@@ -46,7 +50,10 @@ export function withTurnSettings(
     existing.model.providerID === input.model.providerID &&
     existing.model.modelID === input.model.modelID &&
     existing.model.apiModelID === input.model.apiModelID &&
-    existing.compHash === input.compHash
+    existing.compHash === input.compHash &&
+    existing.accountKey === input.accountKey &&
+    profilesEqual(existing.profile, input.profile) &&
+    existing.serverReasoningIncluded === input.serverReasoningIncluded
   )
     return metadata ?? {}
   return {
@@ -222,7 +229,26 @@ function isTurnSettings(value: unknown): value is TurnSettings {
   if (!("modelID" in value.model) || typeof value.model.modelID !== "string") return false
   if ("apiModelID" in value.model && value.model.apiModelID !== undefined && typeof value.model.apiModelID !== "string")
     return false
-  return !("compHash" in value) || value.compHash === undefined || typeof value.compHash === "string"
+  if ("compHash" in value && value.compHash !== undefined && typeof value.compHash !== "string") return false
+  if ("accountKey" in value && value.accountKey !== undefined && typeof value.accountKey !== "string") return false
+  if ("profile" in value && value.profile !== undefined && !CodexResponsesCatalog.isProfile(value.profile)) return false
+  return (
+    !("serverReasoningIncluded" in value) ||
+    value.serverReasoningIncluded === undefined ||
+    typeof value.serverReasoningIncluded === "boolean"
+  )
+}
+
+function profilesEqual(left: Profile | undefined, right: Profile | undefined) {
+  if (left === right) return true
+  if (!left || !right) return false
+  return (
+    left.modelID === right.modelID &&
+    left.contextWindow === right.contextWindow &&
+    left.autoCompactTokenLimit === right.autoCompactTokenLimit &&
+    left.compHash === right.compHash &&
+    left.responsesLite === right.responsesLite
+  )
 }
 
 export * as CodexResponsesCompaction from "./compaction"

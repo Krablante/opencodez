@@ -14,7 +14,6 @@ import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
 import { ProviderTransform } from "@/provider/transform"
 import { Config } from "@/config/config"
 import type { Agent } from "@/agent/agent"
-import type { MessageV2 } from "./message-v2"
 import { Plugin } from "@/plugin"
 import { Permission } from "@/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -29,6 +28,8 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import { CodexResponsesCompaction } from "@/opencodez/codex-responses/compaction"
+import { CodexResponsesTransport } from "@/opencodez/codex-responses/transport"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -48,6 +49,7 @@ export type StreamInput = {
   retries?: number
   toolChoice?: "auto" | "required" | "none"
   onPrepared?: (prepared: LLMRequestPrep.Prepared) => void
+  codexResponsesTurn?: CodexResponsesCompaction.TurnSettings
 }
 
 export type StreamRequest = StreamInput & {
@@ -285,6 +287,14 @@ const live: Layer.Layer<
       return {
         type: "ai-sdk" as const,
         result: streamText({
+          onStepFinish(event) {
+            if (!prepared.codexResponsesTurn) return
+            const included = Object.keys(event.response.headers ?? {}).some(
+              (key) => key.toLowerCase() === CodexResponsesTransport.REASONING_INCLUDED_HEADER,
+            )
+            prepared.codexResponsesTurn.serverReasoningIncluded = included
+            prepared.codexResponsesTurn.settings.serverReasoningIncluded = included
+          },
           onError(error) {
             bridge.fork(
               Effect.logError("stream error", {

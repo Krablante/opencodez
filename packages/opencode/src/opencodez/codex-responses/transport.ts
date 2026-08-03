@@ -12,6 +12,9 @@ export const TITLE_HEADER = "x-opencode-title"
 export const TURN_ID_HEADER = "x-opencodez-turn-id"
 export const ACCOUNT_AFFINITY_HEADER = "x-opencodez-account-affinity"
 export const TURN_STATE_HEADER = "x-codex-turn-state"
+export const TURN_PROFILE_HEADER = "x-opencodez-codex-turn-profile"
+export const TURN_ACCOUNT_HEADER = "x-opencodez-codex-turn-account"
+export const REASONING_INCLUDED_HEADER = "x-reasoning-included"
 
 export interface CreateWebSocketFetchOptions {
   httpFetch?: typeof globalThis.fetch
@@ -35,6 +38,7 @@ interface PoolEntry {
   continuation: Continuation
   turnID?: string
   turnState?: string
+  reasoningIncluded?: boolean
 }
 
 const DEFAULT_CONNECT_TIMEOUT = 15_000
@@ -104,25 +108,19 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     trimPool()
     const turnID = internalHeaders[TURN_ID_HEADER]
 
+    if (turnID !== entry.turnID) {
+      entry.turnID = turnID
+      entry.turnState = undefined
+      entry.continuation.reset()
+    }
+
     if (entry.fallback || (entry.fallbackUntil ?? 0) > Date.now()) {
-      if (turnID !== entry.turnID) {
-        entry.turnID = turnID
-        entry.turnState = undefined
-      }
       return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
     }
     entry.fallbackUntil = undefined
     if (entry.busy) {
       entry.continuation.reset()
-      if (turnID !== entry.turnID) {
-        entry.turnID = turnID
-        entry.turnState = undefined
-      }
       return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
-    }
-    if (turnID !== entry.turnID) {
-      entry.turnID = turnID
-      entry.turnState = undefined
     }
 
     entry.busy = true
@@ -140,7 +138,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         connectTimeout,
         maxConnectionAge,
         init?.signal,
-        (headers) => captureHeaderTurnState(entry, turnID, headers),
+        (headers) => captureUpgradeHeaders(entry, turnID, headers),
       )
       let resolveFirstEvent: (event: boolean | OpenAIWebSocket.WrappedError) => void = () => {}
       let rejectFirstEvent: (error: Error) => void = () => {}
@@ -152,7 +150,8 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
       let transaction = options?.wire === "codex" ? entry.continuation.transaction(body) : undefined
       const requestBody = withTurnState(prepared ?? body, entry.turnState)
       let recoveredPreviousResponse = false
-      const response = OpenAIWebSocket.streamResponsesWebSocket({
+      let response: Response
+      response = OpenAIWebSocket.streamResponsesWebSocket({
         socket: entry.socket,
         body: requestBody,
         idleTimeout,
@@ -161,6 +160,10 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         onEvent: (event) => {
           captureModelsEtag(event, internalHeaders[ACCOUNT_AFFINITY_HEADER], options?.onModelsEtag)
           captureEventTurnState(entry, turnID, event)
+          if (CodexResponsesProtocol.headerValue(event, REASONING_INCLUDED_HEADER) !== undefined) {
+            entry.reasoningIncluded = true
+            response.headers.set(REASONING_INCLUDED_HEADER, "true")
+          }
           transaction?.event(event)
         },
         onComplete: (event) => transaction?.complete(event),
@@ -211,7 +214,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
               connectTimeout,
               maxConnectionAge,
               init?.signal,
-              (headers) => captureHeaderTurnState(entry, turnID, headers),
+              (headers) => captureUpgradeHeaders(entry, turnID, headers),
             )
             transaction = entry.continuation.transaction(body)
             return { socket: entry.socket, body: withTurnState(body, entry.turnState) }
@@ -221,6 +224,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
           throw error
         },
       })
+      if (entry.reasoningIncluded) response.headers.set(REASONING_INCLUDED_HEADER, "true")
       const first = await firstEvent
       if (first !== false) {
         if (first === true || first.status < 200 || first.status > 599) return response
@@ -351,6 +355,11 @@ function captureHeaderTurnState(entry: PoolEntry, turnID: string | undefined, he
   if (state) entry.turnState = state
 }
 
+function captureUpgradeHeaders(entry: PoolEntry, turnID: string | undefined, headers: Record<string, string>) {
+  captureHeaderTurnState(entry, turnID, headers)
+  entry.reasoningIncluded = REASONING_INCLUDED_HEADER in headers
+}
+
 async function fallbackFetch(
   fetcher: typeof globalThis.fetch,
   input: RequestInfo | URL,
@@ -448,6 +457,7 @@ function invalidate(entry: PoolEntry) {
     entry.socket = undefined
   }
   entry.connectedAt = undefined
+  entry.reasoningIncluded = undefined
 }
 
 export function withoutInternalHeaders<T extends { headers?: HeadersInit }>(init: T | undefined): T | undefined {
@@ -457,6 +467,8 @@ export function withoutInternalHeaders<T extends { headers?: HeadersInit }>(init
     headers.delete(TITLE_HEADER)
     headers.delete(TURN_ID_HEADER)
     headers.delete(ACCOUNT_AFFINITY_HEADER)
+    headers.delete(TURN_PROFILE_HEADER)
+    headers.delete(TURN_ACCOUNT_HEADER)
     headers.delete(CodexResponsesAttempt.REQUEST_KIND_HEADER)
     CodexResponsesProtocol.internalHeaders.forEach((key) => headers.delete(key))
     return { ...init, headers }
@@ -481,6 +493,8 @@ function isInternalHeader(value: string) {
     key === TITLE_HEADER ||
     key === TURN_ID_HEADER ||
     key === ACCOUNT_AFFINITY_HEADER ||
+    key === TURN_PROFILE_HEADER ||
+    key === TURN_ACCOUNT_HEADER ||
     key === CodexResponsesAttempt.REQUEST_KIND_HEADER ||
     CodexResponsesProtocol.internalHeaders.includes(key)
   )

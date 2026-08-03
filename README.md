@@ -215,11 +215,12 @@ Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one p
 
 `opencodez.responses.wire` accepts `codex` or `legacy` and defaults to `codex`.
 The default applies only to OpenAI models authenticated through ChatGPT OAuth.
-It sends incremental input with `previous_response_id` while a matching WebSocket
-conversation remains live, and safely returns to a full request after reconnects,
-interruptions, context changes, or model-setting changes. Set the value to
-`legacy` to restore the previous request flow. API-key OpenAI access and other
-providers keep their existing behavior.
+It sends incremental input with `previous_response_id` between requests inside
+one tool-driven user turn. A new user turn keeps the warm WebSocket but starts
+from one full canonical request, as Codex does. Reconnects, interruptions,
+context changes, and model-setting changes also return safely to a full request.
+Set the value to `legacy` to restore the previous request flow. API-key OpenAI
+access and other providers keep their existing behavior.
 
 OpenCodez reads ChatGPT model capabilities from the authenticated Codex model
 catalog and refreshes them on the catalog ETag. GPT-5.6 models that advertise
@@ -241,6 +242,11 @@ OpenCodez records a bounded history of recent turn model settings. If the
 catalog `comp_hash` changes between turns, it compacts the previous history with
 the previous model before sampling the new turn, then retries once with the
 current model only when the previous model can no longer complete the compact.
+The authenticated catalog profile is frozen for the complete logical turn, so
+an ETag refresh cannot change `comp_hash`, Responses Lite lowering, or context
+limits halfway through a tool loop. Switching ChatGPT login during an active
+turn stops that turn with a retryable message; the next user message starts
+safely under the new account.
 An expired OAuth token gets one response-driven refresh and safe retry before any
 model output, provided the refreshed account identity still matches the request;
 an identity change fails the attempt so the next request starts from canonical
@@ -282,12 +288,17 @@ outputs are bounded across the request while images from the complete active
 parallel-tool batch are preserved.
 Only verbatim tool output receives an additional estimation margin; ordinary
 text is not globally double-counted, and `detail: "original"` images use a safe
-10,000-token maximum. The durable local history is unchanged. Newly completed tool output is included
-in the preflight limit, remote state is bound to its base API model and ChatGPT
-account, and Stop cancels the compact request through response-body processing.
+10,000-token maximum. When the backend does not include retained encrypted
+reasoning in reported usage, OpenCodez adds the same historical estimate as
+Codex before deciding to compact. The durable local history is unchanged. Newly
+completed tool output is included in the preflight limit, remote state is bound
+to its base API model and backend `comp_hash` but remains portable between
+ChatGPT accounts, and Stop cancels the compact request through response-body
+processing.
 The UI reports compaction only after the returned remote state is persisted. The
-remote stream has two bounded retries on each transport, remains cancellable
-with the session, and still has no local-summary fallback.
+remote stream has two bounded retries on each transport, honors a server
+`Retry-After` delay, remains cancellable with the session, and still has no
+local-summary fallback.
 
 `opencodez.responses.compaction.threshold` is a fraction of the model's input
 window and defaults to the Codex policy of `0.9`. It accepts values greater than

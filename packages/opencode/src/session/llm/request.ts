@@ -45,10 +45,15 @@ type PrepareInput = {
   readonly isWorkflow: boolean
   readonly config: ConfigInfo
   readonly allowCompHashMismatch?: boolean
+  readonly codexResponsesTurn?: CodexResponsesCompaction.TurnSettings
 }
 
 export type Prepared = {
   readonly codexResponses: boolean
+  readonly codexResponsesTurn?: {
+    readonly settings: CodexResponsesCompaction.TurnSettings
+    serverReasoningIncluded?: boolean
+  }
   readonly system: string[]
   readonly messages: ModelMessage[]
   readonly tools: Record<string, Tool>
@@ -73,6 +78,14 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     input.auth?.type === "oauth"
       ? CodexResponsesProtocol.accountKey(input.auth.accountId, input.auth.access)
       : undefined
+  if (input.codexResponsesTurn?.accountKey && input.codexResponsesTurn.accountKey !== accountKey) {
+    return yield* Effect.fail(
+      new Error("The ChatGPT login changed during the active turn. Retry with a new message to continue safely."),
+    )
+  }
+  const turnProfile =
+    input.codexResponsesTurn?.profile?.modelID === input.model.api.id ? input.codexResponsesTurn.profile : undefined
+  const profile = turnProfile ?? CodexResponsesCatalog.resolve(input.model, accountKey)
   if (CodexResponsesCompaction.has(input.sessionMetadata) && !isOpenaiOauth) {
     return yield* Effect.fail(
       new Error("This session contains OpenAI remote compaction state and must continue with ChatGPT OAuth"),
@@ -80,7 +93,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   }
   const compatibilityError = CodexResponsesCompaction.compatibilityError(input.sessionMetadata, {
     modelID: input.model.api.id,
-    compHash: CodexResponsesCatalog.resolve(input.model, accountKey)?.compHash,
+    compHash: profile?.compHash,
     allowCompHashMismatch: input.allowCompHashMismatch,
   })
   if (compatibilityError) return yield* Effect.fail(new Error(compatibilityError))
@@ -236,6 +249,18 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
 
   return {
     codexResponses,
+    ...(codexResponses && input.codexResponsesTurn
+      ? {
+          codexResponsesTurn: {
+            settings: {
+              ...input.codexResponsesTurn,
+              model: { ...input.codexResponsesTurn.model },
+              profile: input.codexResponsesTurn.profile ? { ...input.codexResponsesTurn.profile } : undefined,
+            },
+            serverReasoningIncluded: input.codexResponsesTurn.serverReasoningIncluded,
+          },
+        }
+      : {}),
     system,
     messages,
     tools: Object.fromEntries(Object.entries(tools).toSorted(([a], [b]) => a.localeCompare(b))),
@@ -254,6 +279,14 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
             "x-session-affinity": input.sessionID,
             "X-Session-Id": input.sessionID,
             ...(isOpenaiOauth ? { [CodexResponsesTransport.TURN_ID_HEADER]: input.turnID ?? input.user.id } : {}),
+            ...(codexResponses && input.codexResponsesTurn?.accountKey
+              ? { [CodexResponsesTransport.TURN_ACCOUNT_HEADER]: input.codexResponsesTurn.accountKey }
+              : {}),
+            ...(codexResponses && turnProfile
+              ? {
+                  [CodexResponsesTransport.TURN_PROFILE_HEADER]: CodexResponsesCatalog.encodeProfile(turnProfile),
+                }
+              : {}),
             ...(codexResponses
               ? {
                   [CodexResponsesProtocol.INTERNAL_WINDOW_ID_HEADER]: CodexResponsesCompaction.windowID(

@@ -20,8 +20,9 @@ The upstream full-request WebSocket transport is enabled by default on `local`,
    the session/thread id as `x-client-request-id`.
 7. In `legacy` mode, send the complete `response.create` body. WebSocket frames
    retain the explicit `stream: true` request field.
-8. In `codex` mode, send the first request in full. Later matching requests send
-   only new input items with `previous_response_id`.
+8. In `codex` mode, send the first request of each logical user turn in full.
+   Later matching requests inside that turn send only new input items with
+   `previous_response_id`; a healthy socket may remain open across the boundary.
 9. Capture `x-codex-turn-state` from response metadata or HTTP fallback
    headers, plus WebSocket upgrade headers when the runtime exposes them. Bun's
    client exposes neither rejected-upgrade status nor headers, so the standalone
@@ -29,11 +30,14 @@ The upstream full-request WebSocket transport is enabled by default on `local`,
    waits one minute before trying WebSocket again, and uses backend metadata
    without adding another socket stack. Keep the state in
    `client_metadata` for follow-ups within the same logical user turn,
-   including compaction, then clear it at the next turn without discarding
-   compatible continuation state.
-10. Return WebSocket events as SSE. Server-selected model, reasoning, rate-limit,
-    moderation, verification, and safety metadata remains on that stream; it is
-    advisory and is not persisted as local conversation state.
+   including compaction, then clear it together with continuation at the next
+   turn without discarding a healthy socket.
+10. Return WebSocket events as SSE. Preserve the handshake's
+    `x-reasoning-included` signal on the synthetic response so normal usage
+    accounting can distinguish server-counted historical reasoning.
+    Server-selected model, reasoning, rate-limit, moderation, verification, and
+    safety metadata remains on that stream; it is advisory and is not persisted
+    as local conversation state.
 
 For ChatGPT OAuth, the fetch adapter supplies the Codex product originator.
 Model-catalog Fast aliases already lower to the same base model with
@@ -50,6 +54,13 @@ metadata marker. Without verified identity, a request can use its fresh catalog
 response but does not add it to the reusable account cache. Legacy wire mode
 keeps the unmodified request shape.
 
+The first request records a bounded turn profile containing account affinity,
+the base API model, context limits, `comp_hash`, and Responses Lite capability.
+Every sampling and compaction request in that logical turn uses the same profile,
+even if an ETag refresh updates the account catalog in the background. A login
+change during the active turn fails before another request is sent; the next user
+message starts a fresh lane while durable encrypted compaction remains portable.
+
 ## Lifetime
 
 - Connect timeout: 15 seconds.
@@ -58,7 +69,8 @@ keeps the unmodified request shape.
 - Reuse a socket for up to 55 minutes, then replace it on the next request.
 - Cool down WebSocket for one minute after an opaque Bun upgrade rejection.
 - Reset Codex continuation state whenever the socket is replaced, aborted, or
-  fails.
+  fails, and at every logical user-turn boundary. Turn changes do not close a
+  healthy socket.
 - Scope pool entries to both session ID and ChatGPT account ID. A login change
   therefore starts a full request chain instead of reusing account-scoped
   response or reasoning IDs. If the account id claim is absent, the OAuth
@@ -92,6 +104,9 @@ keeps the unmodified request shape.
   upstream partial-output policy.
 - OpenAI session retries are finite. One derived policy owns both sides of the
   WebSocket-to-HTTP transition, preventing nested retry multiplication.
+- Remote compaction uses a valid server `Retry-After` value instead of local
+  exponential delay for that retry; the existing attempt and operation limits
+  remain authoritative.
 - Abort or cancel closes the socket.
 
 ## Concurrency
@@ -108,7 +123,7 @@ Revert and edit keep local session history authoritative. Staging and clearing a
 revert do not mutate messages. Committing a replacement deletes the selected
 message and later tail, so the next Codex-wire request fails prefix matching by
 design, omits `previous_response_id`, and starts a full-request branch. Later
-turns continue incrementally from that branch. A restart also forces a full
+requests inside that turn continue incrementally from the branch. A restart also forces a full
 request reconstructed from the edited local history. Forked sessions use new
 message IDs, so their reverts cannot mutate the original session.
 
@@ -178,11 +193,15 @@ parallel-output batch. Only tool outputs receive a second conservative estimate,
 so ordinary text can use the full safe window. If those eligible rewrites still
 cannot fit, the request fails locally instead of sending a predictably rejected
 payload. The durable history is not rewritten. A compaction stream retries
-transient failures at most twice per transport; manual compaction does not
-auto-continue.
+transient failures at most twice per transport and honors `Retry-After`; manual
+compaction does not auto-continue.
 
 Persisted opaque state records the source API model and catalog `comp_hash`.
-Session metadata also keeps the latest 32 logical-turn model/hash settings. A
+Session metadata also keeps the latest 32 logical-turn model profiles and each
+active turn's `x-reasoning-included` state. The signal resets at the next user
+boundary. When the header is absent, encrypted reasoning before the current user
+boundary receives Codex's base64-aware token estimate for the compaction
+decision only. A
 hash change therefore creates a pre-turn compact even for raw history: the
 previous model runs first, the current model is tried once if that model is
 unavailable or fails, and the pending user message remains outside the compact

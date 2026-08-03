@@ -39,6 +39,7 @@ import { ToolRegistry } from "@/tool/registry"
 import { MCP } from "@/mcp"
 import { Truncate } from "@/tool/truncate"
 import { errorMessage } from "@/util/error"
+import { isRecord } from "@/util/record"
 
 export const Event = SessionCompactionEvent
 
@@ -74,6 +75,23 @@ type ModelRef = { providerID: ProviderV2.ID; modelID: ModelV2.ID }
 type RemoteTransition = {
   sourceModel: ModelRef
   targetCompHash: string
+}
+
+function historicalReasoningTokens(messages: SessionV1.WithParts[], turnID: MessageID) {
+  const boundary = messages.findIndex((message) => message.info.role === "user" && message.info.id === turnID)
+  if (boundary < 0) return 0
+  return messages.slice(0, boundary).reduce((total, message) => {
+    return (
+      total +
+      message.parts.reduce((subtotal, part) => {
+        if (part.type !== "reasoning" || !isRecord(part.metadata) || !isRecord(part.metadata.openai)) return subtotal
+        const encrypted = part.metadata.openai.reasoningEncryptedContent
+        if (typeof encrypted !== "string") return subtotal
+        const bytes = Math.max(0, Math.floor((encrypted.length * 3) / 4) - 650)
+        return subtotal + Math.ceil(bytes / 4)
+      }, 0)
+    )
+  }, 0)
 }
 
 function summaryText(message: SessionV1.WithParts) {
@@ -159,6 +177,10 @@ export interface Interface {
     tokens: SessionV1.Assistant["tokens"]
     model: Provider.Model
     additionalTokens?: number
+    turn?: CodexResponsesCompaction.TurnSettings
+    serverReasoningIncluded?: boolean
+    messages?: SessionV1.WithParts[]
+    turnID?: MessageID
   }) => Effect.Effect<boolean>
   readonly remoteTransition: (input: {
     sessionID: SessionID
@@ -170,6 +192,10 @@ export interface Interface {
     sessionID: SessionID
     turnID: MessageID
     model: Provider.Model
+  }) => Effect.Effect<CodexResponsesCompaction.TurnSettings | undefined>
+  readonly saveRemoteTurn: (input: {
+    sessionID: SessionID
+    settings: CodexResponsesCompaction.TurnSettings
   }) => Effect.Effect<void>
   readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
   readonly process: (input: {
@@ -224,15 +250,22 @@ const layer = Layer.effect(
       tokens: SessionV1.Assistant["tokens"]
       model: Provider.Model
       additionalTokens?: number
+      turn?: CodexResponsesCompaction.TurnSettings
+      serverReasoningIncluded?: boolean
+      messages?: SessionV1.WithParts[]
+      turnID?: MessageID
     }) {
       const cfg = yield* config.get()
       const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
       let limit: number | undefined
       if (input.model.providerID === "openai" && authInfo?.type === "oauth") {
-        const profile = CodexResponsesCatalog.resolve(
-          input.model,
-          CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access),
-        )
+        const profile =
+          input.turn?.profile?.modelID === input.model.api.id
+            ? input.turn.profile
+            : CodexResponsesCatalog.resolve(
+                input.model,
+                CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access),
+              )
         limit = OpenCodezSettings.responsesCompactionLimit(
           cfg,
           input.model.limit,
@@ -245,7 +278,11 @@ const layer = Layer.effect(
         model: input.model,
         outputTokenMax: flags.outputTokenMax,
         limit,
-        additionalTokens: input.additionalTokens,
+        additionalTokens:
+          (input.additionalTokens ?? 0) +
+          (input.serverReasoningIncluded !== true && input.messages && input.turnID
+            ? historicalReasoningTokens(input.messages, input.turnID)
+            : 0),
       })
     })
 
@@ -255,12 +292,18 @@ const layer = Layer.effect(
       model: ModelRef
       apiModelID?: string
       compHash?: string
+      accountKey?: string
+      profile?: CodexResponsesCatalog.Profile
+      serverReasoningIncluded?: boolean
     }) {
       const info = yield* session.get(input.sessionID).pipe(Effect.orDie)
       const metadata = CodexResponsesCompaction.withTurnSettings(info.metadata, {
         turnID: input.turnID,
         model: { ...input.model, apiModelID: input.apiModelID },
         compHash: input.compHash,
+        accountKey: input.accountKey,
+        profile: input.profile,
+        serverReasoningIncluded: input.serverReasoningIncluded,
       })
       if (metadata === info.metadata) return
       yield* session.setMetadata({ sessionID: input.sessionID, metadata })
@@ -271,17 +314,68 @@ const layer = Layer.effect(
       turnID: MessageID
       model: Provider.Model
     }) {
-      if (input.model.providerID !== "openai") return
+      if (input.model.providerID !== "openai") return undefined
       const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
-      if (authInfo?.type !== "oauth") return
+      if (authInfo?.type !== "oauth") return undefined
       const accountKey = CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access)
-      if (!accountKey) return
+      if (!accountKey) return undefined
+      const info = yield* session.get(input.sessionID).pipe(Effect.orDie)
+      const journal = CodexResponsesCompaction.turnSettings(info.metadata)
+      const existing = journal.find((item) => item.turnID === input.turnID)
+      if (existing?.accountKey && existing.accountKey !== accountKey) {
+        throw new Error(
+          "The ChatGPT login changed during the active turn. Retry with a new message to continue safely.",
+        )
+      }
+      if (existing?.profile) return existing
+      yield* Effect.promise(() => CodexResponsesCatalog.settleRefresh(accountKey))
+      const profile = CodexResponsesCatalog.resolve(input.model, accountKey)
+      if (existing?.compHash && profile?.compHash && existing.compHash !== profile.compHash) {
+        throw new Error(
+          "The ChatGPT backend changed while resuming the active turn. Retry with a new message to continue safely.",
+        )
+      }
+      const settings = {
+        turnID: input.turnID,
+        model: {
+          providerID: input.model.providerID,
+          modelID: input.model.id,
+          apiModelID: input.model.api.id,
+        },
+        compHash: existing?.compHash ?? profile?.compHash,
+        accountKey,
+        profile,
+        serverReasoningIncluded: existing?.serverReasoningIncluded,
+      } satisfies CodexResponsesCompaction.TurnSettings
       yield* saveTurnSettings({
         sessionID: input.sessionID,
         turnID: input.turnID,
         model: { providerID: input.model.providerID, modelID: input.model.id },
         apiModelID: input.model.api.id,
-        compHash: CodexResponsesCatalog.resolve(input.model, accountKey)?.compHash,
+        compHash: settings.compHash,
+        accountKey,
+        profile,
+        serverReasoningIncluded: settings.serverReasoningIncluded,
+      })
+      return settings
+    })
+
+    const saveRemoteTurn = Effect.fn("SessionCompaction.saveRemoteTurn")(function* (input: {
+      sessionID: SessionID
+      settings: CodexResponsesCompaction.TurnSettings
+    }) {
+      yield* saveTurnSettings({
+        sessionID: input.sessionID,
+        turnID: MessageID.make(input.settings.turnID),
+        model: {
+          providerID: ProviderV2.ID.make(input.settings.model.providerID),
+          modelID: ModelV2.ID.make(input.settings.model.modelID),
+        },
+        apiModelID: input.settings.model.apiModelID,
+        compHash: input.settings.compHash,
+        accountKey: input.settings.accountKey,
+        profile: input.settings.profile,
+        serverReasoningIncluded: input.settings.serverReasoningIncluded,
       })
     })
 
@@ -709,7 +803,18 @@ const layer = Layer.effect(
       const remote = sourceModel.providerID === "openai" && authInfo?.type === "oauth"
       const accountKey =
         authInfo?.type === "oauth" ? CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access) : undefined
-      const targetProfile = accountKey ? CodexResponsesCatalog.resolve(targetModel, accountKey) : undefined
+      const turnSettings = input.prepared?.codexResponsesTurn?.settings
+      if (turnSettings?.accountKey && turnSettings.accountKey !== accountKey) {
+        throw new Error(
+          "The ChatGPT login changed during the active turn. Retry with a new message to continue safely.",
+        )
+      }
+      const targetProfile =
+        turnSettings?.profile?.modelID === targetModel.api.id
+          ? turnSettings.profile
+          : accountKey
+            ? CodexResponsesCatalog.resolve(targetModel, accountKey)
+            : undefined
       const previousCompaction = CodexResponsesCompaction.latest(history)
 
       if (remote) {
@@ -828,6 +933,10 @@ const layer = Layer.effect(
                 items: active.items,
                 sessionID: input.sessionID,
                 accountKey,
+                turnProfile:
+                  prepared.codexResponsesTurn?.settings.profile?.modelID === attemptModel.api.id
+                    ? prepared.codexResponsesTurn.settings.profile
+                    : undefined,
                 windowID: previousCompaction?.messageID ?? input.sessionID,
                 turnID: phase === "mid-turn" ? turnID : undefined,
                 compaction: {
@@ -846,7 +955,7 @@ const layer = Layer.effect(
                 },
                 preserveActiveToolMedia: phase === "mid-turn",
                 abort,
-              })
+              }).pipe(Effect.timeout(REMOTE_COMPACTION_TIMEOUT_MS))
             })
           const attempt = (attemptModel: Provider.Model, snapshot?: LLMRequestPrep.Prepared) =>
             run(attemptModel, snapshot).pipe(
@@ -1229,6 +1338,7 @@ const layer = Layer.effect(
       isOverflow,
       remoteTransition,
       recordRemoteTurn,
+      saveRemoteTurn,
       prune,
       process: processCompaction,
       create,

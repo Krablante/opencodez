@@ -1233,7 +1233,7 @@ const layer = Layer.effect(
             })
             continue
           }
-          yield* compaction.recordRemoteTurn({ sessionID, turnID: activeTurnID, model })
+          const remoteTurn = yield* compaction.recordRemoteTurn({ sessionID, turnID: activeTurnID, model })
 
           const additionalTokens = modelNeedsFollowUp
             ? (lastAssistantMsg?.parts.reduce((total, part) => {
@@ -1254,7 +1254,15 @@ const layer = Layer.effect(
           if (
             lastFinished &&
             lastFinished.summary !== true &&
-            (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model, additionalTokens }))
+            (yield* compaction.isOverflow({
+              tokens: lastFinished.tokens,
+              model,
+              additionalTokens,
+              turn: remoteTurn,
+              serverReasoningIncluded: remoteTurn?.serverReasoningIncluded,
+              messages: msgs,
+              turnID: activeTurnID,
+            }))
           ) {
             yield* compaction.create({
               sessionID,
@@ -1369,11 +1377,18 @@ const layer = Layer.effect(
               ],
               tools,
               model,
+              codexResponsesTurn: remoteTurn,
               toolChoice: format.type === "json_schema" ? "required" : undefined,
               onPrepared(prepared) {
                 preparedContext = prepared
               },
             })
+            if (preparedContext?.codexResponsesTurn?.serverReasoningIncluded !== undefined) {
+              yield* compaction.saveRemoteTurn({
+                sessionID,
+                settings: preparedContext.codexResponsesTurn.settings,
+              })
+            }
 
             if (structured !== undefined) {
               handle.message.structured = structured

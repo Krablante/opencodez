@@ -60,6 +60,7 @@ export function compact(input: {
   items: unknown[]
   sessionID: string
   accountKey: string
+  turnProfile?: CodexResponsesCatalog.Profile
   windowID: string
   turnID?: string
   compaction: {
@@ -74,7 +75,10 @@ export function compact(input: {
     const body = yield* toCompactInput(input)
     if (!Array.isArray(body.input)) throw new Error("OpenAI compact input must be an array")
     const request = compactBody(body, [...input.items.filter((item) => !isSystemMessage(item)), ...body.input])
-    const profile = CodexResponsesCatalog.resolve(input.model, input.accountKey)
+    const profile =
+      input.turnProfile?.modelID === input.model.api.id
+        ? input.turnProfile
+        : CodexResponsesCatalog.resolve(input.model, input.accountKey)
     const bounded = trimOutputs(
       request,
       OpenCodezSettings.responsesCompactionPayloadLimit(
@@ -115,6 +119,12 @@ export function compact(input: {
             [CodexResponsesProtocol.INTERNAL_COMPACTION_TRIGGER_HEADER]: input.compaction.trigger,
             [CodexResponsesProtocol.INTERNAL_COMPACTION_REASON_HEADER]: input.compaction.reason,
             [CodexResponsesProtocol.INTERNAL_COMPACTION_PHASE_HEADER]: input.compaction.phase,
+            [CodexResponsesTransport.TURN_ACCOUNT_HEADER]: input.accountKey,
+            ...(input.turnProfile
+              ? {
+                  [CodexResponsesTransport.TURN_PROFILE_HEADER]: CodexResponsesCatalog.encodeProfile(input.turnProfile),
+                }
+              : {}),
           },
           body: JSON.stringify(request),
           signal: AbortSignal.any([signal, input.abort]),
@@ -124,6 +134,7 @@ export function compact(input: {
             throw new RemoteCompactionError(
               `OpenAI remote compaction failed (${response.status})${detail ? `: ${detail}` : ""}`,
               response.status === 429 || response.status >= 500,
+              retryDelay(response),
             )
           }
           return parseCompactionResponse(response, request.input)
@@ -134,12 +145,21 @@ export function compact(input: {
           : new RemoteCompactionError(
               "OpenAI remote compaction request failed",
               !(cause instanceof DOMException && cause.name === "AbortError"),
+              undefined,
               { cause },
             ),
     }).pipe(
       Effect.retry({
         times: CodexResponsesAttempt.requestRetryLimit("compaction"),
-        schedule: Schedule.exponential("500 millis"),
+        schedule: Schedule.both(Schedule.identity<RemoteCompactionError>(), Schedule.exponential("500 millis")).pipe(
+          Schedule.modifyDelay(([error], duration) =>
+            Effect.succeed(
+              error instanceof RemoteCompactionError && error.retryDelayMs !== undefined
+                ? error.retryDelayMs
+                : duration,
+            ),
+          ),
+        ),
         while: (error) => error.retryable,
       }),
     )
@@ -369,7 +389,7 @@ function parseEvent(block: string) {
     const event: unknown = JSON.parse(data)
     return isRecord(event) ? event : undefined
   } catch (cause) {
-    throw new RemoteCompactionError("OpenAI remote compaction returned invalid event JSON", false, { cause })
+    throw new RemoteCompactionError("OpenAI remote compaction returned invalid event JSON", false, undefined, { cause })
   }
 }
 
@@ -446,10 +466,20 @@ class RemoteCompactionError extends Error {
   constructor(
     message: string,
     readonly retryable: boolean,
+    readonly retryDelayMs?: number,
     options?: ErrorOptions,
   ) {
     super(message, options)
   }
+}
+
+function retryDelay(response: Response) {
+  const value = response.headers.get("retry-after")
+  if (!value) return undefined
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000)
+  const date = Date.parse(value)
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined
 }
 
 export * as CodexResponsesCompact from "./compact"

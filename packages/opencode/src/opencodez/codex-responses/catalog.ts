@@ -13,6 +13,35 @@ export type Profile = {
   readonly responsesLite: boolean
 }
 
+export function encodeProfile(profile: Profile) {
+  return Buffer.from(JSON.stringify(profile)).toString("base64url")
+}
+
+export function decodeProfile(value: string | null | undefined) {
+  if (!value) return undefined
+  try {
+    const decoded: unknown = JSON.parse(Buffer.from(value, "base64url").toString())
+    return isProfile(decoded) ? decoded : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function isProfile(value: unknown): value is Profile {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  if (!("modelID" in value) || typeof value.modelID !== "string") return false
+  if (!("contextWindow" in value) || typeof value.contextWindow !== "number" || !Number.isFinite(value.contextWindow))
+    return false
+  if (
+    "autoCompactTokenLimit" in value &&
+    value.autoCompactTokenLimit !== undefined &&
+    (typeof value.autoCompactTokenLimit !== "number" || !Number.isFinite(value.autoCompactTokenLimit))
+  )
+    return false
+  if ("compHash" in value && value.compHash !== undefined && typeof value.compHash !== "string") return false
+  return "responsesLite" in value && typeof value.responsesLite === "boolean"
+}
+
 export type Snapshot = {
   readonly profiles: ReadonlyMap<string, Profile>
 }
@@ -82,6 +111,10 @@ export function needsRefresh(auth: Extract<Auth.Info, { type: "oauth" }>) {
   if (!key) return true
   const current = cache.get(key)
   return !current || current.expiresAt <= Date.now()
+}
+
+export async function settleRefresh(accountKey: string) {
+  await pending.get(accountKey)?.catch(() => undefined)
 }
 
 export async function refresh(input: {

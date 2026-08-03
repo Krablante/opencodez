@@ -443,13 +443,25 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 ? new URL(codexApiEndpoint)
                 : parsed
 
-            const catalog =
-              parsed.pathname.endsWith("/responses") && CodexResponsesCatalog.needsRefresh(currentAuth)
-                ? await CodexResponsesCatalog.refresh({ auth: currentAuth, endpoint: codexApiEndpoint })
-                : undefined
-
             const handoff = headers.get(CodexResponsesCompaction.HEADER) ?? undefined
             headers.delete(CodexResponsesCompaction.HEADER)
+            const turnAccount = headers.get(CodexResponsesTransport.TURN_ACCOUNT_HEADER)
+            headers.delete(CodexResponsesTransport.TURN_ACCOUNT_HEADER)
+            if (turnAccount && turnAccount !== accountAffinity) {
+              throw new Error(
+                "The ChatGPT login changed during the active turn. Retry with a new message to continue safely.",
+              )
+            }
+            const turnProfile = CodexResponsesCatalog.decodeProfile(
+              headers.get(CodexResponsesTransport.TURN_PROFILE_HEADER),
+            )
+            headers.delete(CodexResponsesTransport.TURN_PROFILE_HEADER)
+            const refresh =
+              parsed.pathname.endsWith("/responses") && CodexResponsesCatalog.needsRefresh(currentAuth)
+                ? CodexResponsesCatalog.refresh({ auth: currentAuth, endpoint: codexApiEndpoint })
+                : undefined
+            if (turnProfile) void refresh?.catch(() => undefined)
+            const catalog = turnProfile ? undefined : await refresh
 
             const lowered = parsed.pathname.endsWith("/responses")
               ? CodexResponsesRequest.lower(
@@ -459,6 +471,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                   headers,
                   CodexResponsesProtocol.accountKey(authWithAccount.accountId, currentAuth.access),
                   catalog,
+                  turnProfile,
                 )
               : undefined
             if (lowered?.responsesLite) headers.set(CodexResponsesCatalog.RESPONSES_LITE_HEADER, "true")

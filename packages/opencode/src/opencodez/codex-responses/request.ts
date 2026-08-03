@@ -9,13 +9,18 @@ export function lower(
   headers: Headers,
   accountKey?: string,
   catalog?: CodexResponsesCatalog.Snapshot,
+  turnProfile?: CodexResponsesCatalog.Profile,
 ) {
   if (typeof body !== "string") throw new Error("OpenAI Responses request body must be JSON text")
   const value: unknown = JSON.parse(body)
   if (!isRecord(value) || !Array.isArray(value.input)) throw new Error("OpenAI Responses input must be an array")
 
   const profile =
-    typeof value.model === "string" ? CodexResponsesCatalog.resolveID(value.model, accountKey, catalog) : undefined
+    typeof value.model === "string" && turnProfile?.modelID === value.model
+      ? turnProfile
+      : typeof value.model === "string"
+        ? CodexResponsesCatalog.resolveID(value.model, accountKey, catalog)
+        : undefined
   const responsesLite = responsesLiteEnabled && profile?.responsesLite === true
   const input = responsesLite ? liteInput(value.input, value.tools, value.instructions) : value.input
   const context = handoff ? CodexResponsesCompaction.consume(handoff) : undefined
