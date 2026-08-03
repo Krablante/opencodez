@@ -79,6 +79,12 @@ const FALLBACK = new Map(FALLBACK_PROFILES.map((profile) => [profile.modelID, pr
 
 const cache = new Map<string, Catalog>()
 const pending = new Map<string, Promise<Catalog>>()
+type RefreshOperation = () => Promise<unknown>
+type ScheduledRefresh = {
+  next?: RefreshOperation
+  promise?: Promise<void>
+}
+const scheduled = new Map<string, ScheduledRefresh>()
 
 export async function initialize<T extends Record<string, Model>>(
   models: T,
@@ -114,7 +120,35 @@ export function needsRefresh(auth: Extract<Auth.Info, { type: "oauth" }>) {
 }
 
 export async function settleRefresh(accountKey: string) {
+  await scheduled.get(accountKey)?.promise?.catch(() => undefined)
   await pending.get(accountKey)?.catch(() => undefined)
+}
+
+export function scheduleRefresh(accountKey: string, operation: RefreshOperation) {
+  const active = scheduled.get(accountKey)
+  if (active) {
+    // Keep at most one follow-up operation. Repeated metadata stays bounded,
+    // while a newer ETag observed during the active request is not lost.
+    active.next = operation
+    return active.promise ?? Promise.resolve()
+  }
+  // Publish the barrier before the asynchronous auth lookup begins so the next
+  // logical turn cannot freeze a profile from the stale catalog snapshot.
+  const state: ScheduledRefresh = { next: operation }
+  const value = Promise.resolve()
+    .then(async () => {
+      while (state.next) {
+        const next = state.next
+        state.next = undefined
+        await next().catch(() => undefined)
+      }
+    })
+    .finally(() => {
+      if (scheduled.get(accountKey) === state) scheduled.delete(accountKey)
+    })
+  state.promise = value
+  scheduled.set(accountKey, state)
+  return value
 }
 
 export async function refresh(input: {
@@ -128,7 +162,15 @@ export async function refresh(input: {
   const current = cache.get(key)
   if (!input.force && current && current.expiresAt > Date.now()) return current
   const active = pending.get(key)
-  if (active) return active
+  if (active) {
+    if (!input.force) return active
+    // An ETag-triggered refresh must not be satisfied by a request that began
+    // before the ETag was observed. Concurrent forced callers still share the
+    // first new request started after the older one settles.
+    await active.catch(() => undefined)
+    const queued = pending.get(key)
+    if (queued) return queued
+  }
   const value = load({ ...input, accountKey: key, store: true }).finally(() => {
     if (pending.get(key) === value) pending.delete(key)
   })

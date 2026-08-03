@@ -109,9 +109,10 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     const turnID = internalHeaders[TURN_ID_HEADER]
 
     if (turnID !== entry.turnID) {
+      // Codex gives each user turn fresh sticky routing while retaining a
+      // compatible previous response on the longer-lived WebSocket session.
       entry.turnID = turnID
       entry.turnState = undefined
-      entry.continuation.reset()
     }
 
     if (entry.fallback || (entry.fallbackUntil ?? 0) > Date.now()) {
@@ -138,7 +139,14 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         connectTimeout,
         maxConnectionAge,
         init?.signal,
-        (headers) => captureUpgradeHeaders(entry, turnID, headers),
+        (headers) =>
+          captureUpgradeHeaders(
+            entry,
+            turnID,
+            headers,
+            internalHeaders[ACCOUNT_AFFINITY_HEADER],
+            options?.onModelsEtag,
+          ),
       )
       let resolveFirstEvent: (event: boolean | OpenAIWebSocket.WrappedError) => void = () => {}
       let rejectFirstEvent: (error: Error) => void = () => {}
@@ -170,11 +178,15 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         onTerminal: (event) => {
           entry.busy = false
           entry.lastUsedAt = Date.now()
-          entry.streamFailures = 0
-          if (event.type !== "response.completed" && event.type !== "response.done") {
-            transaction?.fail()
-            invalidate(entry)
+          if (event.type === "response.completed" || event.type === "response.done") {
+            entry.streamFailures = 0
+            return
           }
+          transaction?.fail()
+          if (!entry.fallback && CodexResponsesAttempt.retryableEvent(event)) {
+            recordStreamFailure(entry, requestStreamRetries)
+          }
+          invalidate(entry)
         },
         onConnectionInvalid: () => {
           transaction?.fail()
@@ -214,7 +226,14 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
               connectTimeout,
               maxConnectionAge,
               init?.signal,
-              (headers) => captureUpgradeHeaders(entry, turnID, headers),
+              (headers) =>
+                captureUpgradeHeaders(
+                  entry,
+                  turnID,
+                  headers,
+                  internalHeaders[ACCOUNT_AFFINITY_HEADER],
+                  options?.onModelsEtag,
+                ),
             )
             transaction = entry.continuation.transaction(body)
             return { socket: entry.socket, body: withTurnState(body, entry.turnState) }
@@ -355,9 +374,17 @@ function captureHeaderTurnState(entry: PoolEntry, turnID: string | undefined, he
   if (state) entry.turnState = state
 }
 
-function captureUpgradeHeaders(entry: PoolEntry, turnID: string | undefined, headers: Record<string, string>) {
+function captureUpgradeHeaders(
+  entry: PoolEntry,
+  turnID: string | undefined,
+  headers: Record<string, string>,
+  accountKey: string | undefined,
+  observe: ((etag: string, accountKey: string | undefined) => void) | undefined,
+) {
   captureHeaderTurnState(entry, turnID, headers)
   entry.reasoningIncluded = REASONING_INCLUDED_HEADER in headers
+  const etag = headers["x-models-etag"]
+  if (etag) observe?.(etag, accountKey)
 }
 
 async function fallbackFetch(

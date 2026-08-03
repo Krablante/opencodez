@@ -136,12 +136,13 @@ Users can override defaults in `~/.config/opencodez/opencode.jsonc`:
 ## Responses Wire Mode
 
 ChatGPT OAuth sessions can use the stateful Responses WebSocket protocol from
-Codex `rust-v0.146.0`. The first model request of each logical user turn sends
-the full conversation. Later requests inside that same tool-driven turn send
-only new input items together with `previous_response_id` when the conversation
-prefix and model settings still match. The WebSocket itself can stay warm
-between user turns; only response continuation and sticky turn routing are
-reset.
+Codex `rust-v0.146.0`. The first request in a fresh transport chain sends the
+full conversation. Later compatible requests send only new input items together
+with `previous_response_id` when the conversation prefix and model settings
+still match. This continuation can cross a logical user-turn boundary, while
+the turn-scoped `x-codex-turn-state` routing token is reset. A reconnect,
+interruption, incompatible history, or relevant request-setting change starts a
+new full chain without requiring a different local session.
 
 The default is `codex`. Set `opencodez.responses.wire` to `legacy` to restore the
 previous OpenCode request flow. The setting applies only to OpenAI models
@@ -175,7 +176,8 @@ product-level validation.
 
 OpenCodez automatically sends a full request after a reconnect, interrupted
 response, context compaction, history edit, relevant model-setting change, or
-new logical user turn.
+failed compatibility check. A new logical user turn alone resets sticky routing
+but does not invalidate an otherwise compatible continuation.
 The existing HTTP fallback also receives the original full request rather than
 an incremental body.
 
@@ -196,26 +198,32 @@ keeps transient authentication and server failures recoverable without adding a
 second socket stack or repeatedly probing an unsupported endpoint. The
 logical turn ID survives synthetic compaction markers and is intentionally
 cleared only when the next real user turn begins. The compatible WebSocket may
-remain reusable, but `previous_response_id` never crosses that boundary. If the
-server can no longer resolve a `previous_response_id`, the transport internally
-opens a fresh socket and retries that request once with the complete canonical
-input. Service metadata before the error does not block recovery; the retry window closes only
-after model output begins.
+remain reusable, and `previous_response_id` may cross that boundary when strict
+prefix and request-property checks succeed. If the server can no longer resolve
+a `previous_response_id`, the transport internally opens a fresh socket and
+retries that request once with the complete canonical input. Service metadata
+before the error does not block recovery; the retry window closes only after
+model output begins.
 
 OpenCode persists streaming deltas immediately, unlike Codex's completed-item
 history. In Codex wire mode, each sampling attempt therefore journals the IDs of
 the text, reasoning, and step parts it creates. A retry first removes those
 incomplete parts through the normal session event path, then replays the frozen
 request; clients see retry state without an orphaned fragment or duplicated
-answer. A tool call is the irreversible boundary. Once admitted, automatic
-replay stops so an external side effect cannot run twice. Other providers keep
-the upstream partial-output behavior. Sampling follows Codex's finite transport
-cycle: the initial WebSocket request plus five retries, one switch to HTTP, then
-the initial HTTP request plus five retries. The terminal error is surfaced after
-at most twelve network requests. A confirmed or retry-exhausted HTTP fallback
-remains sticky for that session-and-account entry until the session is removed
-or the bounded pool evicts it, avoiding periodic WebSocket reprobes after a
-known transport failure.
+answer. A tool call is the irreversible boundary for replaying the same provider
+request, so an external side effect cannot run twice. If the tool result is
+already durable when a transient stream failure arrives, OpenCodez marks that
+assistant step as tool-driven and lets the normal session loop build the next
+request from updated history. An unfinished or interrupted tool still stops the
+turn rather than guessing whether its side effect completed. Other providers
+keep the upstream partial-output behavior. Sampling follows Codex's finite
+transport cycle: the initial WebSocket request plus five retries, one switch to
+HTTP, then the initial HTTP request plus five retries. Retryable terminal error
+frames consume the same WebSocket budget as connection failures. The terminal
+error is surfaced after at most twelve network requests. A confirmed or
+retry-exhausted HTTP fallback remains sticky for that session-and-account entry
+until the session is removed or the bounded pool evicts it, avoiding periodic
+WebSocket reprobes after a known transport failure.
 
 Continuation state is keyed by both the local session and the ChatGPT account.
 Changing accounts therefore opens a fresh chain and sends one full request
@@ -230,11 +238,14 @@ The model catalog profile is also turn-scoped. The bounded turn-settings journal
 freezes the active account affinity, base API model, `comp_hash`, context limits,
 Responses Lite capability, and the server reasoning-accounting signal. An ETag
 refresh updates the account catalog in the background but affects only the next
-logical user turn. This prevents a long tool loop from changing wire shape or
-rejecting its own compacted state halfway through execution. A login change
-during an active turn is rejected before another account-scoped request can be
-sent; sending the next user message starts a fresh account lane and retains any
-durable encrypted compaction state.
+logical user turn. ETags from both normal response metadata and the WebSocket
+upgrade enter the same deduplicated refresh barrier. The next turn settles that
+barrier before checking for a `comp_hash` transition and freezing its profile,
+so it cannot make the transition decision from stale catalog data. This prevents
+a long tool loop from changing wire shape or rejecting its own compacted state
+halfway through execution. A login change during an active turn is rejected
+before another account-scoped request can be sent; sending the next user message
+starts a fresh account lane and retains any durable encrypted compaction state.
 
 ### History Revert and Branching
 
@@ -435,15 +446,17 @@ OpenCodez config boundary:
   only turn state mutates the active transport lane and only model ETag mutates
   the matching account catalog.
 - `catalog.ts` owns an eight-account least-recently-used catalog map. Each
-  account has an independent five-minute cache and in-flight refresh; a missing
-  verified identity uses an uncached request and cannot create reusable state.
+  account has an independent five-minute cache, in-flight refresh, and short
+  scheduling barrier for upgrade-header ETags; a missing verified identity uses
+  an uncached request and cannot create reusable state.
 - `request.ts` is the single raw request boundary for metadata, Responses Lite
   shaping, persisted-state injection, and removal of the internal continuation
   marker.
 - `continuation.ts` owns prefix matching, response item normalization,
   `previous_response_id`, and continuation invalidation. Continuation is reused
-  only inside one logical user turn; the transport connection has a longer
-  independent lifetime.
+  across compatible requests and logical user turns; the sticky routing token
+  has a shorter turn-scoped lifetime, while the transport connection has a
+  longer independent lifetime.
 - `compact.ts` builds the canonical V2 trigger request with the existing
   Responses lowering, bounds only oversized tool output, requires exactly one
   completed `compaction`/`compaction_summary` item with encrypted content, and
@@ -457,16 +470,19 @@ OpenCodez config boundary:
   validation; the request adapter removes it before network I/O.
 - `attempt.ts` owns request kinds, bounded retry policy, and the lightweight
   sampling-attempt journal. It records only part IDs, permits rollback before a
-  tool-call side-effect barrier, and prevents nested WebSocket-plus-HTTP retry
+  tool-call side-effect barrier, resumes from durable tool results without
+  replaying their side effects, and prevents nested WebSocket-plus-HTTP retry
   multiplication.
 - `transport.ts` owns one continuation per session-and-account lane, the
   turn-scoped sticky-routing token, finite fallback state, and the single
   full-request recovery for an unavailable previous response. A 426 upgrade
   response selects HTTP immediately; an opaque rejected upgrade uses a one-minute
-  HTTP cooldown; a 401 returns to the OAuth owner for one token refresh and one
-  safe pre-output replay. Codex-mode handshakes carry the thread request id and
-  WebSocket frames retain the explicit streaming flag. A new logical user turn
-  resets continuation and sticky routing without discarding a healthy socket.
+  HTTP cooldown; retryable terminal frames consume the same fallback budget as
+  broken connections; a 401 returns to the OAuth owner for one token refresh and
+  one safe pre-output replay. Codex-mode handshakes carry the thread request id,
+  expose model-catalog ETags to the refresh barrier, and WebSocket frames retain
+  the explicit streaming flag. A new logical user turn resets sticky routing
+  without discarding compatible continuation or a healthy socket.
 - `packages/opencode/src/session/model-context.ts` is the shared preparation
   boundary for effective System context, transformed history, and model-visible
   tools used by both sampling and compact requests. The active runner retains

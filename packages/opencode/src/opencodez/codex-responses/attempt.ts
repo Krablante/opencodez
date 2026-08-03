@@ -77,6 +77,10 @@ export function create() {
     return enabled ? !irreversible : !input.durableOutput
   }
 
+  function canResumeFromHistory() {
+    return enabled && irreversible
+  }
+
   function retryLimit() {
     return enabled ? requestRetryLimit("sampling") : undefined
   }
@@ -105,6 +109,7 @@ export function create() {
     markModelVisible,
     markIrreversible,
     canRetry,
+    canResumeFromHistory,
     retryLimit,
     rollback,
     commit,

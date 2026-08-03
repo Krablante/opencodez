@@ -25,14 +25,14 @@
 
 OpenCodez is for people who want OpenCode to stay OpenCode, but with flexible prompt control, a ready-to-use Codex-style prompt set, and efficient stateful ChatGPT Responses requests.
 
-| Area           | What OpenCodez adds                                                                                        |
-| -------------- | ---------------------------------------------------------------------------------------------------------- |
-| Prompt control | TUI command and web composer control for the active System prompt.                                         |
-| Prompt library | Upstream built-ins, bundled Codex presets, and user prompt files in one shared selector.                   |
-| Model defaults | Configurable System defaults, with Codex-style defaults for OpenAI Responses GPT models out of the box.    |
-| Session state  | A manual System choice stays with the session and does not reset on `/model`.                              |
-| Responses wire | ChatGPT OAuth can send incremental Codex-style WebSocket turns instead of resending the full conversation. |
-| Updates        | `opencodez update` uses GitHub Releases.                                                                   |
+| Area           | What OpenCodez adds                                                                                           |
+| -------------- | ------------------------------------------------------------------------------------------------------------- |
+| Prompt control | TUI command and web composer control for the active System prompt.                                            |
+| Prompt library | Upstream built-ins, bundled Codex presets, and user prompt files in one shared selector.                      |
+| Model defaults | Configurable System defaults, with Codex-style defaults for OpenAI Responses GPT models out of the box.       |
+| Session state  | A manual System choice stays with the session and does not reset on `/model`.                                 |
+| Responses wire | ChatGPT OAuth can send incremental Codex-style WebSocket requests instead of resending the full conversation. |
+| Updates        | `opencodez update` uses GitHub Releases.                                                                      |
 
 Read the full public feature reference in [docs/opencodez.md](docs/opencodez.md).
 
@@ -215,10 +215,12 @@ Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one p
 
 `opencodez.responses.wire` accepts `codex` or `legacy` and defaults to `codex`.
 The default applies only to OpenAI models authenticated through ChatGPT OAuth.
-It sends incremental input with `previous_response_id` between requests inside
-one tool-driven user turn. A new user turn keeps the warm WebSocket but starts
-from one full canonical request, as Codex does. Reconnects, interruptions,
-context changes, and model-setting changes also return safely to a full request.
+After one full canonical request, it sends incremental input with
+`previous_response_id` whenever the next request is a compatible extension,
+including across logical user turns. A new user turn resets its sticky
+`x-codex-turn-state` routing token without discarding a compatible continuation
+or warm WebSocket. Reconnects, interruptions, context changes, and relevant
+model-setting changes return safely to a full request.
 Set the value to `legacy` to restore the previous request flow. API-key OpenAI
 access and other providers keep their existing behavior.
 

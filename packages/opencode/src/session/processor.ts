@@ -728,6 +728,31 @@ const layer = Layer.effect(
                   }),
               }),
             ),
+            Effect.catch((error) => {
+              const parsed = parse(error)
+              const statusCode = SessionV1.APIError.isInstance(parsed) ? parsed.data.statusCode : undefined
+              if (
+                !attempt.canResumeFromHistory() ||
+                !ctx.sawToolCall ||
+                Object.keys(ctx.toolcalls).length > 0 ||
+                statusCode === 429 ||
+                !SessionRetry.retryable(parsed, input.model.providerID)
+              )
+                return Effect.fail(error)
+              return Effect.gen(function* () {
+                // The side effect is already durable. Replaying this provider
+                // request could execute it twice; the outer loop instead builds
+                // the next request from the saved tool call and result.
+                attempt.commit()
+                ctx.assistantMessage.finish = "tool-calls"
+                yield* session.updateMessage(ctx.assistantMessage)
+                yield* Effect.logWarning("resuming Codex Responses from durable tool result after stream failure", {
+                  "session.id": ctx.sessionID,
+                  messageID: ctx.assistantMessage.id,
+                  error: errorMessage(error),
+                })
+              })
+            }),
             Effect.catch(halt),
             Effect.ensuring(cleanup()),
           )

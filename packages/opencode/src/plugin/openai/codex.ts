@@ -336,12 +336,13 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 httpFetch: fetch,
                 wire: codexWire ? "codex" : "legacy",
                 onModelsEtag(etag, accountKey) {
-                  void getAuth().then((value) => {
+                  if (!accountKey || !CodexResponsesCatalog.observeEtag(etag, accountKey)) return
+                  void CodexResponsesCatalog.scheduleRefresh(accountKey, async () => {
+                    const value = await getAuth()
                     if (value.type !== "oauth") return
                     if (CodexResponsesProtocol.accountKey(value.accountId, value.access) !== accountKey) return
-                    if (!CodexResponsesCatalog.observeEtag(etag, accountKey)) return
-                    void CodexResponsesCatalog.refresh({ auth: value, endpoint: codexApiEndpoint, force: true })
-                  })
+                    await CodexResponsesCatalog.refresh({ auth: value, endpoint: codexApiEndpoint, force: true })
+                  }).catch(() => undefined)
                 },
               })
             : undefined

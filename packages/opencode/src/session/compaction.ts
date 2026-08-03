@@ -390,6 +390,7 @@ const layer = Layer.effect(
       if (authInfo?.type !== "oauth") return undefined
       const accountKey = CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access)
       if (!accountKey) return undefined
+      yield* Effect.promise(() => CodexResponsesCatalog.settleRefresh(accountKey))
       const profile = CodexResponsesCatalog.resolve(input.model, accountKey)
       if (!profile?.compHash) return undefined
       const info = yield* session.get(input.sessionID).pipe(Effect.orDie)
