@@ -248,8 +248,9 @@ session state. WebSocket upgrade status 426 switches that session to HTTP
 immediately. A runtime that cannot expose the rejected upgrade status uses HTTP
 for the current request and waits one minute before probing WebSocket again. If
 account identity cannot be verified, OpenCodez uses uncached HTTP and the current
-uncached catalog response, but refuses to reuse account-scoped continuation or
-compacted state.
+uncached catalog response and refuses to reuse account-scoped continuation.
+Persisted encrypted compaction remains part of the local session history and is
+sent in the fresh full request, matching Codex behavior across login changes.
 
 For ChatGPT OAuth, automatic and manual compaction use Codex Remote Compaction
 V2: a normal streamed `/responses` request whose final input item is

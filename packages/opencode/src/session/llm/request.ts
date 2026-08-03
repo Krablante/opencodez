@@ -80,7 +80,6 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   }
   const compatibilityError = CodexResponsesCompaction.compatibilityError(input.sessionMetadata, {
     modelID: input.model.api.id,
-    accountKey,
     compHash: CodexResponsesCatalog.resolve(input.model, accountKey)?.compHash,
     allowCompHashMismatch: input.allowCompHashMismatch,
   })

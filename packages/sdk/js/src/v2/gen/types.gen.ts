@@ -636,7 +636,6 @@ export type CompactionPart = {
     providerID: "openai"
     items: Array<unknown>
     model_id?: string
-    account_key?: string
     comp_hash?: string
   }
 }

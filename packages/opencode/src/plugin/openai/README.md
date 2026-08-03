@@ -181,15 +181,18 @@ payload. The durable history is not rewritten. A compaction stream retries
 transient failures at most twice per transport; manual compaction does not
 auto-continue.
 
-Persisted opaque state records the source API model, account key, and catalog
-`comp_hash`. Session metadata also keeps the latest 32 logical-turn model/hash
-settings. A hash change therefore creates a pre-turn compact even for raw
-history: the previous model runs first, the current model is tried once if that
-model is unavailable or fails, and the pending user message remains outside the
-compact request until replay. The durable transition marker carries the target
-model and hash so restart recovery follows the same path. The
-authenticated model catalog refreshes every five minutes and immediately after
-an `x-models-etag` change; known fallback profiles cover temporary catalog
-failure without becoming a second live source of truth.
-Persisted state without a verifiable stored and current account identity is
-rejected locally instead of being reused optimistically.
+Persisted opaque state records the source API model and catalog `comp_hash`.
+Session metadata also keeps the latest 32 logical-turn model/hash settings. A
+hash change therefore creates a pre-turn compact even for raw history: the
+previous model runs first, the current model is tried once if that model is
+unavailable or fails, and the pending user message remains outside the compact
+request until replay. The durable transition marker carries the target model and
+hash so restart recovery follows the same path. The authenticated model catalog
+refreshes every five minutes and immediately after an `x-models-etag` change;
+known fallback profiles cover temporary catalog failure without becoming a
+second live source of truth.
+
+A login change discards account-scoped continuation and sends a fresh full
+request. The encrypted compaction item remains in that request as durable session
+history, matching Codex without carrying response or reasoning IDs across the
+account boundary.

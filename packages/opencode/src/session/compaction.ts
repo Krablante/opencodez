@@ -918,7 +918,6 @@ const layer = Layer.effect(
             providerID: "openai",
             items: compacted.value.items,
             model_id: targetModel.api.id,
-            account_key: accountKey,
             comp_hash: transition?.comp_hash ?? targetProfile?.compHash,
           },
         })

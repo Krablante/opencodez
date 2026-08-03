@@ -9,7 +9,6 @@ type Context = {
   items: unknown[]
   windowID?: string
   modelID?: string
-  accountKey?: string
   compHash?: string
 }
 
@@ -70,7 +69,6 @@ export function latest(messages: readonly SessionV1.WithParts[]) {
       windowID: message.info.id,
       items: part.remote.items,
       modelID: part.remote.model_id,
-      accountKey: part.remote.account_key,
       compHash: part.remote.comp_hash,
     }
   }
@@ -100,7 +98,6 @@ export function withMetadata(metadata: Record<string, unknown> | undefined, mess
       items: context.items,
       windowID: context.windowID,
       modelID: context.modelID,
-      accountKey: context.accountKey,
       compHash: context.compHash,
     } satisfies Context,
   }
@@ -148,14 +145,11 @@ function pruneHandoffs() {
 
 export function compatibilityError(
   metadata: Record<string, unknown> | undefined,
-  input: { modelID: string; accountKey?: string; compHash?: string; allowCompHashMismatch?: boolean },
+  input: { modelID: string; compHash?: string; allowCompHashMismatch?: boolean },
 ): string | undefined {
   const context = metadata?.[METADATA_KEY]
   if (context === undefined) return undefined
   if (!isContext(context)) return "This session's OpenAI compacted state is malformed"
-  if (!context.accountKey || !input.accountKey) {
-    return "This session's OpenAI compacted state cannot be continued without a verified ChatGPT account identity"
-  }
   if (
     !input.allowCompHashMismatch &&
     context.modelID &&
@@ -163,9 +157,6 @@ export function compatibilityError(
     (!context.compHash || !input.compHash || context.compHash !== input.compHash)
   ) {
     return `This session's OpenAI compacted state belongs to model ${context.modelID}; continue with that base model or start a new session before switching`
-  }
-  if (context.accountKey && context.accountKey !== input.accountKey) {
-    return "This session's OpenAI compacted state belongs to a different ChatGPT account"
   }
   if (!input.allowCompHashMismatch && input.compHash && context.compHash !== input.compHash) {
     return "This session's OpenAI compacted state belongs to an older backend snapshot and must be compacted again before continuing"
@@ -220,7 +211,6 @@ function isContext(value: unknown): value is Context {
     return false
   if ("modelID" in value && value.modelID !== undefined && typeof value.modelID !== "string") return false
   if ("windowID" in value && value.windowID !== undefined && typeof value.windowID !== "string") return false
-  if ("accountKey" in value && value.accountKey !== undefined && typeof value.accountKey !== "string") return false
   return !("compHash" in value) || value.compHash === undefined || typeof value.compHash === "string"
 }
 

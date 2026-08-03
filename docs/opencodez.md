@@ -219,7 +219,9 @@ Changing accounts therefore opens a fresh chain and sends one full request
 instead of reusing account-scoped response or reasoning IDs. When the login does
 not expose a ChatGPT account id, OpenCodez uses the standard OAuth subject only
 as an internal affinity fallback; it is never substituted into the provider's
-`ChatGPT-Account-Id` header.
+`ChatGPT-Account-Id` header. Durable encrypted compaction is session history,
+not continuation state: it remains in that full request after a login change,
+as it does in Codex.
 
 ### History Revert and Branching
 
@@ -337,21 +339,21 @@ are ignored, exactly one completed opaque compaction item is installed as-is,
 and newest user messages are retained within the bounded budget. Current System
 instructions are regenerated for each request instead of being owned by opaque
 state; assistant, reasoning, and tool artifacts are not retained beside it. New
-compaction state also records the source API model, a one-way ChatGPT account key
-when either an account id or standard OAuth subject is available, and the
-model's catalog `comp_hash`. Standard, Fast, Pro, and base-model aliases sharing
-that hash remain compatible; another account fails locally. When the known hash
-changes between logical turns, OpenCodez performs one remote pre-turn transition
-through the same compaction state machine before sampling, even when the history
-has never been compacted before. The pending user message remains outside the
-compact request and is replayed once afterward. The transition first uses the
-previous turn's model and falls back once to the current model when the previous
-model is unavailable or cannot complete the request. A bounded 32-entry journal
-in session metadata preserves the recent model/hash boundary across restart and
-normal history edits without another state store. Older sessions without that
-journal can still derive cross-model transitions from their durable user-model
-history; existing opaque state remains independently protected by its persisted
-model, account, and hash.
+compaction state also records the source API model and the model catalog's
+`comp_hash`. Standard, Fast, Pro, and base-model aliases sharing that hash remain
+compatible. A login change keeps the encrypted item but starts a fresh full
+request, so no response or reasoning ID crosses the account boundary. When the
+known hash changes between logical turns, OpenCodez performs one remote pre-turn
+transition through the same compaction state machine before sampling, even when
+the history has never been compacted before. The pending user message remains
+outside the compact request and is replayed once afterward. The transition first
+uses the previous turn's model and falls back once to the current model when the
+previous model is unavailable or cannot complete the request. A bounded 32-entry
+journal in session metadata preserves the recent model/hash boundary across
+restart and normal history edits without another state store. Older sessions
+without that journal can still derive cross-model transitions from their durable
+user-model history; existing opaque state remains protected by its persisted
+model and hash.
 
 If the provider itself reports context overflow while automatic compaction is
 enabled, that error is treated as an internal recovery trigger rather than
@@ -424,12 +426,11 @@ OpenCodez config boundary:
   installs bounded retained user context.
 - `compaction.ts` finds persisted compaction items without writing a second
   state store, keeps the bounded turn-settings journal, and checks
-  model/account/backend-snapshot compatibility. Unknown current or persisted
-  account identity fails closed. A random one-shot handoff moves durable context
-  across the AI SDK request boundary; it expires after one minute and the process
-  retains at most 128 handoffs. Direct mid-turn continuation uses one internal
-  non-network marker to satisfy the AI SDK's non-empty prompt validation; the
-  request adapter removes it before network I/O.
+  model/backend-snapshot compatibility. A random one-shot handoff moves durable
+  context across the AI SDK request boundary; it expires after one minute and the
+  process retains at most 128 handoffs. Direct mid-turn continuation uses one
+  internal non-network marker to satisfy the AI SDK's non-empty prompt
+  validation; the request adapter removes it before network I/O.
 - `attempt.ts` owns request kinds, bounded retry policy, and the lightweight
   sampling-attempt journal. It records only part IDs, permits rollback before a
   tool-call side-effect barrier, and prevents nested WebSocket-plus-HTTP retry
@@ -469,13 +470,13 @@ rather than a correctness requirement. OpenCodez keeps its existing lazy,
 session-affine pool to avoid an idle connection and additional lifecycle state.
 Remote Compaction V2 uses the same `/responses` transport and
 `compaction_trigger` contract as pinned Codex while adapting installed history
-to OpenCode's durable session model. Persisted opaque state is bound to the
-available account identity and the `comp_hash` published by the authenticated
-Codex model catalog. Responses carry the catalog ETag, so a backend-snapshot
-change schedules one deduplicated refresh without a service restart. Known
-profiles remain only as a short-lived fallback for catalog outages; maintainers
-update those profiles when adding a supported base model, not for routine
-backend metadata changes.
+to OpenCode's durable session model. Persisted opaque state follows the
+`comp_hash` published by the authenticated Codex model catalog, while reusable
+transport and catalog state remain account-scoped. Responses carry the catalog
+ETag, so a backend-snapshot change schedules one deduplicated refresh without a
+service restart. Known profiles remain only as a short-lived fallback for
+catalog outages; maintainers update those profiles when adding a supported base
+model, not for routine backend metadata changes.
 
 A pre-output 401 performs one deduplicated OAuth refresh. OpenCodez replays the
 already lowered request only when the refreshed account affinity is unchanged;

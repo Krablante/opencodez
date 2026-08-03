@@ -477,9 +477,9 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               currentAuth.access = refreshed.access
               authWithAccount.accountId = refreshed.accountId
               const affinity = CodexResponsesProtocol.accountKey(authWithAccount.accountId, currentAuth.access)
-              // The lowered body may contain account-scoped catalog or compacted
-              // state. Let the caller retry from canonical session state instead
-              // of replaying that body after an unexpected identity change.
+              // Request shape and reusable transport state were selected for the
+              // previous identity. Rebuild from canonical session state instead
+              // of replaying the lowered body across an account boundary.
               if (affinity !== accountAffinity) return response
               await response.body?.cancel().catch(() => {})
               headers.set("authorization", `Bearer ${refreshed.access}`)
