@@ -493,7 +493,7 @@ const layer = Layer.effect(
               .pipe(Effect.ignore, Effect.forkIn(scope))
             const needsFollowUp = ctx.sawToolCall || value.reason === "tool-calls" || value.reason === "unknown"
             if (
-              needsFollowUp &&
+              (!attempt.active() || needsFollowUp) &&
               !ctx.assistantMessage.summary &&
               isOverflow({ cfg: yield* config.get(), tokens: usage.tokens, model: ctx.model })
             ) {

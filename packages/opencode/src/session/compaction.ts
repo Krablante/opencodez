@@ -74,7 +74,15 @@ type Phase = NonNullable<SessionV1.CompactionPart["phase"]>
 type ModelRef = { providerID: ProviderV2.ID; modelID: ModelV2.ID }
 type RemoteTransition = {
   sourceModel: ModelRef
-  targetCompHash: string
+  targetCompHash?: string
+  reason: "comp_hash_changed" | "model_downshift"
+}
+
+function modelContextWindow(model: Provider.Model, profile: CodexResponsesCatalog.Profile | undefined) {
+  const limits = [model.limit.input, model.limit.context, profile?.contextWindow].filter(
+    (value): value is number => typeof value === "number" && value > 0,
+  )
+  return limits.length > 0 ? Math.min(...limits) : undefined
 }
 
 function historicalReasoningTokens(messages: SessionV1.WithParts[], turnID: MessageID) {
@@ -178,6 +186,7 @@ export interface Interface {
     model: Provider.Model
     additionalTokens?: number
     turn?: CodexResponsesCompaction.TurnSettings
+    profile?: CodexResponsesCatalog.Profile
     serverReasoningIncluded?: boolean
     messages?: SessionV1.WithParts[]
     turnID?: MessageID
@@ -187,6 +196,7 @@ export interface Interface {
     turnID: MessageID
     messages: SessionV1.WithParts[]
     model: Provider.Model
+    tokens?: SessionV1.Assistant["tokens"]
   }) => Effect.Effect<RemoteTransition | undefined>
   readonly recordRemoteTurn: (input: {
     sessionID: SessionID
@@ -251,6 +261,7 @@ const layer = Layer.effect(
       model: Provider.Model
       additionalTokens?: number
       turn?: CodexResponsesCompaction.TurnSettings
+      profile?: CodexResponsesCatalog.Profile
       serverReasoningIncluded?: boolean
       messages?: SessionV1.WithParts[]
       turnID?: MessageID
@@ -260,12 +271,14 @@ const layer = Layer.effect(
       let limit: number | undefined
       if (input.model.providerID === "openai" && authInfo?.type === "oauth") {
         const profile =
-          input.turn?.profile?.modelID === input.model.api.id
-            ? input.turn.profile
-            : CodexResponsesCatalog.resolve(
-                input.model,
-                CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access),
-              )
+          input.profile?.modelID === input.model.api.id
+            ? input.profile
+            : input.turn?.profile?.modelID === input.model.api.id
+              ? input.turn.profile
+              : CodexResponsesCatalog.resolve(
+                  input.model,
+                  CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access),
+                )
         limit = OpenCodezSettings.responsesCompactionLimit(
           cfg,
           input.model.limit,
@@ -384,6 +397,7 @@ const layer = Layer.effect(
       turnID: MessageID
       messages: SessionV1.WithParts[]
       model: Provider.Model
+      tokens?: SessionV1.Assistant["tokens"]
     }) {
       if (input.model.providerID !== "openai") return undefined
       const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
@@ -392,7 +406,7 @@ const layer = Layer.effect(
       if (!accountKey) return undefined
       yield* Effect.promise(() => CodexResponsesCatalog.settleRefresh(accountKey))
       const profile = CodexResponsesCatalog.resolve(input.model, accountKey)
-      if (!profile?.compHash) return undefined
+      if (!profile) return undefined
       const info = yield* session.get(input.sessionID).pipe(Effect.orDie)
       const settings = CodexResponsesCompaction.turnSettings(info.metadata)
       if (settings.some((item) => item.turnID === input.turnID)) return undefined
@@ -436,22 +450,51 @@ const layer = Layer.effect(
         (Option.isSome(previousModel)
           ? CodexResponsesCatalog.resolve(previousModel.value, accountKey)?.compHash
           : undefined)
-      if (previousCompHash && previousCompHash !== profile.compHash) {
+      if (previousCompHash && profile.compHash && previousCompHash !== profile.compHash) {
         return {
           sourceModel: Option.isSome(previousModel)
             ? { providerID: previousModel.value.providerID, modelID: previousModel.value.id }
             : { providerID: input.model.providerID, modelID: input.model.id },
           targetCompHash: profile.compHash,
+          reason: "comp_hash_changed",
         } satisfies RemoteTransition
       }
 
+      if (Option.isSome(previousModel) && input.tokens && previousModel.value.api.id !== input.model.api.id) {
+        const previousProfile =
+          previous?.profile?.modelID === previousModel.value.api.id
+            ? previous.profile
+            : CodexResponsesCatalog.resolve(previousModel.value, accountKey)
+        const previousWindow = modelContextWindow(previousModel.value, previousProfile)
+        const currentWindow = modelContextWindow(input.model, profile)
+        if (
+          previousWindow !== undefined &&
+          currentWindow !== undefined &&
+          previousWindow > currentWindow &&
+          (yield* isOverflow({
+            tokens: input.tokens,
+            model: input.model,
+            profile,
+            serverReasoningIncluded: previous?.serverReasoningIncluded,
+            messages: input.messages,
+            turnID: input.turnID,
+          }))
+        ) {
+          return {
+            sourceModel: { providerID: previousModel.value.providerID, modelID: previousModel.value.id },
+            targetCompHash: profile.compHash,
+            reason: "model_downshift",
+          } satisfies RemoteTransition
+        }
+      }
+
       const context = CodexResponsesCompaction.latest(input.messages)
-      if (!context || context.compHash === profile.compHash) return undefined
+      if (!context || !profile.compHash || context.compHash === profile.compHash) return undefined
       const sourceModel =
         Option.isSome(previousModel) && context.modelID === previousModel.value.api.id
           ? { providerID: previousModel.value.providerID, modelID: previousModel.value.id }
           : { providerID: input.model.providerID, modelID: input.model.id }
-      return { sourceModel, targetCompHash: profile.compHash } satisfies RemoteTransition
+      return { sourceModel, targetCompHash: profile.compHash, reason: "comp_hash_changed" } satisfies RemoteTransition
     })
 
     const estimate = Effect.fn("SessionCompaction.estimate")(function* (input: {
@@ -943,15 +986,15 @@ const layer = Layer.effect(
                 compaction: {
                   trigger: input.auto ? "auto" : "manual",
                   reason:
-                    transition ||
+                    transition?.reason ??
                     (input.auto &&
-                      previousCompaction?.compHash &&
-                      targetProfile?.compHash &&
-                      targetProfile.compHash !== previousCompaction.compHash)
+                    previousCompaction?.compHash &&
+                    targetProfile?.compHash &&
+                    targetProfile.compHash !== previousCompaction.compHash
                       ? "comp_hash_changed"
                       : input.auto
                         ? "context_limit"
-                        : "user_requested",
+                        : "user_requested"),
                   phase: phase === "pre-turn" ? "pre_turn" : phase === "mid-turn" ? "mid_turn" : "standalone_turn",
                 },
                 preserveActiveToolMedia: phase === "mid-turn",
@@ -1319,7 +1362,8 @@ const layer = Layer.effect(
           ? {
               transition: {
                 model: input.model,
-                comp_hash: input.transition.targetCompHash,
+                ...(input.transition.targetCompHash ? { comp_hash: input.transition.targetCompHash } : {}),
+                reason: input.transition.reason,
               },
             }
           : {}),

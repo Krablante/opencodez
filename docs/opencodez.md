@@ -368,17 +368,20 @@ compaction state also records the source API model and the model catalog's
 `comp_hash`. Standard, Fast, Pro, and base-model aliases sharing that hash remain
 compatible. A login change keeps the encrypted item but starts a fresh full
 request, so no response or reasoning ID crosses the account boundary. When the
-known hash changes between logical turns, OpenCodez performs one remote pre-turn
-transition through the same compaction state machine before sampling, even when
-the history has never been compacted before. The pending user message remains
-outside the compact request and is replayed once afterward. The transition first
-uses the previous turn's model and falls back once to the current model when the
-previous model is unavailable or cannot complete the request. A bounded 32-entry
-journal in session metadata preserves the recent model/hash boundary across
-restart and normal history edits without another state store. Older sessions
-without that journal can still derive cross-model transitions from their durable
-user-model history; existing opaque state remains protected by its persisted
-model and hash.
+known hash changes between logical turns, or the current model has a smaller
+effective context window that cannot fit the active token state, OpenCodez
+performs one remote pre-turn transition through the same compaction state machine
+before sampling. This also applies when the history has never been compacted
+before. The pending user message remains outside the compact request and is
+replayed once afterward. The transition first uses the previous turn's model and
+falls back once to the current model when the previous model is unavailable or
+cannot complete the request. Its durable marker records whether the cause was a
+hash change or model downshift, plus the target model and available target hash,
+so restart recovery follows the same path. A bounded 32-entry journal in session
+metadata preserves the recent model boundary across restart and normal history
+edits without another state store. Older sessions without that journal can still
+derive cross-model transitions from their durable user-model history; existing
+opaque state remains protected by its persisted model and hash.
 
 Codex reports whether server usage already includes retained encrypted
 reasoning through `x-reasoning-included`. OpenCodez preserves that signal from
@@ -614,11 +617,13 @@ The OpenAPI document and JavaScript SDK are generated from the server contract.
 
 A release should confirm the mapped System prompts, both Responses wire modes,
 default and configured compaction thresholds, one streamed V2 compaction trigger
-with exactly one opaque result, logical-turn sticky routing, bounded retry and
-partial-attempt rollback before the tool side-effect barrier, cross-turn full
-requests on a warm socket, frozen same-turn catalog behavior, reasoning-aware
-usage accounting, oversized-replay failure, `comp_hash` refresh, cooperative
-compaction retry delay, remote state persistence across restart, generated
-SDK, one production Linux build, embedded web UI startup, and desktop/mobile
-System selector behavior. The public release must contain all platform archives
+with exactly one opaque result, logical-turn sticky routing, exact per-transport
+retry budgets, partial-attempt rollback before the tool side-effect barrier,
+compatible cross-turn incremental requests with safe full-request resets, frozen
+same-turn catalog behavior, provider-isolated post-turn compaction,
+reasoning-aware usage accounting, oversized-replay failure, both `comp_hash` and
+model-downshift transitions, cooperative compaction retry delay, remote state
+persistence across restart, generated SDK, one production Linux build, embedded
+web UI startup, and desktop/mobile System selector behavior. The public release
+must contain all platform archives
 plus one SHA-256 file per archive.

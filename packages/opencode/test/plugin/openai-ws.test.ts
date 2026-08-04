@@ -92,7 +92,7 @@ describe("plugin.openai.ws", () => {
     expect(await response.text()).toBe(
       'data: {"type":"response.output_text.delta","delta":"hello"}\n\ndata: {"type":"response.done","response":{"id":"resp_123"}}\n\ndata: [DONE]\n\n',
     )
-    expect(requestBody).toEqual({ type: "response.create", input: "hi" })
+    expect(requestBody).toEqual({ type: "response.create", stream: true, input: "hi" })
     expect(completed).toHaveLength(1)
     expect(completed[0]?.type).toBe("response.done")
   })
@@ -188,7 +188,7 @@ describe("plugin.openai.ws-pool", () => {
     fetch.close()
   })
 
-  test("falls back to HTTP after websocket setup retries are exhausted", async () => {
+  test("temporarily falls back to HTTP after an opaque websocket setup rejection", async () => {
     const attempts: string[] = []
     await using server = await createRejectingWebSocketServer(() => attempts.push("websocket"))
     const fetch = CodexResponsesTransport.createWebSocketFetch({
@@ -198,13 +198,11 @@ describe("plugin.openai.ws-pool", () => {
     })
 
     const first = await fetch(server.url, streamRequest({ [TITLE_HEADER]: "false" }))
-    expect(await readTextError(first.text())).toBeInstanceOf(ProviderError.ResponseStreamError)
     const second = await fetch(server.url, streamRequest({ [TITLE_HEADER]: "false" }))
-    const third = await fetch(server.url, streamRequest({ [TITLE_HEADER]: "false" }))
 
+    expect(await first.text()).toBe("http")
     expect(await second.text()).toBe("http")
-    expect(await third.text()).toBe("http")
-    expect(attempts).toEqual(["websocket", "websocket"])
+    expect(attempts).toEqual(["websocket"])
     expect(server.httpRequests).toHaveLength(2)
     expect(server.httpRequests[0]?.headers[TITLE_HEADER]).toBeUndefined()
     expect(server.httpRequests[1]?.headers[TITLE_HEADER]).toBeUndefined()
@@ -465,9 +463,11 @@ describe("plugin.openai.ws-pool", () => {
     expect((await readTextError(second.text())).message).toContain("Responses websocket connection limit reached")
     const third = await fetch(server.url, streamRequest())
     const fourth = await fetch(server.url, streamRequest())
+    const fifth = await fetch(server.url, streamRequest())
 
-    expect(await third.text()).toBe("http")
+    expect((await readTextError(third.text())).message).toContain("Responses websocket connection limit reached")
     expect(await fourth.text()).toBe("http")
+    expect(await fifth.text()).toBe("http")
     expect(connections).toBe(3)
     expect(server.httpRequests).toHaveLength(2)
     fetch.close()
@@ -502,8 +502,10 @@ describe("plugin.openai.ws-pool", () => {
     const first = await fetch(server.url, streamRequest())
     expect((await readTextError(first.text())).message).toContain("WebSocket closed before response.completed")
     const second = await fetch(server.url, streamRequest())
+    expect((await readTextError(second.text())).message).toContain("Responses websocket connection limit reached")
+    const third = await fetch(server.url, streamRequest())
 
-    expect(await second.text()).toBe("http")
+    expect(await third.text()).toBe("http")
     expect(connections).toBe(2)
     expect(server.httpRequests).toHaveLength(1)
     fetch.close()
@@ -525,9 +527,11 @@ describe("plugin.openai.ws-pool", () => {
     expect((await readTextError(first.text())).message).toContain("idle timeout waiting for websocket")
     const second = await fetch(server.url, streamRequest())
     const third = await fetch(server.url, streamRequest())
+    const fourth = await fetch(server.url, streamRequest())
 
-    expect(await second.text()).toBe("http")
+    expect((await readTextError(second.text())).message).toContain("idle timeout waiting for websocket")
     expect(await third.text()).toBe("http")
+    expect(await fourth.text()).toBe("http")
     expect(connections).toBe(2)
     expect(server.httpRequests).toHaveLength(2)
     fetch.close()
@@ -551,8 +555,10 @@ describe("plugin.openai.ws-pool", () => {
     await new Promise((resolve) => setTimeout(resolve, 300))
 
     const second = await fetch(server.url, streamRequest())
+    expect((await readTextError(second.text())).message).toContain("idle timeout waiting for websocket")
+    const third = await fetch(server.url, streamRequest())
 
-    expect(await second.text()).toBe("http")
+    expect(await third.text()).toBe("http")
     expect(connections).toBe(2)
     expect(server.httpRequests).toHaveLength(1)
     fetch.close()
@@ -682,9 +688,9 @@ describe("plugin.openai.ws-pool", () => {
     const second = fetch(fallback.url, streamRequest())
 
     expect(await (await second).text()).toBe("http")
-    expect(await (await first).text()).toBe("http")
+    expect((await readTextError((await first).text())).message).toContain("WebSocket connect timed out")
     expect(server.connections()).toBe(1)
-    expect(fallback.httpRequests).toHaveLength(2)
+    expect(fallback.httpRequests).toHaveLength(1)
     fetch.close()
   })
 
@@ -705,9 +711,11 @@ describe("plugin.openai.ws-pool", () => {
     expect((await readTextError(first.text())).message).toContain("WebSocket closed before response.completed")
     const second = await fetch(server.url, streamRequest())
     const third = await fetch(server.url, streamRequest())
+    const fourth = await fetch(server.url, streamRequest())
 
-    expect(await second.text()).toBe("http")
+    expect((await readTextError(second.text())).message).toContain("WebSocket closed before response.completed")
     expect(await third.text()).toBe("http")
+    expect(await fourth.text()).toBe("http")
     expect(connections).toBe(2)
     expect(server.httpRequests).toHaveLength(2)
     fetch.close()

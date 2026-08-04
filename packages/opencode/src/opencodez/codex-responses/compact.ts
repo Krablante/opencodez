@@ -65,7 +65,7 @@ export function compact(input: {
   turnID?: string
   compaction: {
     trigger: "manual" | "auto"
-    reason: "user_requested" | "context_limit" | "comp_hash_changed"
+    reason: "user_requested" | "context_limit" | "comp_hash_changed" | "model_downshift"
     phase: "standalone_turn" | "pre_turn" | "mid_turn"
   }
   preserveActiveToolMedia: boolean

@@ -201,15 +201,16 @@ Session metadata also keeps the latest 32 logical-turn model profiles and each
 active turn's `x-reasoning-included` state. The signal resets at the next user
 boundary. When the header is absent, encrypted reasoning before the current user
 boundary receives Codex's base64-aware token estimate for the compaction
-decision only. A
-hash change therefore creates a pre-turn compact even for raw history: the
-previous model runs first, the current model is tried once if that model is
-unavailable or fails, and the pending user message remains outside the compact
-request until replay. The durable transition marker carries the target model and
-hash so restart recovery follows the same path. The authenticated model catalog
-refreshes every five minutes and immediately after an `x-models-etag` change;
-known fallback profiles cover temporary catalog failure without becoming a
-second live source of truth.
+decision only. A hash change therefore creates a pre-turn compact even for raw
+history. A switch from a larger effective context window also creates one when
+the active token state no longer fits the current model. The previous model runs
+first, the current model is tried once if that model is unavailable or fails,
+and the pending user message remains outside the compact request until replay.
+The durable transition marker carries the transition reason, target model, and
+available target hash so restart recovery follows the same path. The
+authenticated model catalog refreshes every five minutes and immediately after
+an `x-models-etag` change; known fallback profiles cover temporary catalog
+failure without becoming a second live source of truth.
 
 A login change discards account-scoped continuation and sends a fresh full
 request. The encrypted compaction item remains in that request as durable session

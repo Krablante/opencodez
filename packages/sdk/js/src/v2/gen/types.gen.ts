@@ -630,7 +630,8 @@ export type CompactionPart = {
       providerID: string
       modelID: string
     }
-    comp_hash: string
+    comp_hash?: string
+    reason?: "comp_hash_changed" | "model_downshift"
   }
   remote?: {
     providerID: "openai"

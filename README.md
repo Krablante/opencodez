@@ -241,9 +241,11 @@ response and reasoning IDs are never reused across account boundaries.
 Each request also carries one Codex-compatible metadata snapshot for its
 installation, session/thread, logical turn, compacted window, and request kind.
 OpenCodez records a bounded history of recent turn model settings. If the
-catalog `comp_hash` changes between turns, it compacts the previous history with
-the previous model before sampling the new turn, then retries once with the
-current model only when the previous model can no longer complete the compact.
+catalog `comp_hash` changes between turns, or a model switch reduces the
+effective context window below the active token state, it compacts the previous
+history with the previous model before sampling the new turn. It retries once
+with the current model only when the previous model can no longer complete the
+compact.
 The authenticated catalog profile is frozen for the complete logical turn, so
 an ETag refresh cannot change `comp_hash`, Responses Lite lowering, or context
 limits halfway through a tool loop. Switching ChatGPT login during an active
@@ -297,10 +299,12 @@ completed tool output is included in the preflight limit, remote state is bound
 to its base API model and backend `comp_hash` but remains portable between
 ChatGPT accounts, and Stop cancels the compact request through response-body
 processing.
-The UI reports compaction only after the returned remote state is persisted. The
-remote stream has two bounded retries on each transport, honors a server
-`Retry-After` delay, remains cancellable with the session, and still has no
-local-summary fallback.
+The UI reports compaction only after the returned remote state is persisted.
+Sampling has five bounded retries on WebSocket, then a fresh five-retry HTTP
+budget, for at most twelve network requests. The remote-compaction stream uses
+two retries on each transport, for at most six requests. Both honor a server
+`Retry-After` delay, remain cancellable with the session, and have no hidden
+retry multiplication; compaction still has no local-summary fallback.
 
 `opencodez.responses.compaction.threshold` is a fraction of the model's input
 window and defaults to the Codex policy of `0.9`. It accepts values greater than

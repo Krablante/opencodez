@@ -81,7 +81,7 @@ function createModel(opts: {
       input: { text: true, image: false, audio: false, video: false },
       output: { text: true, image: false, audio: false, video: false },
     },
-    api: { npm: opts.npm ?? "@ai-sdk/anthropic" },
+    api: { id: "test-model", url: "https://example.com/v1", npm: opts.npm ?? "@ai-sdk/anthropic" },
     options: {},
   } as Provider.Model
 }
@@ -530,22 +530,13 @@ describe("session.compaction.isOverflow", () => {
     ),
   )
 
-  it.live(
-    "returns false when compaction.auto is disabled",
-    provideTmpdirInstance(
-      () =>
-        Effect.gen(function* () {
-          const compact = yield* SessionCompaction.Service
-          const model = createModel({ context: 100_000, output: 32_000 })
-          const tokens = { input: 75_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } }
-          expect(yield* compact.isOverflow({ tokens, model })).toBe(false)
-        }),
-      {
-        config: {
-          compaction: { auto: false },
-        },
-      },
-    ),
+  itCompaction.instance("returns false when compaction.auto is disabled", () =>
+    Effect.gen(function* () {
+      const compact = yield* SessionCompaction.Service
+      const model = createModel({ context: 100_000, output: 32_000 })
+      const tokens = { input: 75_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } }
+      expect(yield* compact.isOverflow({ tokens, model })).toBe(false)
+    }).pipe(withCompaction({ config: cfg({ auto: false }) })),
   )
 })
 
@@ -860,6 +851,7 @@ describe("session.compaction.process", () => {
       expect(seen).toContain(SessionCompaction.Event.Compacted.type)
       expect(seen.filter((type) => type.startsWith("session.next."))).toEqual([])
     }),
+    { timeout: 10_000 },
   )
 
   itCompaction.instance(

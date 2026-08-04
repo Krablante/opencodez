@@ -269,8 +269,13 @@ describe("plugin.codex", () => {
     )
     const loaded = await hooks.auth!.loader!(async () => auth as never, {} as never)
 
-    const first = loaded.fetch!("https://api.openai.com/v1/responses")
-    const second = loaded.fetch!("https://api.openai.com/v1/responses")
+    const request = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-5.6-luna", stream: true, input: [] }),
+    }
+    const first = loaded.fetch!("https://api.openai.com/v1/responses", request)
+    const second = loaded.fetch!("https://api.openai.com/v1/responses", request)
 
     await waitFor(() => refreshRequests === 1)
     expect(apiRequests).toHaveLength(0)

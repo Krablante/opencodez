@@ -1214,6 +1214,7 @@ const layer = Layer.effect(
             turnID: activeTurnID,
             messages: msgs,
             model,
+            tokens: lastFinished?.tokens,
           })
           if (remoteTransition) {
             yield* Effect.logInfo("transitioning remote compaction backend snapshot", {
@@ -1221,6 +1222,7 @@ const layer = Layer.effect(
               model: model.api.id,
               sourceModel: remoteTransition.sourceModel.modelID,
               compHash: remoteTransition.targetCompHash,
+              reason: remoteTransition.reason,
             })
             yield* compaction.create({
               sessionID,

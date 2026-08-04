@@ -207,7 +207,8 @@ export const CompactionPart = Schema.Struct({
         providerID: Provider.ID,
         modelID: Model.ID,
       }),
-      comp_hash: Schema.String,
+      comp_hash: Schema.optional(Schema.String),
+      reason: Schema.optional(Schema.Literals(["comp_hash_changed", "model_downshift"])),
     }),
   ),
   remote: Schema.optional(

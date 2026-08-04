@@ -16,8 +16,12 @@ export function streamRetryLimit(kind: RequestKind) {
   return kind === "compaction" ? 2 : 5
 }
 
+export function requestAttemptLimit(kind: RequestKind) {
+  return (streamRetryLimit(kind) + 1) * 2
+}
+
 export function requestRetryLimit(kind: RequestKind) {
-  return streamRetryLimit(kind) * 2 + 1
+  return requestAttemptLimit(kind) - 1
 }
 
 export function requestKind(headers: Record<string, string>): RequestKind {
@@ -81,8 +85,12 @@ export function create() {
     return enabled && irreversible
   }
 
+  function active() {
+    return enabled
+  }
+
   function retryLimit() {
-    return enabled ? requestRetryLimit("sampling") : undefined
+    return enabled ? requestAttemptLimit("sampling") : undefined
   }
 
   function rollback(): Rollback | undefined {
@@ -110,6 +118,7 @@ export function create() {
     markIrreversible,
     canRetry,
     canResumeFromHistory,
+    active,
     retryLimit,
     rollback,
     commit,

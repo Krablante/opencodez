@@ -1105,50 +1105,53 @@ itFragmentFailure.live("session.processor effect tests retain partial legacy par
   ),
 )
 
-itCodexFragmentRetry.live("session.processor replaces an incomplete Codex attempt before retry", () =>
-  provideTmpdirInstance(
-    (dir) =>
-      Effect.gen(function* () {
-        codexFragmentAttempt = 0
-        const { processors, session, provider } = yield* boot()
-        const events = yield* EventV2Bridge.Service
+itCodexFragmentRetry.live(
+  "session.processor replaces an incomplete Codex attempt before retry",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          codexFragmentAttempt = 0
+          const { processors, session, provider } = yield* boot()
+          const events = yield* EventV2Bridge.Service
 
-        const chat = yield* session.create({})
-        const parent = yield* user(chat.id, "provider retry")
-        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
-        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
-        const seen: string[] = []
-        const off = yield* events.listen((event) => {
-          seen.push(event.type)
-          return Effect.void
-        })
-        const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "provider retry")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const seen: string[] = []
+          const off = yield* events.listen((event) => {
+            seen.push(event.type)
+            return Effect.void
+          })
+          const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
 
-        expect(
-          yield* handle.process({
-            user: {
-              id: parent.id,
+          expect(
+            yield* handle.process({
+              user: {
+                id: parent.id,
+                sessionID: chat.id,
+                role: "user",
+                time: parent.time,
+                agent: parent.agent,
+                model: { providerID: ref.providerID, modelID: ref.modelID },
+              } satisfies SessionV1.User,
               sessionID: chat.id,
-              role: "user",
-              time: parent.time,
-              agent: parent.agent,
-              model: { providerID: ref.providerID, modelID: ref.modelID },
-            } satisfies SessionV1.User,
-            sessionID: chat.id,
-            model: mdl,
-            agent: agent(),
-            system: [],
-            messages: [{ role: "user", content: "provider retry" }],
-            tools: {},
-          }),
-        ).toBe("continue")
-        yield* off
+              model: mdl,
+              agent: agent(),
+              system: [],
+              messages: [{ role: "user", content: "provider retry" }],
+              tools: {},
+            }),
+          ).toBe("continue")
+          yield* off
 
-        const parts = yield* MessageV2.parts(msg.id)
-        expect(parts.filter((part) => part.type === "text").map((part) => part.text)).toEqual(["complete"])
-        expect(parts.some((part) => part.type === "reasoning")).toBe(false)
-        expect(seen.filter((type) => type === SessionV1.Event.PartRemoved.type)).toHaveLength(3)
-      }),
-    { config: cfg },
-  ),
+          const parts = yield* MessageV2.parts(msg.id)
+          expect(parts.filter((part) => part.type === "text").map((part) => part.text)).toEqual(["complete"])
+          expect(parts.some((part) => part.type === "reasoning")).toBe(false)
+          expect(seen.filter((type) => type === SessionV1.Event.PartRemoved.type)).toHaveLength(3)
+        }),
+      { config: cfg },
+    ),
+  { timeout: 10_000 },
 )

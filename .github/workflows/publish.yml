@@ -73,8 +73,38 @@ jobs:
             echo "draft=$draft"
           } >> "$GITHUB_OUTPUT"
 
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Configure git identity
+        shell: bash
+        run: |
+          git config --global user.email "bot@opencode.ai"
+          git config --global user.name "opencode"
+
+      - name: Run unit tests
+        shell: bash
+        run: GITHUB_ACTIONS=false bun turbo test
+
+      - name: Check generated client
+        working-directory: packages/client
+        run: bun run check:generated
+
+      - name: Run HttpApi exerciser gates
+        working-directory: packages/opencode
+        run: bun run test:httpapi
+
   build-and-publish:
-    needs: prepare
+    needs: [prepare, validate]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
