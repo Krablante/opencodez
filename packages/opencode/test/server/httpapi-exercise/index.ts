@@ -144,6 +144,26 @@ const scenarios: Scenario[] = [
   http.protected.get("/skill", "app.skills").json(200, array, "status"),
   http.protected.get("/lsp", "lsp.status").json(200, array),
   http.protected.get("/formatter", "formatter.status").json(200, array),
+  http.protected.get("/opencodez/prompts", "opencodez.prompt.list").json(200, array),
+  http.protected
+    .post("/opencodez/prompts/state", "opencodez.prompt.state")
+    .at((ctx) => ({ path: "/opencodez/prompts/state", headers: ctx.headers(), body: {} }))
+    .json(200, (body) => {
+      object(body)
+      object(body.state)
+      check(typeof body.state.system === "string", "prompt state should report the effective System id")
+      object(body.metadata)
+    }),
+  http.protected
+    .post("/opencodez/prompts/select", "opencodez.prompt.select")
+    .at((ctx) => ({ path: "/opencodez/prompts/select", headers: ctx.headers(), body: { name: "none" } }))
+    .json(200, (body) => {
+      object(body)
+      object(body.state)
+      check(body.state.system === "none", "prompt selection should explicitly disable the System prompt")
+      object(body.metadata)
+      object(body.metadata.opencodez)
+    }),
   http.protected.get("/config", "config.get").json(200, undefined, "status"),
   http.protected
     .patch("/config", "config.update")

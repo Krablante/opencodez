@@ -491,7 +491,8 @@ const layer = Layer.effect(
                 messageID: ctx.assistantMessage.parentID,
               })
               .pipe(Effect.ignore, Effect.forkIn(scope))
-            const needsFollowUp = ctx.sawToolCall || value.reason === "tool-calls" || value.reason === "unknown"
+            const needsFollowUp =
+              ctx.sawToolCall || value.reason === "tool-calls" || (attempt.active() && value.reason === "unknown")
             if (
               (!attempt.active() || needsFollowUp) &&
               !ctx.assistantMessage.summary &&
@@ -771,7 +772,7 @@ const layer = Layer.effect(
           return (
             ctx.sawToolCall ||
             ctx.assistantMessage.finish === "tool-calls" ||
-            ctx.assistantMessage.finish === "unknown" ||
+            (attempt.active() && ctx.assistantMessage.finish === "unknown") ||
             (ctx.needsCompaction && ctx.producedDurableOutput)
           )
         },

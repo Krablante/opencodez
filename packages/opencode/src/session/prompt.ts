@@ -60,6 +60,7 @@ import { SessionModelContext } from "./model-context"
 import { LLMEvent } from "@opencode-ai/llm"
 import { Token } from "@/util/token"
 import { LLMRequestPrep } from "./llm/request"
+import { Auth } from "@/auth"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -144,7 +145,20 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    const auth = yield* Auth.Service
     const { db } = database
+    const isCodexResponses = Effect.fnUntraced(function* (model: Provider.Model) {
+      if (model.providerID !== "openai" || model.api.npm !== "@ai-sdk/openai") return false
+      const [cfg, info] = yield* Effect.all([config.get(), auth.get(model.providerID).pipe(Effect.orDie)], {
+        concurrency: "unbounded",
+      })
+      return LLMRequestPrep.isCodexResponses({
+        providerID: model.providerID,
+        modelNpm: model.api.npm,
+        authType: info?.type,
+        config: cfg,
+      })
+    })
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
@@ -1135,8 +1149,12 @@ const layer = Layer.effect(
             lastAssistantMsg?.parts.some(
               (part) => part.type === "tool" && !part.metadata?.providerExecuted && !isOrphanedInterruptedTool(part),
             ) ?? false
-          const modelNeedsFollowUp =
-            hasToolCalls || lastAssistant?.finish === "tool-calls" || lastAssistant?.finish === "unknown"
+          const unknownModel =
+            lastAssistant?.finish === "unknown"
+              ? yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
+              : undefined
+          const unknownNeedsFollowUp = unknownModel ? yield* isCodexResponses(unknownModel) : false
+          const modelNeedsFollowUp = hasToolCalls || lastAssistant?.finish === "tool-calls" || unknownNeedsFollowUp
           const directRemoteCompactionPart =
             lastAssistant?.summary === true &&
             lastAssistant.parentID === lastUser.id &&
@@ -1152,7 +1170,7 @@ const layer = Layer.effect(
                   )
               : undefined
           const directRemoteCompaction = directRemoteCompactionPart !== undefined
-          const activeTurnID = modelNeedsFollowUp
+          const candidateTurnID = modelNeedsFollowUp
             ? (lastFinished?.parentID ?? lastUser.id)
             : (directRemoteCompactionPart?.turn_id ?? lastUser.id)
 
@@ -1186,7 +1204,7 @@ const layer = Layer.effect(
               history: msgs,
             }).pipe(Effect.ignore, Effect.forkIn(scope))
 
-          const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
+          const model = unknownModel ?? (yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID))
           const task = tasks.pop()
 
           if (task?.type === "subtask") {
@@ -1208,6 +1226,9 @@ const layer = Layer.effect(
             if (result === "stop") break
             continue
           }
+
+          const codexResponses = unknownModel ? unknownNeedsFollowUp : yield* isCodexResponses(model)
+          const activeTurnID = codexResponses || directRemoteCompaction ? candidateTurnID : lastUser.id
 
           const remoteTransition = yield* compaction.remoteTransition({
             sessionID,
@@ -1237,22 +1258,23 @@ const layer = Layer.effect(
           }
           const remoteTurn = yield* compaction.recordRemoteTurn({ sessionID, turnID: activeTurnID, model })
 
-          const additionalTokens = modelNeedsFollowUp
-            ? (lastAssistantMsg?.parts.reduce((total, part) => {
-                if (part.type !== "tool") return total
-                if (part.state.status === "completed") {
-                  return (
-                    total +
-                    Token.estimate(part.state.output) +
-                    (model.providerID === "openai"
-                      ? CodexResponsesCompact.estimateInput(part.state.attachments ?? [])
-                      : Token.estimate(JSON.stringify(part.state.attachments ?? [])))
-                  )
-                }
-                if (part.state.status === "error") return total + Token.estimate(part.state.error)
-                return total
-              }, 0) ?? 0)
-            : 0
+          const additionalTokens =
+            codexResponses && modelNeedsFollowUp
+              ? (lastAssistantMsg?.parts.reduce((total, part) => {
+                  if (part.type !== "tool") return total
+                  if (part.state.status === "completed") {
+                    return (
+                      total +
+                      Token.estimate(part.state.output) +
+                      (model.providerID === "openai"
+                        ? CodexResponsesCompact.estimateInput(part.state.attachments ?? [])
+                        : Token.estimate(JSON.stringify(part.state.attachments ?? [])))
+                    )
+                  }
+                  if (part.state.status === "error") return total + Token.estimate(part.state.error)
+                  return total
+                }, 0) ?? 0)
+              : 0
           if (
             lastFinished &&
             lastFinished.summary !== true &&
@@ -1266,14 +1288,18 @@ const layer = Layer.effect(
               turnID: activeTurnID,
             }))
           ) {
-            yield* compaction.create({
-              sessionID,
-              agent: lastUser.agent,
-              model: lastUser.model,
-              auto: true,
-              phase: modelNeedsFollowUp ? "mid-turn" : "pre-turn",
-              turnID: activeTurnID,
-            })
+            yield* compaction.create(
+              codexResponses
+                ? {
+                    sessionID,
+                    agent: lastUser.agent,
+                    model: lastUser.model,
+                    auto: true,
+                    phase: modelNeedsFollowUp ? "mid-turn" : "pre-turn",
+                    turnID: activeTurnID,
+                  }
+                : { sessionID, agent: lastUser.agent, model: lastUser.model, auto: true },
+            )
             continue
           }
 
@@ -1426,6 +1452,16 @@ const layer = Layer.effect(
             if (directRemoteCompaction) yield* compaction.releasePending({ sessionID })
             if (result === "stop") return "break" as const
             if (result === "compact") {
+              if (!codexResponses) {
+                yield* compaction.create({
+                  sessionID,
+                  agent: lastUser.agent,
+                  model: lastUser.model,
+                  auto: true,
+                  overflow: !handle.message.finish,
+                })
+                return "continue" as const
+              }
               const needsFollowUp =
                 modelNeedsFollowUp || directRemoteCompaction || handle.needsFollowUp || handle.producedDurableOutput
               if (
@@ -1753,6 +1789,7 @@ export const node = LayerNode.make({
     LLM.node,
     EventV2Bridge.node,
     RuntimeFlags.node,
+    Auth.node,
     Database.node,
   ],
 })

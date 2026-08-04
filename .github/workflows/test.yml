@@ -68,6 +68,10 @@ jobs:
         timeout-minutes: 20
         run: GITHUB_ACTIONS=false bun turbo test
         env:
+          OPENCODEZ: "1"
+          OPENCODE_APP_NAME: opencodez
+          OPENCODE_CLI_NAME: opencodez
+          OPENCODE_DISABLE_FFF: "0"
           OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
 
       - name: Check generated client

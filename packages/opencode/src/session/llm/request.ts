@@ -71,9 +71,28 @@ export type Prepared = {
 const mergeOptions = (target: Record<string, any>, source: Record<string, any> | undefined): Record<string, any> =>
   mergeDeep(target, source ?? {}) as Record<string, any>
 
+export function isCodexResponses(input: {
+  providerID: string
+  modelNpm: string
+  authType?: string
+  config: ConfigInfo
+}) {
+  return (
+    input.providerID === "openai" &&
+    input.modelNpm === "@ai-sdk/openai" &&
+    input.authType === "oauth" &&
+    OpenCodezSettings.responsesWire(input.config) === "codex"
+  )
+}
+
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
-  const codexResponses = isOpenaiOauth && OpenCodezSettings.responsesWire(input.config) === "codex"
+  const codexResponses = isCodexResponses({
+    providerID: input.provider.id,
+    modelNpm: input.model.api.npm,
+    authType: input.auth?.type,
+    config: input.config,
+  })
   const accountKey =
     input.auth?.type === "oauth"
       ? CodexResponsesProtocol.accountKey(input.auth.accountId, input.auth.access)
@@ -85,8 +104,12 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   }
   const turnProfile =
     input.codexResponsesTurn?.profile?.modelID === input.model.api.id ? input.codexResponsesTurn.profile : undefined
-  const profile = turnProfile ?? CodexResponsesCatalog.resolve(input.model, accountKey)
-  if (CodexResponsesCompaction.has(input.sessionMetadata) && !isOpenaiOauth) {
+  const hasRemoteCompaction = CodexResponsesCompaction.has(input.sessionMetadata)
+  const profile =
+    codexResponses || hasRemoteCompaction
+      ? (turnProfile ?? CodexResponsesCatalog.resolve(input.model, accountKey))
+      : undefined
+  if (hasRemoteCompaction && !isOpenaiOauth) {
     return yield* Effect.fail(
       new Error("This session contains OpenAI remote compaction state and must continue with ChatGPT OAuth"),
     )
@@ -278,7 +301,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         : {
             "x-session-affinity": input.sessionID,
             "X-Session-Id": input.sessionID,
-            ...(isOpenaiOauth ? { [CodexResponsesTransport.TURN_ID_HEADER]: input.turnID ?? input.user.id } : {}),
+            ...(codexResponses ? { [CodexResponsesTransport.TURN_ID_HEADER]: input.turnID ?? input.user.id } : {}),
             ...(codexResponses && input.codexResponsesTurn?.accountKey
               ? { [CodexResponsesTransport.TURN_ACCOUNT_HEADER]: input.codexResponsesTurn.accountKey }
               : {}),

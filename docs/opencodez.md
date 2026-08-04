@@ -145,13 +145,16 @@ interruption, incompatible history, or relevant request-setting change starts a
 new full chain without requiring a different local session.
 
 The default is `codex`. Set `opencodez.responses.wire` to `legacy` to restore the
-previous OpenCode request flow. The setting applies only to OpenAI models
-authenticated through ChatGPT OAuth; OpenAI API-key access and other providers
-are unchanged.
+previous OpenCode request lifecycle: full authenticated HTTP requests, upstream
+partial-output handling, and local text-summary compaction. The setting applies
+only to OpenAI models authenticated through ChatGPT OAuth; OpenAI API-key access
+and other providers are unchanged. Start a new CLI process or restart a
+long-running server after changing the value so its provider adapter is rebuilt
+with one unambiguous mode.
 
-The authenticated Codex `/models` catalog is the live source for model context,
-automatic-compaction limits, `comp_hash`, and Responses Lite support. OpenCodez
-caches one account-scoped catalog for five minutes, deduplicates concurrent
+In `codex` mode, the authenticated Codex `/models` catalog is the live source
+for model context, automatic-compaction limits, `comp_hash`, and Responses Lite
+support. OpenCodez caches one account-scoped catalog for five minutes, deduplicates concurrent
 refreshes, and marks it stale whenever a Responses stream reports a different
 `x-models-etag`. A request without verified account identity can use its fresh
 catalog response but never stores it for reuse. A failed account-scoped refresh
@@ -285,11 +288,12 @@ sent to the model.
 
 Remote compaction participates in `opencodez.responses.wire`: `codex` mode can
 reuse the session/account WebSocket and incremental chain, while explicit
-`legacy` mode sends the same trigger request through the existing HTTP flow.
-Other providers keep upstream OpenCode local compaction. A session that already
-contains OpenAI opaque compaction state must continue through ChatGPT OAuth;
-switching to an incompatible provider produces a clear error instead of silently
-dropping the old context. Remote API failures are surfaced directly and never
+`legacy` mode creates the same local text summary as upstream OpenCode. A
+session that already contains durable opaque OpenAI compaction state remains a
+narrow compatibility exception: it continues that state over authenticated HTTP
+instead of silently discarding context. Other providers always keep upstream
+OpenCode local compaction. Switching opaque state to an incompatible provider
+produces a clear error. Remote API failures are surfaced directly and never
 fall back to a local summary.
 
 For OpenAI Zero Data Retention credentials, remote compaction uses `store:
@@ -511,6 +515,14 @@ OpenCodez config boundary:
 The shared provider and `packages/llm` abstractions are unchanged, keeping this
 custom layer small and easy to rebase onto future OpenCode versions.
 
+The wire capability is decided once from four facts: provider id `openai`, the
+official `@ai-sdk/openai` model adapter, OAuth authentication, and
+`opencodez.responses.wire: "codex"`. Session continuation, retry rollback,
+Codex-only unknown-finish recovery, catalog accounting, and new remote
+compaction all use that same decision. This is a hard isolation boundary rather
+than a transport hint: API-key OpenAI, compatible third-party adapters, other
+providers, and explicit `legacy` mode retain the upstream lifecycle.
+
 Pinned Codex also contains WebSocket prewarming, which is a latency optimization
 rather than a correctness requirement. OpenCodez keeps its existing lazy,
 session-affine pool to avoid an idle connection and additional lifecycle state.
@@ -616,8 +628,9 @@ The OpenAPI document and JavaScript SDK are generated from the server contract.
 ## Release Verification
 
 A release should confirm the mapped System prompts, both Responses wire modes,
-default and configured compaction thresholds, one streamed V2 compaction trigger
-with exactly one opaque result, logical-turn sticky routing, exact per-transport
+strict legacy local-compaction and partial-output parity, non-OpenAI provider
+isolation, default and configured compaction thresholds, one streamed V2
+compaction trigger with exactly one opaque result, logical-turn sticky routing, exact per-transport
 retry budgets, partial-attempt rollback before the tool side-effect barrier,
 compatible cross-turn incremental requests with safe full-request resets, frozen
 same-turn catalog behavior, provider-isolated post-turn compaction,

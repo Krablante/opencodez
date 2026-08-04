@@ -17,7 +17,9 @@ const storage: AsyncStorage = {
 }
 
 beforeAll(async () => {
+  const router = await import("@solidjs/router")
   mock.module("@solidjs/router", () => ({
+    ...router,
     useParams: () => ({}),
     useSearchParams: () => [{}],
     useLocation: () => ({ pathname: "", query: {} }),

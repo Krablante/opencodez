@@ -136,6 +136,7 @@ export const dict = {
   "dialog.provider.anthropic.note": "使用 Claude Pro/Max 或 API 密钥连接",
   "dialog.provider.copilot.note": "使用 Copilot 或 API 密钥连接",
   "dialog.provider.openai.note": "使用 ChatGPT Pro/Plus 或 API 密钥连接",
+  "dialog.provider.custom.label": "自定义 OpenAI 兼容提供商",
   "dialog.provider.google.note": "使用 Google 账号或 API 密钥连接",
   "dialog.provider.openrouter.note": "使用 OpenRouter 账号或 API 密钥连接",
   "dialog.provider.vercel.note": "使用 Vercel 账号或 API 密钥连接",
@@ -148,6 +149,7 @@ export const dict = {
   "dialog.model.manage.provider.toggle": "切换所有 {{provider}} 模型",
   "dialog.model.unpaid.freeModels.title": "OpenCode 提供的免费模型",
   "dialog.model.unpaid.addMore.title": "从热门提供商添加更多模型",
+  "dialog.model.unpaid.viewMoreProviders": "查看更多 70 多个提供商",
 
   "dialog.provider.viewAll": "查看更多提供商",
 
@@ -1019,6 +1021,9 @@ export const dict = {
   "session.header.open.finder": "访达",
   "session.header.open.fileExplorer": "文件资源管理器",
   "session.header.open.fileManager": "文件管理器",
+  "session.header.reveal.finder": "在访达中显示",
+  "session.header.reveal.fileExplorer": "在文件资源管理器中显示",
+  "session.header.reveal.containingFolder": "打开所在文件夹",
   "session.header.open.app.vscode": "VS Code",
   "session.header.open.app.cursor": "Cursor",
   "session.header.open.app.zed": "Zed",

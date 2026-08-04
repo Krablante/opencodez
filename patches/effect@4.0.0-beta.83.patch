@@ -55,3 +55,70 @@ index f2920365cf0328146523ce2e2dba04d6a8809a4a..5482d635cdf01a72063ff683d244fab8
  /**
   * Creates a streaming `Uint8Array` success response schema.
   *
+diff --git a/dist/internal/schema/arbitrary.js b/dist/internal/schema/arbitrary.js
+index c42170cf780e84188aedff96b48fd6d50eb8a6df..8bedb9ef486e4d5899778877c6cbdd7413bb0e2f 100644
+--- a/dist/internal/schema/arbitrary.js
++++ b/dist/internal/schema/arbitrary.js
+@@ -242,24 +242,25 @@ function toIntegerConstraints(ordered) {
+   return toRangeConstraints(ordered, (minimum, excluded) => excluded ? Math.floor(minimum) + 1 : Math.ceil(minimum), (maximum, excluded) => excluded ? Math.ceil(maximum) - 1 : Math.floor(maximum), "integer constraints");
+ }
+ function toFloatConstraints(constraint, ordered) {
++  const originalMinimum = ordered?.minimum;
++  const originalMaximum = ordered?.maximum;
++  // Fast Check 4.8 accepts only float32 bounds; exclusion keeps rounding inside the original range.
++  const minimum = originalMinimum === undefined ? undefined : Math.fround(originalMinimum);
++  const maximum = originalMaximum === undefined ? undefined : Math.fround(originalMaximum);
+   const out = {
+     ...(constraint?.noInfinity ? {
+       noDefaultInfinity: true
+     } : {}),
+     ...(constraint?.noNaN ? {
+       noNaN: true
+     } : {}),
+-    ...(ordered?.minimum !== undefined ? {
+-      min: ordered.minimum
+-    } : {}),
+-    ...(ordered?.exclusiveMinimum !== undefined ? {
+-      minExcluded: ordered.exclusiveMinimum
++    ...(minimum !== undefined ? {
++      min: minimum,
++      minExcluded: ordered?.exclusiveMinimum === true || minimum < originalMinimum
+     } : {}),
+-    ...(ordered?.maximum !== undefined ? {
+-      max: ordered.maximum
+-    } : {}),
+-    ...(ordered?.exclusiveMaximum !== undefined ? {
+-      maxExcluded: ordered.exclusiveMaximum
++    ...(maximum !== undefined ? {
++      max: maximum,
++      maxExcluded: ordered?.exclusiveMaximum === true || maximum > originalMaximum
+     } : {})
+   };
+   if (out.min !== undefined && out.max !== undefined && (out.min > out.max || out.min === out.max && (out.minExcluded || out.maxExcluded))) {
+diff --git a/src/internal/schema/arbitrary.ts b/src/internal/schema/arbitrary.ts
+index 2091336eb4997b6690be287debcf231aaafbe3a1..fc3d5beddd3b273f9655ccb35d492cff17309bb1 100644
+--- a/src/internal/schema/arbitrary.ts
++++ b/src/internal/schema/arbitrary.ts
+@@ -326,11 +326,18 @@ function toIntegerConstraints(ordered: OrderedConstraint | undefined) {
+ function toFloatConstraints(constraint: Constraint | undefined, ordered: OrderedConstraint | undefined) {
++  const originalMinimum = ordered?.minimum as number | undefined
++  const originalMaximum = ordered?.maximum as number | undefined
++  // Fast Check 4.8 accepts only float32 bounds; exclusion keeps rounding inside the original range.
++  const minimum = originalMinimum === undefined ? undefined : Math.fround(originalMinimum)
++  const maximum = originalMaximum === undefined ? undefined : Math.fround(originalMaximum)
+   const out: FastCheck.FloatConstraints = {
+     ...(constraint?.noInfinity ? { noDefaultInfinity: true } : {}),
+     ...(constraint?.noNaN ? { noNaN: true } : {}),
+-    ...(ordered?.minimum !== undefined ? { min: ordered.minimum as number } : {}),
+-    ...(ordered?.exclusiveMinimum !== undefined ? { minExcluded: ordered.exclusiveMinimum } : {}),
+-    ...(ordered?.maximum !== undefined ? { max: ordered.maximum as number } : {}),
+-    ...(ordered?.exclusiveMaximum !== undefined ? { maxExcluded: ordered.exclusiveMaximum } : {})
++    ...(minimum !== undefined
++      ? { min: minimum, minExcluded: ordered?.exclusiveMinimum === true || minimum < originalMinimum }
++      : {}),
++    ...(maximum !== undefined
++      ? { max: maximum, maxExcluded: ordered?.exclusiveMaximum === true || maximum > originalMaximum }
++      : {})
+   }
+   if (
+     out.min !== undefined &&

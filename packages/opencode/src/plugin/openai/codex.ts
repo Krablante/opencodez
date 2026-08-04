@@ -319,10 +319,8 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               },
             ]),
         )
-        return CodexResponsesCatalog.initialize(models, {
-          auth: ctx.auth,
-          endpoint: codexApiEndpoint,
-        })
+        if (responsesWire === "legacy") return models
+        return CodexResponsesCatalog.initialize(models, { auth: ctx.auth, endpoint: codexApiEndpoint })
       },
     },
     auth: {
@@ -336,6 +334,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 httpFetch: fetch,
                 wire: codexWire ? "codex" : "legacy",
                 onModelsEtag(etag, accountKey) {
+                  if (!codexWire) return
                   if (!accountKey || !CodexResponsesCatalog.observeEtag(etag, accountKey)) return
                   void CodexResponsesCatalog.scheduleRefresh(accountKey, async () => {
                     const value = await getAuth()
@@ -428,7 +427,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
             }
             headers.set("authorization", `Bearer ${currentAuth.access}`)
             // ChatGPT routes catalog Fast tiers only for the Codex product originator.
-            headers.set("originator", "codex_cli_rs")
+            if (codexWire) headers.set("originator", "codex_cli_rs")
             if (authWithAccount.accountId) {
               headers.set("ChatGPT-Account-Id", authWithAccount.accountId)
             }
@@ -458,7 +457,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
             )
             headers.delete(CodexResponsesTransport.TURN_PROFILE_HEADER)
             const refresh =
-              parsed.pathname.endsWith("/responses") && CodexResponsesCatalog.needsRefresh(currentAuth)
+              codexWire && parsed.pathname.endsWith("/responses") && CodexResponsesCatalog.needsRefresh(currentAuth)
                 ? CodexResponsesCatalog.refresh({ auth: currentAuth, endpoint: codexApiEndpoint })
                 : undefined
             if (turnProfile) void refresh?.catch(() => undefined)
@@ -508,6 +507,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
             }
             const modelsEtag = response.headers.get("x-models-etag") ?? undefined
             if (
+              codexWire &&
               CodexResponsesCatalog.observeEtag(
                 modelsEtag,
                 CodexResponsesProtocol.accountKey(authWithAccount.accountId, currentAuth.access),

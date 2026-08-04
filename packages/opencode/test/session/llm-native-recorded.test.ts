@@ -9,6 +9,7 @@ import { Effect, Layer, Option, Schema, Stream } from "effect"
 import path from "node:path"
 import z from "zod"
 import { Auth } from "@/auth"
+import { Config } from "@/config/config"
 import { Provider } from "@/provider/provider"
 
 import { Filesystem } from "@/util/filesystem"
@@ -148,15 +149,18 @@ const RECORDED_SCENARIOS = [
     replayAuth: replayOpenAIOAuth,
     stableID: "openai-oauth",
     config: (model) =>
-      providerConfig({
-        providerID: ProviderV2.ID.openai,
-        name: "OpenAI",
-        env: ["OPENAI_API_KEY"],
-        npm: "@ai-sdk/openai",
-        api: "https://api.openai.com/v1",
-        model,
-        options: { baseURL: "https://api.openai.com/v1" },
-      }),
+      ({
+        ...providerConfig({
+          providerID: ProviderV2.ID.openai,
+          name: "OpenAI",
+          env: ["OPENAI_API_KEY"],
+          npm: "@ai-sdk/openai",
+          api: "https://api.openai.com/v1",
+          model,
+          options: { baseURL: "https://api.openai.com/v1" },
+        }),
+        opencodez: { responses: { wire: "legacy" } },
+      }) satisfies Partial<ConfigV1.Info>,
   },
   {
     id: "opencode-proxy",
@@ -280,7 +284,7 @@ function recordedNativeLLMLayer(scenario: RecordedScenario) {
         redactor: HttpRecorderInternal.Redactor.make(redact),
       })
     : HttpRecorder.http(scenario.cassette, { directory: FIXTURES_DIR, metadata, redact })
-  return AppNodeBuilder.build(LayerNode.group([Provider.node, LLM.node]), [
+  return AppNodeBuilder.build(LayerNode.group([Provider.node, LLM.node, Config.node]), [
     [LayerNodePlatform.requestExecutor, RequestExecutor.layer.pipe(Layer.provide(recordedHttp))],
     [RuntimeFlags.node, RuntimeFlags.layer({ experimentalNativeLlm: true })],
     ...(auth ? ([[Auth.node, auth]] as const) : []),
@@ -345,6 +349,9 @@ const driveToolLoop = (scenario: RecordedScenario) =>
     const test = yield* TestInstance
     const model = yield* Effect.promise(() => loadFixture(scenario.providerID, scenario.modelID))
     yield* writeConfig(test.directory, scenario, model)
+    const config = yield* Config.Service
+    yield* config.invalidate()
+    expect((yield* config.get()).opencodez?.responses?.wire).toBe(scenario.id === "openai-oauth" ? "legacy" : undefined)
 
     const stableID = scenario.stableID ?? scenario.providerID
     const sessionID = SessionID.make(`session-recorded-${stableID}-loop`)
@@ -374,6 +381,8 @@ const driveToolLoop = (scenario: RecordedScenario) =>
       model: resolved,
       agent,
       system: [WEATHER_SYSTEM],
+      sessionMetadata:
+        scenario.id === "openai-oauth" ? { opencodez: { selection: { system: null, systemManual: true } } } : undefined,
       tools: { get_weather: weatherTool },
     }
 

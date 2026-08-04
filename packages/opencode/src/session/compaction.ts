@@ -269,7 +269,15 @@ const layer = Layer.effect(
       const cfg = yield* config.get()
       const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
       let limit: number | undefined
-      if (input.model.providerID === "openai" && authInfo?.type === "oauth") {
+      if (
+        authInfo?.type === "oauth" &&
+        LLMRequestPrep.isCodexResponses({
+          providerID: input.model.providerID,
+          modelNpm: input.model.api.npm,
+          authType: authInfo?.type,
+          config: cfg,
+        })
+      ) {
         const profile =
           input.profile?.modelID === input.model.api.id
             ? input.profile
@@ -328,8 +336,19 @@ const layer = Layer.effect(
       model: Provider.Model
     }) {
       if (input.model.providerID !== "openai") return undefined
-      const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
+      const [cfg, authInfo] = yield* Effect.all([config.get(), auth.get(input.model.providerID).pipe(Effect.orDie)], {
+        concurrency: "unbounded",
+      })
       if (authInfo?.type !== "oauth") return undefined
+      if (
+        !LLMRequestPrep.isCodexResponses({
+          providerID: input.model.providerID,
+          modelNpm: input.model.api.npm,
+          authType: authInfo?.type,
+          config: cfg,
+        })
+      )
+        return undefined
       const accountKey = CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access)
       if (!accountKey) return undefined
       const info = yield* session.get(input.sessionID).pipe(Effect.orDie)
@@ -400,8 +419,19 @@ const layer = Layer.effect(
       tokens?: SessionV1.Assistant["tokens"]
     }) {
       if (input.model.providerID !== "openai") return undefined
-      const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
+      const [cfg, authInfo] = yield* Effect.all([config.get(), auth.get(input.model.providerID).pipe(Effect.orDie)], {
+        concurrency: "unbounded",
+      })
       if (authInfo?.type !== "oauth") return undefined
+      if (
+        !LLMRequestPrep.isCodexResponses({
+          providerID: input.model.providerID,
+          modelNpm: input.model.api.npm,
+          authType: authInfo?.type,
+          config: cfg,
+        })
+      )
+        return undefined
       const accountKey = CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access)
       if (!accountKey) return undefined
       yield* Effect.promise(() => CodexResponsesCatalog.settleRefresh(accountKey))
@@ -844,7 +874,16 @@ const layer = Layer.effect(
         ? yield* provider.getModel(transition.model.providerID, transition.model.modelID).pipe(Effect.orDie)
         : sourceModel
       const authInfo = yield* auth.get(userMessage.model.providerID).pipe(Effect.orDie)
-      const remote = sourceModel.providerID === "openai" && authInfo?.type === "oauth"
+      const previousCompaction = CodexResponsesCompaction.latest(history)
+      const codexResponses = LLMRequestPrep.isCodexResponses({
+        providerID: sourceModel.providerID,
+        modelNpm: sourceModel.api.npm,
+        authType: authInfo?.type,
+        config: cfg,
+      })
+      // Legacy mode creates local summaries. Existing opaque history remains on
+      // the remote path so changing the setting never discards durable context.
+      const remote = codexResponses || (sourceModel.providerID === "openai" && !!previousCompaction)
       const accountKey =
         authInfo?.type === "oauth" ? CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access) : undefined
       const turnSettings = input.prepared?.codexResponsesTurn?.settings
@@ -859,8 +898,6 @@ const layer = Layer.effect(
           : accountKey
             ? CodexResponsesCatalog.resolve(targetModel, accountKey)
             : undefined
-      const previousCompaction = CodexResponsesCompaction.latest(history)
-
       if (remote) {
         if (!accountKey) throw new Error("OpenAI remote compaction requires a verified ChatGPT account identity")
         if (!compactionPart) throw new Error(`Missing compaction part for ${input.parentID}`)

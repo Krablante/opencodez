@@ -20,6 +20,7 @@ import { testEffect } from "../lib/effect"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 
 const encoder = new TextEncoder()
 
@@ -139,12 +140,15 @@ describe("Project.fromDirectory", () => {
     }),
   )
 
-  it.live("returns global for non-git directory", () =>
+  it.live("uses the identity-appropriate ID for a non-git directory", () =>
     Effect.gen(function* () {
       const project = yield* Project.Service
       const tmp = yield* tmpdirScoped()
       const result = yield* project.fromDirectory(tmp)
-      expect(result.project.id).toBe(ProjectV2.ID.global)
+      const next = yield* project.fromDirectory(tmp)
+      if (OpenCodezIdentity.enabled) expect(result.project.id).not.toBe(ProjectV2.ID.global)
+      else expect(result.project.id).toBe(ProjectV2.ID.global)
+      expect(next.project.id).toBe(result.project.id)
     }),
   )
 

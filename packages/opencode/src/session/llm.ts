@@ -231,13 +231,12 @@ const live: Layer.Layer<
       // Runtime seam: native is an opt-in adapter over @opencode-ai/llm. It
       // either returns a ready LLMEvent stream or a concrete fallback reason.
       if (flags.experimentalNativeLlm) {
-        const isOpenaiOauth = item.id === "openai" && info?.type === "oauth"
         const native = LLMNativeRuntime.stream({
           model: input.model,
           provider: item,
           auth: info,
           llmClient,
-          system: isOpenaiOauth || isWorkflow ? prepared.system : undefined,
+          system: prepared.codexResponses || isWorkflow ? prepared.system : undefined,
           messages: prepared.messages,
           tools: prepared.tools,
           toolChoice: input.toolChoice,

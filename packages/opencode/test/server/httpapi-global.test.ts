@@ -7,6 +7,7 @@ import { Auth } from "../../src/auth"
 import { Config } from "../../src/config/config"
 import { Installation } from "../../src/installation"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
+import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import { ServerAuth } from "../../src/server/auth"
 import { RootHttpApi } from "../../src/server/routes/instance/httpapi/api"
 import { GlobalPaths } from "../../src/server/routes/instance/httpapi/groups/global"
@@ -43,12 +44,21 @@ const apiLayer = HttpRouter.serve(
 const it = testEffect(apiLayer)
 
 describe("global HttpApi", () => {
-  it.live("upgrades to latest when the request body is omitted", () =>
+  it.live("uses the identity-specific upgrade behavior when the request body is omitted", () =>
     Effect.gen(function* () {
       const response = yield* HttpClient.post(GlobalPaths.upgrade)
+      const body = yield* response.json
 
+      if (OpenCodezIdentity.enabled) {
+        expect(response.status).toBe(400)
+        expect(body).toEqual({
+          success: false,
+          error: "OpenCodez uses GitHub Releases for updates. Run `opencodez update` or `opencodez update --check`.",
+        })
+        return
+      }
       expect(response.status).toBe(200)
-      expect(yield* response.json).toEqual({ success: true, version: "9.9.9" })
+      expect(body).toEqual({ success: true, version: "9.9.9" })
     }),
   )
 

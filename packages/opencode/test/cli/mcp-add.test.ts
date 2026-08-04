@@ -1,6 +1,7 @@
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"
 import path from "path"
+import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import { cliIt } from "../lib/cli-process"
 
 describe("opencode mcp add (non-interactive subprocess)", () => {
@@ -22,7 +23,7 @@ describe("opencode mcp add (non-interactive subprocess)", () => {
         opencode.expectExit(result, 0)
 
         const config = yield* Effect.promise(() =>
-          Bun.file(path.join(home, ".config", "opencode", "opencode.json")).json(),
+          Bun.file(path.join(home, ".config", OpenCodezIdentity.appName, "opencode.json")).json(),
         )
         expect(config.mcp.github).toEqual({
           type: "remote",
@@ -58,7 +59,7 @@ describe("opencode mcp add (non-interactive subprocess)", () => {
         opencode.expectExit(result, 0)
 
         const config = yield* Effect.promise(() =>
-          Bun.file(path.join(home, ".config", "opencode", "opencode.json")).json(),
+          Bun.file(path.join(home, ".config", OpenCodezIdentity.appName, "opencode.json")).json(),
         )
         expect(config.mcp.local).toEqual({
           type: "local",

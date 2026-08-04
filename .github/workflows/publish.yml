@@ -94,6 +94,11 @@ jobs:
       - name: Run unit tests
         shell: bash
         run: GITHUB_ACTIONS=false bun turbo test
+        env:
+          OPENCODEZ: "1"
+          OPENCODE_APP_NAME: opencodez
+          OPENCODE_CLI_NAME: opencodez
+          OPENCODE_DISABLE_FFF: "0"
 
       - name: Check generated client
         working-directory: packages/client
