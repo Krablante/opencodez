@@ -6,8 +6,8 @@
 
 - Made default-disabled FFF a true zero-index mode: OpenCodez no longer starts the upstream `rg --files` fallback or retains a background path index when `OPENCODE_DISABLE_FFF=1`. Directory browsing and explicit agent file tools remain available.
 - Made the v2 Web composer controls shrink and truncate inside narrow/mobile layouts, with icon-only Agent, System, and Variant controls and readable Model priority, so every control remains contained without changing desktop spacing.
-- Updated the fork base from upstream OpenCode `1.18.4` to `1.18.11` while keeping the OpenCodez prompt, project, updater, embedded Web UI, Responses wire, and remote compaction layers isolated.
-- Adopted upstream fixes for MCP SSE reconnect loops, configurable interleaved reasoning fields, stale prompt controls and session tabs, narrow file-tree tabs, directory selection, and external desktop links.
+- Updated the fork base from upstream OpenCode `1.18.4` to `1.18.13` while keeping the OpenCodez prompt, project, updater, embedded Web UI, Responses wire, and remote compaction layers isolated.
+- Adopted upstream fixes for MCP SSE reconnect loops, configurable interleaved reasoning fields, stale prompt controls and session tabs, narrow file-tree tabs, directory selection, external desktop links, right-to-left layouts, localized desktop surfaces, and responsive worker-based Markdown rendering.
 - Adopted upstream's current project-scoped MCP state loading.
 - Ported OpenCodez prompt metadata into the current App prompt controller and session-creation flow.
 - History edits now force one safe full request before incremental ChatGPT OAuth continuation resumes on the resulting branch.
@@ -27,7 +27,7 @@
 - Aligned the ChatGPT OAuth wire with current Codex model metadata and Responses Lite: context, automatic-compaction limits, `comp_hash`, and Lite support now come from an ETag-refreshed authenticated catalog with bounded fallback profiles; opaque compaction injection uses an expiring one-shot handoff; Unicode payload accounting is UTF-8 safe; and sampling/compaction share exact finite WebSocket-to-HTTP retry budgets with a bounded sticky-fallback pool.
 - Completed the responsive-wire boundary behavior: sampling now receives the full Codex budget of one request plus five retries independently on WebSocket and HTTP; post-answer compaction deferral applies only to ChatGPT OAuth Codex wire; and switching to a smaller effective model window triggers a pre-turn compact with the previous model before the new model samples.
 - Made the Codex Responses capability a fail-closed, request-scoped boundary. Explicit `legacy` mode now preserves unchanged full request bodies and upstream retry behavior, while API-key OpenAI, alternate OpenAI adapters, and other providers bypass Codex lowering, catalog accounting, turn state, and response-driven replay.
-- Made manual release publication depend on a fresh Linux validation job covering the repository test suite, generated client, and concrete HttpApi exerciser before any artifacts are built or uploaded.
+- Made manual release publication depend on fresh package typechecks and generated-client verification before any artifacts are built or uploaded; production archive and binary checks remain mandatory in the publishing job.
 - OpenCodez binary builds now fail closed unless production mode is explicit: `OPENCODEZ_BUILD=1`, channel `latest`, and an OpenCodez version with `+opencodez.N` metadata are all required before artifact generation.
 
 ## 1.18.4+opencodez.3

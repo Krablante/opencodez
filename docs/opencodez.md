@@ -44,7 +44,7 @@ replacement of `/usr/local/bin/opencodez`, then falls back to the normal
 interactive sudo flow when the helper is absent.
 
 Release versions use the upstream base plus OpenCodez build metadata, for
-example `1.18.11+opencodez.1`. The release tag and embedded binary version must
+example `1.18.13+opencodez.1`. The release tag and embedded binary version must
 match exactly.
 
 ## System Prompt Library
@@ -520,6 +520,14 @@ OpenCodez config boundary:
 The shared provider and `packages/llm` abstractions are unchanged, keeping this
 custom layer small and easy to rebase onto future OpenCode versions.
 
+The Web/Desktop System control is similarly isolated in
+`packages/app/src/components/opencodez-prompt-control.tsx`. Both composer
+generations inject that one control at the model-control seam and pass its
+session metadata through the normal session creation call. The control reuses
+upstream localization keys and layout direction, so adding an upstream locale
+or changing right-to-left behavior does not create a parallel OpenCodez
+translation surface.
+
 The wire capability is decided per request from four facts: provider id
 `openai`, the official `@ai-sdk/openai` model adapter, OAuth authentication,
 and `opencodez.responses.wire: "codex"`. Request preparation sends that decision
@@ -637,6 +645,21 @@ packages/session-ui/src/v2/components/prompt-input/index.tsx
 The OpenAPI document and JavaScript SDK are generated from the server contract.
 
 ## Release Verification
+
+A release update should merge the upstream release tag rather than copy its
+tree. Keep the OpenCodez publish workflow, binary identity, updater, runtime
+roots, System control, project-safety guards, and Codex Responses subsystem as
+the protected fork boundary. When upstream changes a shared composer, retain
+its current draft, attachment, localization, accessibility, and directionality
+behavior first, then reconnect the isolated System control at the existing
+model-control seam. Generated Protocol, OpenAPI, and SDK files must come from
+their normal generators rather than manual edits.
+
+The release workflow deliberately uses typechecks, generated-client drift,
+archive verification, and a production build instead of carrying the broad
+upstream unit and integration matrix into the small public fork. Runtime
+behavior is then checked manually against the final production artifact and its
+published checksum.
 
 A release should confirm the mapped System prompts, both Responses wire modes,
 strict legacy local-compaction and partial-output parity, non-OpenAI provider

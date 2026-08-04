@@ -104,8 +104,9 @@ export function createOpenCodezPromptControl(options: Options): {
   const position = () => {
     const rect = trigger?.getBoundingClientRect()
     if (!rect) return
+    const anchor = language.direction() === "rtl" ? rect.right - 288 : rect.left
     setState({
-      left: Math.max(8, Math.min(rect.left, window.innerWidth - 296)),
+      left: Math.max(8, Math.min(anchor, window.innerWidth - 296)),
       bottom: Math.max(8, window.innerHeight - rect.top + 8),
     })
   }
@@ -170,7 +171,7 @@ export function createOpenCodezPromptControl(options: Options): {
   const entries = createMemo(() => {
     const query = state.search.trim().toLowerCase()
     return [{ name: "none", source: "builtin" as const }, ...state.entries].filter((entry) => {
-      const label = entry.name === "none" ? "None" : entry.name
+      const label = entry.name === "none" ? language.t("sound.option.none") : entry.name
       return !query || label.toLowerCase().includes(query)
     })
   })
@@ -183,12 +184,12 @@ export function createOpenCodezPromptControl(options: Options): {
         data-action="prompt-system"
         class="h-6 min-w-0 max-w-[200px] shrink-0 px-2 flex items-center gap-1 rounded-md text-12-regular text-text-weak hover:text-text-strong hover:bg-surface-base-hover sm:shrink"
         style={options.style?.()}
-        aria-label="Select System prompt"
+        aria-label={language.t("context.systemPrompt.title")}
         aria-expanded={state.open}
         onClick={() => setOpen(!state.open)}
       >
         <Icon name="prompt" size="small" />
-        <span class="hidden truncate sm:inline">S: {state.prompt?.system ?? "default"}</span>
+        <span class="hidden truncate sm:inline">S: {state.prompt?.system ?? language.t("common.default")}</span>
         <span class="hidden sm:inline-flex">
           <Icon name="chevron-down" size="small" />
         </span>
@@ -198,7 +199,7 @@ export function createOpenCodezPromptControl(options: Options): {
           <div
             ref={menu}
             role="dialog"
-            aria-label="Select System prompt"
+            aria-label={language.t("context.systemPrompt.title")}
             class="fixed z-50 w-72 overflow-hidden rounded-md border border-border-weak-base bg-background-base shadow-lg"
             style={{ left: `${state.left}px`, bottom: `${state.bottom}px` }}
           >
@@ -207,14 +208,14 @@ export function createOpenCodezPromptControl(options: Options): {
                 ref={search}
                 value={state.search}
                 onInput={(event) => setState("search", event.currentTarget.value)}
-                placeholder="Search system prompts..."
+                placeholder={language.t("common.search.placeholder")}
                 class="w-full h-8 px-2 rounded-md bg-surface-base text-13-regular text-text-strong outline-none placeholder:text-text-weaker"
               />
             </div>
             <div class="max-h-[244px] overflow-y-auto p-1">
               <Show
                 when={!state.loading}
-                fallback={<div class="px-2 py-1.5 text-13-regular text-text-weak">Loading...</div>}
+                fallback={<div class="px-2 py-1.5 text-13-regular text-text-weak">{language.t("common.loading")}</div>}
               >
                 <Show
                   when={!state.error}
@@ -222,15 +223,17 @@ export function createOpenCodezPromptControl(options: Options): {
                 >
                   <Show
                     when={entries().length > 0}
-                    fallback={<div class="px-2 py-1.5 text-13-regular text-text-weak">No prompts found</div>}
+                    fallback={
+                      <div class="px-2 py-1.5 text-13-regular text-text-weak">{language.t("palette.empty")}</div>
+                    }
                   >
                     <For each={entries()}>
                       {(entry) => {
-                        const label = entry.name === "none" ? "None" : entry.name
+                        const label = entry.name === "none" ? language.t("sound.option.none") : entry.name
                         return (
                           <button
                             type="button"
-                            class="w-full px-2 py-1.5 flex items-center gap-2 rounded-md text-left text-13-regular text-text-strong hover:bg-surface-base-hover"
+                            class="w-full px-2 py-1.5 flex items-center gap-2 rounded-md text-start text-13-regular text-text-strong hover:bg-surface-base-hover"
                             onClick={() => void select(entry.name)}
                           >
                             <Icon name="prompt" size="small" />

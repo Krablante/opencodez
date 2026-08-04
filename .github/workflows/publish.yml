@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: "Release version, without leading v. Example: 1.18.4+opencodez.3"
+        description: "Release version, without leading v. Example: 1.18.13+opencodez.1"
         required: true
         type: string
       binary_version:
@@ -54,15 +54,15 @@ jobs:
 
           semver='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
           if [[ ! "$release_version" =~ $semver ]]; then
-            echo "release_version must be semver-like, for example 1.18.4+opencodez.3" >&2
+            echo "release_version must be semver-like, for example 1.18.13+opencodez.1" >&2
             exit 1
           fi
           if [[ "$release_version" != *opencodez* ]]; then
-            echo "release_version must be OpenCodez-specific, for example 1.18.4+opencodez.3" >&2
+            echo "release_version must be OpenCodez-specific, for example 1.18.13+opencodez.1" >&2
             exit 1
           fi
           if [[ ! "$binary_version" =~ $semver ]]; then
-            echo "binary_version must be semver-like, for example 1.18.4+opencodez.3" >&2
+            echo "binary_version must be semver-like, for example 1.18.13+opencodez.1" >&2
             exit 1
           fi
 
@@ -91,29 +91,32 @@ jobs:
           git config --global user.email "bot@opencode.ai"
           git config --global user.name "opencode"
 
-      - name: Run unit tests
-        shell: bash
-        run: GITHUB_ACTIONS=false bun turbo test
-        env:
-          OPENCODEZ: "1"
-          OPENCODE_APP_NAME: opencodez
-          OPENCODE_CLI_NAME: opencodez
-          OPENCODE_DISABLE_FFF: "0"
+      - name: Typecheck core
+        working-directory: packages/core
+        run: bun typecheck
+
+      - name: Typecheck runtime
+        working-directory: packages/opencode
+        run: bun typecheck
+
+      - name: Typecheck app
+        working-directory: packages/app
+        run: bun typecheck
+
+      - name: Typecheck session UI
+        working-directory: packages/session-ui
+        run: bun typecheck
 
       - name: Check generated client
         working-directory: packages/client
         run: bun run check:generated
-
-      - name: Run HttpApi exerciser gates
-        working-directory: packages/opencode
-        run: bun run test:httpapi
 
   build-and-publish:
     needs: [prepare, validate]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
