@@ -11,6 +11,7 @@ import { CodexResponsesCompaction } from "@/opencodez/codex-responses/compaction
 import { CodexResponsesCatalog } from "@/opencodez/codex-responses/catalog"
 import { CodexResponsesRequest } from "@/opencodez/codex-responses/request"
 import { CodexResponsesProtocol } from "@/opencodez/codex-responses/protocol"
+import { CodexResponsesCapability } from "@/opencodez/codex-responses/capability"
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 const ISSUER = "https://auth.openai.com"
@@ -320,6 +321,16 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
             ]),
         )
         if (responsesWire === "legacy") return models
+        if (
+          !Object.values(models).some((model) =>
+            CodexResponsesCapability.supportsModel({
+              providerID: "openai",
+              modelNpm: model.api.npm,
+              wire: responsesWire,
+            }),
+          )
+        )
+          return models
         return CodexResponsesCatalog.initialize(models, { auth: ctx.auth, endpoint: codexApiEndpoint })
       },
     },
@@ -425,9 +436,11 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 }
               }
             }
+            const codexCapability = codexWire && headers.get(CodexResponsesCapability.HEADER) === "true"
+            headers.delete(CodexResponsesCapability.HEADER)
             headers.set("authorization", `Bearer ${currentAuth.access}`)
-            // ChatGPT routes catalog Fast tiers only for the Codex product originator.
-            if (codexWire) headers.set("originator", "codex_cli_rs")
+            // Preserve the established ChatGPT OAuth product route in both wire modes.
+            headers.set("originator", "codex_cli_rs")
             if (authWithAccount.accountId) {
               headers.set("ChatGPT-Account-Id", authWithAccount.accountId)
             }
@@ -442,38 +455,40 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               parsed.pathname.includes("/v1/responses") || parsed.pathname.includes("/chat/completions")
                 ? new URL(codexApiEndpoint)
                 : parsed
+            const codexRequest = codexCapability && parsed.pathname.endsWith("/responses")
 
             const handoff = headers.get(CodexResponsesCompaction.HEADER) ?? undefined
             headers.delete(CodexResponsesCompaction.HEADER)
-            const turnAccount = headers.get(CodexResponsesTransport.TURN_ACCOUNT_HEADER)
+            const turnAccount = codexRequest ? headers.get(CodexResponsesTransport.TURN_ACCOUNT_HEADER) : undefined
             headers.delete(CodexResponsesTransport.TURN_ACCOUNT_HEADER)
             if (turnAccount && turnAccount !== accountAffinity) {
               throw new Error(
                 "The ChatGPT login changed during the active turn. Retry with a new message to continue safely.",
               )
             }
-            const turnProfile = CodexResponsesCatalog.decodeProfile(
-              headers.get(CodexResponsesTransport.TURN_PROFILE_HEADER),
-            )
+            const turnProfile = codexRequest
+              ? CodexResponsesCatalog.decodeProfile(headers.get(CodexResponsesTransport.TURN_PROFILE_HEADER))
+              : undefined
             headers.delete(CodexResponsesTransport.TURN_PROFILE_HEADER)
             const refresh =
-              codexWire && parsed.pathname.endsWith("/responses") && CodexResponsesCatalog.needsRefresh(currentAuth)
+              codexRequest && CodexResponsesCatalog.needsRefresh(currentAuth)
                 ? CodexResponsesCatalog.refresh({ auth: currentAuth, endpoint: codexApiEndpoint })
                 : undefined
             if (turnProfile) void refresh?.catch(() => undefined)
             const catalog = turnProfile ? undefined : await refresh
 
-            const lowered = parsed.pathname.endsWith("/responses")
-              ? CodexResponsesRequest.lower(
-                  init?.body,
-                  handoff,
-                  codexWire,
-                  headers,
-                  CodexResponsesProtocol.accountKey(authWithAccount.accountId, currentAuth.access),
-                  catalog,
-                  turnProfile,
-                )
-              : undefined
+            const lowered =
+              codexRequest || (parsed.pathname.endsWith("/responses") && handoff)
+                ? CodexResponsesRequest.lower(
+                    init?.body,
+                    handoff,
+                    codexRequest,
+                    headers,
+                    CodexResponsesProtocol.accountKey(authWithAccount.accountId, currentAuth.access),
+                    catalog,
+                    turnProfile,
+                  )
+                : undefined
             if (lowered?.responsesLite) headers.set(CodexResponsesCatalog.RESPONSES_LITE_HEADER, "true")
 
             const requestInit = {
@@ -481,11 +496,12 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               body: lowered?.body ?? init?.body,
               headers,
             }
-            let response =
-              websocketFetch && parsed.pathname.endsWith("/responses")
-                ? await websocketFetch(url, requestInit)
-                : await fetch(url, CodexResponsesTransport.withoutInternalHeaders(requestInit))
-            if (response.status === 401) {
+            const useWebSocket =
+              !!websocketFetch && (codexRequest || (parsed.pathname.endsWith("/responses") && !codexWire && !handoff))
+            let response = useWebSocket
+              ? await websocketFetch(url, requestInit)
+              : await fetch(url, CodexResponsesTransport.withoutInternalHeaders(requestInit))
+            if (response.status === 401 && codexRequest) {
               const refreshed = await refreshAuth()
               currentAuth.access = refreshed.access
               authWithAccount.accountId = refreshed.accountId
@@ -500,14 +516,13 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               if (!refreshed.accountId) headers.delete("ChatGPT-Account-Id")
               if (affinity) headers.set(CodexResponsesTransport.ACCOUNT_AFFINITY_HEADER, affinity)
               if (!affinity) headers.delete(CodexResponsesTransport.ACCOUNT_AFFINITY_HEADER)
-              response =
-                websocketFetch && parsed.pathname.endsWith("/responses")
-                  ? await websocketFetch(url, requestInit)
-                  : await fetch(url, CodexResponsesTransport.withoutInternalHeaders(requestInit))
+              response = useWebSocket
+                ? await websocketFetch(url, requestInit)
+                : await fetch(url, CodexResponsesTransport.withoutInternalHeaders(requestInit))
             }
             const modelsEtag = response.headers.get("x-models-etag") ?? undefined
             if (
-              codexWire &&
+              codexRequest &&
               CodexResponsesCatalog.observeEtag(
                 modelsEtag,
                 CodexResponsesProtocol.accountKey(authWithAccount.accountId, currentAuth.access),

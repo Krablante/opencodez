@@ -5,6 +5,7 @@ import { Continuation } from "./continuation"
 import { OpenAIWebSocket } from "@/plugin/openai/ws"
 import { CodexResponsesAttempt } from "./attempt"
 import { CodexResponsesProtocol } from "./protocol"
+import { CodexResponsesCapability } from "./capability"
 
 export type Mode = "legacy" | "codex"
 
@@ -116,12 +117,12 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     }
 
     if (entry.fallback || (entry.fallbackUntil ?? 0) > Date.now()) {
-      return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
+      return fallbackFetch(httpFetch, input, httpInit, entry, turnID, options?.wire === "codex")
     }
     entry.fallbackUntil = undefined
     if (entry.busy) {
       entry.continuation.reset()
-      return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
+      return fallbackFetch(httpFetch, input, httpInit, entry, turnID, options?.wire === "codex")
     }
 
     entry.busy = true
@@ -139,14 +140,16 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         connectTimeout,
         maxConnectionAge,
         init?.signal,
-        (headers) =>
-          captureUpgradeHeaders(
-            entry,
-            turnID,
-            headers,
-            internalHeaders[ACCOUNT_AFFINITY_HEADER],
-            options?.onModelsEtag,
-          ),
+        options?.wire === "codex"
+          ? (headers) =>
+              captureUpgradeHeaders(
+                entry,
+                turnID,
+                headers,
+                internalHeaders[ACCOUNT_AFFINITY_HEADER],
+                options?.onModelsEtag,
+              )
+          : undefined,
       )
       let resolveFirstEvent: (event: boolean | OpenAIWebSocket.WrappedError) => void = () => {}
       let rejectFirstEvent: (error: Error) => void = () => {}
@@ -156,7 +159,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
       })
       const prepared = options?.wire === "codex" ? entry.continuation.prepare(body) : undefined
       let transaction = options?.wire === "codex" ? entry.continuation.transaction(body) : undefined
-      const requestBody = withTurnState(prepared ?? body, entry.turnState)
+      const requestBody = options?.wire === "codex" ? withTurnState(prepared ?? body, entry.turnState) : body
       let recoveredPreviousResponse = false
       let response: Response
       response = OpenAIWebSocket.streamResponsesWebSocket({
@@ -166,9 +169,14 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         signal: init?.signal ?? undefined,
         onFirstEvent: (error) => resolveFirstEvent(error ?? true),
         onEvent: (event) => {
-          captureModelsEtag(event, internalHeaders[ACCOUNT_AFFINITY_HEADER], options?.onModelsEtag)
-          captureEventTurnState(entry, turnID, event)
-          if (CodexResponsesProtocol.headerValue(event, REASONING_INCLUDED_HEADER) !== undefined) {
+          if (options?.wire === "codex") {
+            captureModelsEtag(event, internalHeaders[ACCOUNT_AFFINITY_HEADER], options?.onModelsEtag)
+            captureEventTurnState(entry, turnID, event)
+          }
+          if (
+            options?.wire === "codex" &&
+            CodexResponsesProtocol.headerValue(event, REASONING_INCLUDED_HEADER) !== undefined
+          ) {
             entry.reasoningIncluded = true
             response.headers.set(REASONING_INCLUDED_HEADER, "true")
           }
@@ -180,6 +188,11 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
           entry.lastUsedAt = Date.now()
           if (event.type === "response.completed" || event.type === "response.done") {
             entry.streamFailures = 0
+            return
+          }
+          if (options?.wire !== "codex") {
+            entry.streamFailures = 0
+            invalidate(entry)
             return
           }
           transaction?.fail()
@@ -247,9 +260,9 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
       const first = await firstEvent
       if (first !== false) {
         if (first === true || first.status < 200 || first.status > 599) return response
-        if (first.status === 426) {
+        if (options?.wire === "codex" && first.status === 426) {
           entry.fallback = true
-          return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
+          return fallbackFetch(httpFetch, input, httpInit, entry, turnID, true)
         }
         return new Response(first.body, {
           status: first.status,
@@ -266,11 +279,22 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         throw error
       }
 
+      if (options?.wire !== "codex") {
+        recordStreamFailure(entry, requestStreamRetries)
+        invalidate(entry)
+        if (entry.fallback) return httpFetch(input, httpInit)
+        return failedResponse(
+          new ProviderError.ResponseStreamError(error instanceof Error ? error.message : String(error), {
+            cause: error,
+          }),
+        )
+      }
+
       const upgrade = OpenAIWebSocket.upgradeResponse(error)
       if (upgrade?.status === 426) {
         entry.fallback = true
         invalidate(entry)
-        return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
+        return fallbackFetch(httpFetch, input, httpInit, entry, turnID, true)
       }
       if (upgrade) {
         invalidate(entry)
@@ -282,7 +306,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
       if (OpenAIWebSocket.isOpaqueUpgradeRejection(error)) {
         entry.fallbackUntil = Date.now() + OPAQUE_FALLBACK_COOLDOWN
         invalidate(entry)
-        return fallbackFetch(httpFetch, input, httpInit, entry, turnID)
+        return fallbackFetch(httpFetch, input, httpInit, entry, turnID, true)
       }
 
       recordStreamFailure(entry, requestStreamRetries)
@@ -393,13 +417,14 @@ async function fallbackFetch(
   init: RequestInit | undefined,
   entry: PoolEntry,
   turnID: string | undefined,
+  codex: boolean,
 ) {
   entry.lastUsedAt = Date.now()
   const response = await fetcher(input, {
     ...init,
-    headers: withTurnStateHeader(OpenAIWebSocket.normalizeHeaders(init?.headers), entry.turnState),
+    headers: withTurnStateHeader(OpenAIWebSocket.normalizeHeaders(init?.headers), codex ? entry.turnState : undefined),
   })
-  captureHeaderTurnState(entry, turnID, OpenAIWebSocket.normalizeHeaders(response.headers))
+  if (codex) captureHeaderTurnState(entry, turnID, OpenAIWebSocket.normalizeHeaders(response.headers))
   return response
 }
 
@@ -496,6 +521,7 @@ export function withoutInternalHeaders<T extends { headers?: HeadersInit }>(init
     headers.delete(ACCOUNT_AFFINITY_HEADER)
     headers.delete(TURN_PROFILE_HEADER)
     headers.delete(TURN_ACCOUNT_HEADER)
+    headers.delete(CodexResponsesCapability.HEADER)
     headers.delete(CodexResponsesAttempt.REQUEST_KIND_HEADER)
     CodexResponsesProtocol.internalHeaders.forEach((key) => headers.delete(key))
     return { ...init, headers }
@@ -522,6 +548,7 @@ function isInternalHeader(value: string) {
     key === ACCOUNT_AFFINITY_HEADER ||
     key === TURN_PROFILE_HEADER ||
     key === TURN_ACCOUNT_HEADER ||
+    key === CodexResponsesCapability.HEADER ||
     key === CodexResponsesAttempt.REQUEST_KIND_HEADER ||
     CodexResponsesProtocol.internalHeaders.includes(key)
   )

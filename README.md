@@ -222,10 +222,14 @@ including across logical user turns. A new user turn resets its sticky
 or warm WebSocket. Reconnects, interruptions, context changes, and relevant
 model-setting changes return safely to a full request.
 Set the value to `legacy` to restore the previous OpenCode request lifecycle:
-full HTTP requests, upstream partial-output handling, and local text-summary
-compaction. A session that already contains durable opaque OpenAI compaction
-state continues that state over authenticated HTTP so changing the setting
-cannot discard context. API-key OpenAI access and other providers keep their
+unchanged full request bodies, upstream retry and partial-output handling, and
+local text-summary compaction. Production builds use HTTP in this mode unless
+the pre-existing experimental full-request WebSocket transport is explicitly
+enabled; local, dev, and beta builds enable that experiment by default. A
+session that already contains durable opaque OpenAI compaction state continues
+that state over authenticated HTTP so changing the
+setting cannot discard context. API-key OpenAI access, alternate OpenAI model
+adapters, and other providers bypass Codex request lowering and keep their
 existing behavior.
 
 OpenCodez reads ChatGPT model capabilities from the authenticated Codex model

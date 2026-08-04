@@ -77,8 +77,8 @@ export function create() {
     irreversible = true
   }
 
-  function canRetry(input: { durableOutput: boolean }) {
-    return enabled ? !irreversible : !input.durableOutput
+  function canRetry() {
+    return enabled ? !irreversible : true
   }
 
   function canResumeFromHistory() {

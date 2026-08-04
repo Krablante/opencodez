@@ -145,12 +145,16 @@ interruption, incompatible history, or relevant request-setting change starts a
 new full chain without requiring a different local session.
 
 The default is `codex`. Set `opencodez.responses.wire` to `legacy` to restore the
-previous OpenCode request lifecycle: full authenticated HTTP requests, upstream
-partial-output handling, and local text-summary compaction. The setting applies
-only to OpenAI models authenticated through ChatGPT OAuth; OpenAI API-key access
-and other providers are unchanged. Start a new CLI process or restart a
-long-running server after changing the value so its provider adapter is rebuilt
-with one unambiguous mode.
+previous OpenCode request lifecycle: unchanged full request bodies, upstream
+retry and partial-output handling, and local text-summary compaction. Production
+builds use authenticated HTTP in this mode unless the pre-existing experimental
+full-request WebSocket transport is explicitly enabled; local, dev, and beta
+builds enable that experiment by default. The setting applies only to OpenAI
+models authenticated through ChatGPT OAuth.
+OpenAI API-key access, alternate OpenAI model adapters, and other providers
+bypass Codex lowering, catalog accounting, turn state, and retry rollback.
+Start a new CLI process or restart a long-running server after changing the
+value so its provider adapter is rebuilt with one unambiguous mode.
 
 In `codex` mode, the authenticated Codex `/models` catalog is the live source
 for model context, automatic-compaction limits, `comp_hash`, and Responses Lite
@@ -438,10 +442,11 @@ OpenCodez config boundary:
 - `packages/core/src/v1/config/opencodez.ts` defines the public wire and
   compaction policy, while `packages/core/src/opencodez/settings.ts` owns the
   `codex` and 90% defaults without embedding live model metadata.
-- `packages/opencode/src/plugin/openai/codex.ts` enables the mode only for
-  ChatGPT OAuth, supplies the Codex product originator required by Fast routing,
-  lowers the authenticated request once, and leaves API-key OpenAI access and
-  other providers unchanged.
+- `packages/opencode/src/plugin/openai/codex.ts` enables the mode only when a
+  request-scoped capability marker confirms ChatGPT OAuth and the official
+  OpenAI adapter. It consumes that marker, supplies the Codex product originator
+  required by Fast routing, lowers the authenticated request once, and leaves
+  API-key access, alternate adapters, and other providers unchanged.
 - `packages/opencode/src/opencodez/codex-responses/` is the complete
   ChatGPT-OAuth subsystem. It has no background worker or second durable store,
   and no other provider imports it.
@@ -515,13 +520,18 @@ OpenCodez config boundary:
 The shared provider and `packages/llm` abstractions are unchanged, keeping this
 custom layer small and easy to rebase onto future OpenCode versions.
 
-The wire capability is decided once from four facts: provider id `openai`, the
-official `@ai-sdk/openai` model adapter, OAuth authentication, and
-`opencodez.responses.wire: "codex"`. Session continuation, retry rollback,
-Codex-only unknown-finish recovery, catalog accounting, and new remote
-compaction all use that same decision. This is a hard isolation boundary rather
-than a transport hint: API-key OpenAI, compatible third-party adapters, other
-providers, and explicit `legacy` mode retain the upstream lifecycle.
+The wire capability is decided per request from four facts: provider id
+`openai`, the official `@ai-sdk/openai` model adapter, OAuth authentication,
+and `opencodez.responses.wire: "codex"`. Request preparation sends that decision
+through one private marker to the authenticated OpenAI fetch adapter, which
+consumes it before network I/O and fails closed when it is absent. Session
+continuation, retry rollback, Codex-only unknown-finish recovery, catalog
+accounting, and new remote compaction all use the same decision. This is a hard
+isolation boundary rather than a transport hint: API-key OpenAI, compatible
+third-party adapters, other providers, and explicit `legacy` mode retain the
+upstream request shape and lifecycle. The sole exception is already-persisted
+opaque OpenAI compaction state, which is completed over authenticated HTTP so a
+mode change cannot discard durable context.
 
 Pinned Codex also contains WebSocket prewarming, which is a latency optimization
 rather than a correctness requirement. OpenCodez keeps its existing lazy,
@@ -607,6 +617,7 @@ packages/opencode/src/opencodez/prompt-library.ts
 packages/opencode/src/opencodez/default-prompts/
 packages/opencode/src/plugin/openai/codex.ts
 packages/opencode/src/opencodez/codex-responses/attempt.ts
+packages/opencode/src/opencodez/codex-responses/capability.ts
 packages/opencode/src/opencodez/codex-responses/catalog.ts
 packages/opencode/src/opencodez/codex-responses/compact.ts
 packages/opencode/src/opencodez/codex-responses/compaction.ts

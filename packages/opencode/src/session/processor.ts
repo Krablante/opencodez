@@ -714,7 +714,7 @@ const layer = Layer.effect(
               SessionRetry.policy({
                 provider: input.model.providerID,
                 maxAttempts: () => attempt.retryLimit(),
-                continue: () => attempt.canRetry({ durableOutput: ctx.producedDurableOutput }),
+                continue: () => attempt.canRetry(),
                 parse,
                 set: (info) =>
                   Effect.gen(function* () {

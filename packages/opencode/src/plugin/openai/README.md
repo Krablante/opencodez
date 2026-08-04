@@ -8,9 +8,13 @@ The upstream full-request WebSocket transport is enabled by default on `local`,
 
 ## Flow
 
-1. A streamed `POST /responses` request arrives.
-2. The request adapter installs one canonical Codex metadata snapshot in
-   `client_metadata`, with compatible HTTP/WS projections derived from it.
+1. A streamed `POST /responses` request arrives. Request preparation enables
+   Codex behavior only for provider `openai`, the official `@ai-sdk/openai`
+   adapter, ChatGPT OAuth, and `wire: "codex"`. One private header carries that
+   decision to this adapter and is removed before network I/O.
+2. For an enabled Codex request, the request adapter installs one canonical
+   metadata snapshot in `client_metadata`, with compatible HTTP/WS projections
+   derived from it. A missing or false marker bypasses that lowering.
 3. If it has no `session-id` or `x-session-affinity` header, use HTTP.
    Codex mode also uses HTTP when no verified account identity is available,
    preventing reusable response state from crossing an unknown account boundary.
@@ -19,7 +23,8 @@ The upstream full-request WebSocket transport is enabled by default on `local`,
 6. Otherwise, reuse its open socket or open a new one. Codex-mode handshakes use
    the session/thread id as `x-client-request-id`.
 7. In `legacy` mode, send the complete `response.create` body. WebSocket frames
-   retain the explicit `stream: true` request field.
+   retain the explicit `stream: true` request field and do not acquire Codex
+   continuation, turn-state, catalog, or replay semantics.
 8. In `codex` mode, send the first request of each logical user turn in full.
    Later matching requests inside that turn send only new input items with
    `previous_response_id`; a healthy socket may remain open across the boundary.
@@ -39,10 +44,13 @@ The upstream full-request WebSocket transport is enabled by default on `local`,
     safety metadata remains on that stream; it is advisory and is not persisted
     as local conversation state.
 
-For ChatGPT OAuth, the fetch adapter supplies the Codex product originator.
+For ChatGPT OAuth, the fetch adapter preserves the established Codex product
+originator in both wire modes.
 Model-catalog Fast aliases already lower to the same base model with
 `service_tier: "priority"`; the product originator is the only additional
 routing requirement. API-key OpenAI requests do not pass through this adapter.
+Alternate OpenAI model adapters can share OAuth but still fail closed into their
+unchanged request path because they cannot receive a true capability marker.
 
 The authenticated `/models` catalog supplies context, automatic-compaction
 limits, `comp_hash`, and Responses Lite capability. It refreshes every five
@@ -87,10 +95,12 @@ message starts a fresh lane while durable encrypted compaction remains portable.
   spending the WebSocket retry budget.
 - An opaque Bun upgrade rejection uses HTTP immediately but is not treated as a
   permanent 426; WebSocket becomes eligible again after the one-minute cooldown.
-- An HTTP or pre-output WebSocket 401 performs one deduplicated OAuth refresh and
-  replays the request once only when account affinity is unchanged. An identity
-  change or second 401 is returned normally so a later request is rebuilt from
-  canonical session state.
+- For a Codex-wire request, an HTTP or pre-output WebSocket 401 performs one
+  deduplicated OAuth refresh and replays the request once only when account
+  affinity is unchanged. Legacy mode returns the response through the upstream
+  lifecycle without this response-driven replay. An identity change or second
+  Codex 401 is returned normally so a later request is rebuilt from canonical
+  session state.
 - `previous_response_not_found` opens a fresh socket and retries the current
   canonical full request once without consuming the normal stream-failure
   budget. A repeated failure is returned normally.

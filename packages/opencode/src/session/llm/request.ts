@@ -22,6 +22,7 @@ import { CodexResponsesTransport } from "@/opencodez/codex-responses/transport"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 import { CodexResponsesCatalog } from "@/opencodez/codex-responses/catalog"
 import { CodexResponsesProtocol } from "@/opencodez/codex-responses/protocol"
+import { CodexResponsesCapability } from "@/opencodez/codex-responses/capability"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
@@ -77,12 +78,12 @@ export function isCodexResponses(input: {
   authType?: string
   config: ConfigInfo
 }) {
-  return (
-    input.providerID === "openai" &&
-    input.modelNpm === "@ai-sdk/openai" &&
-    input.authType === "oauth" &&
-    OpenCodezSettings.responsesWire(input.config) === "codex"
-  )
+  return CodexResponsesCapability.enabled({
+    providerID: input.providerID,
+    modelNpm: input.modelNpm,
+    authType: input.authType,
+    wire: OpenCodezSettings.responsesWire(input.config),
+  })
 }
 
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
@@ -323,6 +324,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
           }),
       ...input.model.headers,
       ...headers,
+      ...(isOpenaiOauth ? { [CodexResponsesCapability.HEADER]: codexResponses ? "true" : "false" } : {}),
       ...(compactionHandoff ? { [CodexResponsesCompaction.HEADER]: compactionHandoff } : {}),
     },
   }

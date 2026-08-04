@@ -268,16 +268,14 @@ const layer = Layer.effect(
     }) {
       const cfg = yield* config.get()
       const authInfo = yield* auth.get(input.model.providerID).pipe(Effect.orDie)
+      const codexResponses = LLMRequestPrep.isCodexResponses({
+        providerID: input.model.providerID,
+        modelNpm: input.model.api.npm,
+        authType: authInfo?.type,
+        config: cfg,
+      })
       let limit: number | undefined
-      if (
-        authInfo?.type === "oauth" &&
-        LLMRequestPrep.isCodexResponses({
-          providerID: input.model.providerID,
-          modelNpm: input.model.api.npm,
-          authType: authInfo?.type,
-          config: cfg,
-        })
-      ) {
+      if (codexResponses && authInfo?.type === "oauth") {
         const profile =
           input.profile?.modelID === input.model.api.id
             ? input.profile
@@ -301,7 +299,7 @@ const layer = Layer.effect(
         limit,
         additionalTokens:
           (input.additionalTokens ?? 0) +
-          (input.serverReasoningIncluded !== true && input.messages && input.turnID
+          (codexResponses && input.serverReasoningIncluded !== true && input.messages && input.turnID
             ? historicalReasoningTokens(input.messages, input.turnID)
             : 0),
       })
