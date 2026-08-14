@@ -1177,7 +1177,7 @@ const layer = Layer.effect(
           if (
             lastAssistant?.finish &&
             !modelNeedsFollowUp &&
-            lastUser.id < lastAssistant.id &&
+            lastAssistant.parentID === lastUser.id &&
             !directRemoteCompaction
           ) {
             const orphan = lastAssistantMsg?.parts.find(

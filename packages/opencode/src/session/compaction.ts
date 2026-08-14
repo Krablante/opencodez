@@ -47,9 +47,8 @@ export const PRUNE_MINIMUM = 20_000
 export const PRUNE_PROTECT = 40_000
 const TOOL_OUTPUT_MAX_CHARS = 2_000
 const PRUNE_PROTECTED_TOOLS = ["skill"]
-const DEFAULT_TAIL_TURNS = 2
 const MIN_PRESERVE_RECENT_TOKENS = 2_000
-const MAX_PRESERVE_RECENT_TOKENS = 8_000
+const MAX_PRESERVE_RECENT_TOKENS = 15_000
 // Keep one overall operation deadline above the bounded transport retry budget.
 // Each streamed attempt still uses the WebSocket pool's five-minute idle limit.
 const REMOTE_COMPACTION_TIMEOUT_MS = 20 * 60_000
@@ -100,6 +99,42 @@ function historicalReasoningTokens(messages: SessionV1.WithParts[], turnID: Mess
       }, 0)
     )
   }, 0)
+}
+
+const truncate = (value: string) =>
+  value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
+
+const serialize = (message: SessionV1.WithParts) => {
+  if (message.info.role === "user") {
+    const text = message.parts
+      .filter((part): part is SessionV1.TextPart => part.type === "text" && !part.ignored)
+      .map((part) => part.text)
+      .filter(Boolean)
+      .join("\n")
+    const files = message.parts.flatMap((part) =>
+      part.type === "file" ? [`[Attached ${part.mime}: ${part.filename ?? "file"}]`] : [],
+    )
+    return [...(text ? [`[User]: ${text}`] : []), ...files].join("\n")
+  }
+  return message.parts
+    .flatMap((part) => {
+      if (part.type === "text") return part.text ? [`[Assistant]: ${part.text}`] : []
+      if (part.type === "reasoning") return part.text ? [`[Assistant reasoning]: ${part.text}`] : []
+      if (part.type !== "tool") return []
+      const call = `[Assistant tool call]: ${part.tool}(${JSON.stringify(part.state.input)})`
+      if (part.state.status === "completed") {
+        const attachments = (part.state.attachments ?? []).map(
+          (item) => `[Attached ${item.mime}: ${item.filename ?? "file"}]`,
+        )
+        const output = part.state.time.compacted
+          ? "[Old tool result content cleared]"
+          : truncate([part.state.output, ...attachments].join("\n"))
+        return [call, `[Tool result]: ${output}`]
+      }
+      if (part.state.status === "error") return [call, `[Tool error]: ${part.state.error}`]
+      return [call]
+    })
+    .join("\n")
 }
 
 function summaryText(message: SessionV1.WithParts) {
@@ -538,27 +573,22 @@ const layer = Layer.effect(
       cfg: ConfigV1.Info
       model: Provider.Model
     }) {
-      const limit = input.cfg.compaction?.tail_turns ?? DEFAULT_TAIL_TURNS
-      if (limit <= 0) return { head: input.messages, tail_start_id: undefined }
+      const limit = input.cfg.compaction?.tail_turns
+      if (limit !== undefined && limit <= 0) return { head: input.messages, tail_start_id: undefined }
       const budget = preserveRecentBudget({ cfg: input.cfg, model: input.model })
       const all = turns(input.messages)
       if (!all.length) return { head: input.messages, tail_start_id: undefined }
-      const recent = all.slice(-limit)
-      const sizes = yield* Effect.forEach(
-        recent,
-        (turn) =>
-          estimate({
-            messages: input.messages.slice(turn.start, turn.end),
-            model: input.model,
-          }),
-        { concurrency: 1 },
-      )
+      const recent = limit === undefined ? all : all.slice(-limit)
 
       let total = 0
       let keep: Tail | undefined
       for (let i = recent.length - 1; i >= 0; i--) {
         const turn = recent[i]!
-        const size = sizes[i]
+        // estimate lazily so cost stays proportional to the retained tail, not the whole session
+        const size = yield* estimate({
+          messages: input.messages.slice(turn.start, turn.end),
+          model: input.model,
+        })
         if (total + size <= budget) {
           total += size
           keep = { start: turn.start, id: turn.id }
@@ -672,15 +702,17 @@ const layer = Layer.effect(
       turnID: MessageID
       markerID: MessageID
     }) {
-      return (yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie))
+      const messages = yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)
+      const turnIndex = messages.findIndex((message) => message.info.id === input.turnID)
+      if (turnIndex < 0) return []
+      return messages
+        .slice(turnIndex + 1)
         .filter(
           (message): message is SessionV1.WithParts & { info: SessionV1.User } =>
             message.info.role === "user" &&
-            message.info.id > input.turnID &&
             message.info.id !== input.markerID &&
             !message.parts.some((part) => part.type === "compaction"),
         )
-        .toSorted((a, b) => a.info.id.localeCompare(b.info.id))
     })
 
     const completeCompaction = Effect.fn("SessionCompaction.complete")(function* (input: {
@@ -839,15 +871,17 @@ const layer = Layer.effect(
       }
 
       const turnID = compactionPart?.turn_id
+      const turnIndex = turnID ? input.messages.findIndex((message) => message.info.id === turnID) : -1
       const pending =
-        phase === "mid-turn" && turnID
-          ? input.messages.filter(
-              (message) =>
-                message.info.role === "user" &&
-                message.info.id > turnID &&
-                message.info.id !== input.parentID &&
-                !message.parts.some((part) => part.type === "compaction"),
-            )
+        phase === "mid-turn" && turnIndex >= 0
+          ? input.messages
+              .slice(turnIndex + 1)
+              .filter(
+                (message) =>
+                  message.info.role === "user" &&
+                  message.info.id !== input.parentID &&
+                  !message.parts.some((part) => part.type === "compaction"),
+              )
           : []
       if (pending.length > 0) {
         const pendingIDs = new Set(pending.map((message) => message.info.id))
@@ -856,7 +890,7 @@ const layer = Layer.effect(
             !pendingIDs.has(message.info.id) &&
             !(message.info.role === "assistant" && pendingIDs.has(message.info.parentID)),
         )
-        const firstPending = pending.toSorted((a, b) => a.info.id.localeCompare(b.info.id))[0]
+        const firstPending = pending[0]
         if (compactionPart && firstPending) {
           yield* session.updatePart({ ...compactionPart, tail_start_id: firstPending.info.id })
         }
@@ -1157,13 +1191,20 @@ const layer = Layer.effect(
         { sessionID: input.sessionID },
         { context: [], prompt: undefined },
       )
-      const nextPrompt = compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context })
       const msgs = structuredClone(selected.head)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-      const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, model, {
-        stripMedia: true,
-        toolOutputMaxChars: TOOL_OUTPUT_MAX_CHARS,
-      })
+      const conversation = msgs.map(serialize).filter(Boolean).join("\n\n")
+      const nextPrompt =
+        compacting.prompt ??
+        [
+          buildPrompt({
+            previousSummary,
+            context: [conversation],
+          }),
+          ...compacting.context,
+        ]
+          .filter(Boolean)
+          .join("\n\n")
       const ctx = yield* InstanceState.context
       const msg: SessionV1.Assistant = {
         id: MessageID.ascending(),
@@ -1204,10 +1245,19 @@ const layer = Layer.effect(
         tools: {},
         system: [],
         messages: [
-          ...modelMessages,
           {
             role: "user",
-            content: [{ type: "text", text: nextPrompt }],
+            content: [
+              {
+                type: "text",
+                text: [
+                  nextPrompt,
+                  ...(compacting.prompt ? ["The following is the conversation history:", conversation] : []),
+                ]
+                  .filter(Boolean)
+                  .join("\n\n"),
+              },
+            ],
           },
         ],
         model,
@@ -1274,14 +1324,16 @@ const layer = Layer.effect(
           message.info.parentID === marker.info.id &&
           message.info.finish !== undefined,
       )
+      const summaryIndex = summary ? input.messages.findIndex((message) => message.info.id === summary.info.id) : -1
       const continuation = summary
-        ? input.messages.find(
-            (message) =>
-              message.info.role === "assistant" &&
-              message.info.summary !== true &&
-              message.info.parentID === marker.info.id &&
-              message.info.id > summary.info.id,
-          )
+        ? input.messages
+            .slice(summaryIndex + 1)
+            .find(
+              (message) =>
+                message.info.role === "assistant" &&
+                message.info.summary !== true &&
+                message.info.parentID === marker.info.id,
+            )
         : undefined
       if (!summary || continuation) return false
       const pending = yield* pendingUsers({
@@ -1295,9 +1347,7 @@ const layer = Layer.effect(
     })
 
     const releasePending = Effect.fn("SessionCompaction.releasePending")(function* (input: { sessionID: SessionID }) {
-      const messages = (yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).toSorted((a, b) =>
-        a.info.id.localeCompare(b.info.id),
-      )
+      const messages = yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)
       const marker = messages.findLast(
         (message): message is SessionV1.WithParts & { info: SessionV1.User } =>
           message.info.role === "user" &&
@@ -1325,14 +1375,16 @@ const layer = Layer.effect(
           message.info.finish !== undefined,
       )
       if (!summary) return
-      const continuation = messages.find(
-        (message) =>
-          message.info.role === "assistant" &&
-          message.info.summary !== true &&
-          message.info.parentID === marker.info.id &&
-          message.info.id > summary.info.id &&
-          message.info.time.completed !== undefined,
-      )
+      const summaryIndex = messages.findIndex((message) => message.info.id === summary.info.id)
+      const continuation = messages
+        .slice(summaryIndex + 1)
+        .find(
+          (message) =>
+            message.info.role === "assistant" &&
+            message.info.summary !== true &&
+            message.info.parentID === marker.info.id &&
+            message.info.time.completed !== undefined,
+        )
       if (!continuation) return
 
       const pending = yield* pendingUsers({
@@ -1343,8 +1395,10 @@ const layer = Layer.effect(
       for (const message of pending) {
         yield* replayUser({ sessionID: input.sessionID, message, replaceMedia: false })
       }
+      const markerIndex = messages.findIndex((message) => message.info.id === marker.info.id)
+      const afterMarker = new Set(messages.slice(markerIndex + 1).map((message) => message.info.id))
       for (const message of pending) {
-        if (message.info.id > marker.info.id) {
+        if (afterMarker.has(message.info.id)) {
           yield* session.removeMessage({ sessionID: input.sessionID, messageID: message.info.id })
         }
       }

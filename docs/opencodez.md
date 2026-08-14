@@ -44,7 +44,7 @@ replacement of `/usr/local/bin/opencodez`, then falls back to the normal
 interactive sudo flow when the helper is absent.
 
 Release versions use the upstream base plus OpenCodez build metadata, for
-example `1.18.13+opencodez.1`. The release tag and embedded binary version must
+example `1.18.18+opencodez.1`. The release tag and embedded binary version must
 match exactly.
 
 ## System Prompt Library
@@ -261,6 +261,11 @@ revert records only the target message and optional part; unrevert removes that
 marker without changing stored messages. Sending a replacement prompt commits
 the revert, removes the selected message and its later tail from the active
 branch, and then creates the replacement user/assistant pair.
+
+History boundaries use persisted creation order with message IDs only as a
+same-timestamp tie-breaker. Revert, fork, prompt-loop, App/TUI rendering, and
+OpenCodez remote-compaction boundaries therefore remain chronological for
+long-lived and imported sessions even when their raw IDs are not monotonic.
 
 The shortened or edited input cannot match the previous Responses prefix, so
 Codex wire deliberately omits `previous_response_id` and sends one full request
@@ -668,6 +673,7 @@ compaction trigger with exactly one opaque result, logical-turn sticky routing, 
 retry budgets, partial-attempt rollback before the tool side-effect barrier,
 compatible cross-turn incremental requests with safe full-request resets, frozen
 same-turn catalog behavior, provider-isolated post-turn compaction,
+chronological prompt, revert, fork, and remote-compaction boundaries,
 reasoning-aware usage accounting, oversized-replay failure, both `comp_hash` and
 model-downshift transitions, cooperative compaction retry delay, remote state
 persistence across restart, generated SDK, one production Linux build, embedded

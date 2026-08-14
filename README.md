@@ -116,11 +116,11 @@ For local development, run the source-checkout launcher directly:
 
 Production OpenCodez builds must explicitly set `OPENCODEZ_BUILD=1`,
 `OPENCODE_CHANNEL=latest`, and an `OPENCODE_VERSION` such as
-`1.18.13+opencodez.1`. The build rejects missing, preview-channel, plain
+`1.18.18+opencodez.1`. The build rejects missing, preview-channel, plain
 upstream-version, and other non-production OpenCodez metadata before generating
 an artifact. A valid build emits `opencodez-*` artifacts with an `opencodez`
 binary inside.
-Normal public releases should use the `publish` GitHub Actions workflow. Give it an OpenCodez release version such as `1.18.13+opencodez.1`; the release version must include `opencodez` so accidental upstream-looking tags are rejected. The workflow embeds that complete version by default, typechecks the fork boundary, verifies generated-client drift, builds the `opencodez-*` assets, verifies their names and archive contents, uploads them to GitHub Releases, and publishes the release unless `draft` is enabled.
+Normal public releases should use the `publish` GitHub Actions workflow. Give it an OpenCodez release version such as `1.18.18+opencodez.1`; the release version must include `opencodez` so accidental upstream-looking tags are rejected. The workflow embeds that complete version by default, typechecks the fork boundary, verifies generated-client drift, builds the `opencodez-*` assets, verifies their names and archive contents, uploads them to GitHub Releases, and publishes the release unless `draft` is enabled.
 
 ## Side-by-Side With OpenCode
 

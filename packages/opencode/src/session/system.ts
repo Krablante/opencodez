@@ -50,7 +50,7 @@ export function builtinPrompt(name: string) {
 }
 
 export function providerNameFromID(modelID: string) {
-  if (modelID.includes("muse-spark") || modelID.toLowerCase().includes("meta")) return "meta"
+  if (modelID.includes("muse") || modelID.toLowerCase().includes("meta")) return "meta"
   if (modelID.includes("gpt-4") || modelID.includes("o1") || modelID.includes("o3")) return "beast"
   if (modelID.includes("gpt")) return modelID.includes("codex") ? "codex" : "gpt"
   if (modelID.includes("gemini-")) return "gemini"
@@ -61,10 +61,15 @@ export function providerNameFromID(modelID: string) {
 }
 
 export function providerName(model: Provider.Model) {
+  if (["kimi-for-coding", "moonshotai", "moonshotai-cn"].includes(model.providerID)) return "kimi"
   return providerNameFromID(model.api.id)
 }
 
 export function provider(model: Provider.Model) {
+  if (model.api.id.includes("muse")) {
+    const name = model.api.id.includes("muse-glimmer") ? "Muse Glimmer" : "Muse Spark"
+    return [PROMPT_META.replaceAll("{{MODEL_NAME}}", name)]
+  }
   return [builtinPrompt(providerName(model)) ?? PROMPT_DEFAULT]
 }
 

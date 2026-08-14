@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: "Release version, without leading v. Example: 1.18.13+opencodez.1"
+        description: "Release version, without leading v. Example: 1.18.18+opencodez.1"
         required: true
         type: string
       binary_version:
@@ -54,15 +54,15 @@ jobs:
 
           semver='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
           if [[ ! "$release_version" =~ $semver ]]; then
-            echo "release_version must be semver-like, for example 1.18.13+opencodez.1" >&2
+            echo "release_version must be semver-like, for example 1.18.18+opencodez.1" >&2
             exit 1
           fi
           if [[ "$release_version" != *opencodez* ]]; then
-            echo "release_version must be OpenCodez-specific, for example 1.18.13+opencodez.1" >&2
+            echo "release_version must be OpenCodez-specific, for example 1.18.18+opencodez.1" >&2
             exit 1
           fi
           if [[ ! "$binary_version" =~ $semver ]]; then
-            echo "binary_version must be semver-like, for example 1.18.13+opencodez.1" >&2
+            echo "binary_version must be semver-like, for example 1.18.18+opencodez.1" >&2
             exit 1
           fi
 
