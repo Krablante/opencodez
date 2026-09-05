@@ -19,6 +19,7 @@ import {
 } from "@opentui/core"
 import * as Locale from "@/util/locale"
 import { go } from "@/cli/logo"
+import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import type { RunSplashTheme } from "./theme"
 
 export const SPLASH_TITLE_LIMIT = 50
@@ -234,7 +235,7 @@ function build(input: SplashWriterInput, kind: "entry" | "exit", ctx: Scrollback
       lines,
       body_left + label.length,
       top + 1,
-      `opencode --mini -s ${meta.session_id}`,
+      `${OpenCodezIdentity.cliName} --mini -s ${meta.session_id}`,
       right,
       undefined,
       TextAttributes.BOLD,

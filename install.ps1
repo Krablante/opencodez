@@ -31,7 +31,19 @@ $Arch = switch ($ProcessorArchitecture.ToLowerInvariant()) {
 }
 
 $InstallDir = [System.Environment]::ExpandEnvironmentVariables($InstallDir)
-$Asset = "opencodez-windows-$Arch.zip"
+$Baseline = ""
+if ($Arch -eq "x64") {
+  try {
+    Add-Type -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool IsProcessorFeaturePresent(int ProcessorFeature);' -Name Kernel32 -Namespace OpenCodezInstaller
+    if (-not [OpenCodezInstaller.Kernel32]::IsProcessorFeaturePresent(40)) {
+      $Baseline = "-baseline"
+    }
+  } catch {
+    # Unknown CPU capability must choose the broadly compatible artifact.
+    $Baseline = "-baseline"
+  }
+}
+$Asset = "opencodez-windows-$Arch$Baseline.zip"
 $Url = "https://github.com/$Repository/releases/latest/download/$Asset"
 $Work = Join-Path ([System.IO.Path]::GetTempPath()) "opencodez-install-$([System.Guid]::NewGuid().ToString("N"))"
 $Archive = Join-Path $Work $Asset
@@ -77,6 +89,15 @@ try {
   New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
   New-Item -ItemType Directory -Force -Path $Work | Out-Null
 
+  $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repository/releases/latest" -Headers @{
+    Accept = "application/vnd.github+json"
+    "User-Agent" = "opencodez-installer"
+  }
+  $ExpectedVersion = ([string]$Release.tag_name).TrimStart("v")
+  if ($ExpectedVersion -notmatch '^\d+\.\d+\.\d+\+opencodez\.\d+$') {
+    throw "Refusing non-production OpenCodez release version: $ExpectedVersion"
+  }
+
   $ProgressPreference = "SilentlyContinue"
   Write-Host "Downloading $Url"
   Invoke-WebRequest -Uri $Url -OutFile $Archive -UseBasicParsing
@@ -90,6 +111,11 @@ try {
       throw "Archive did not contain opencodez.exe"
     }
     $Binary = $Match.FullName
+  }
+
+  $ActualVersion = ((& $Binary --version 2>&1) | Out-String).Trim().TrimStart("v")
+  if ($LASTEXITCODE -ne 0 -or $ActualVersion -ne $ExpectedVersion) {
+    throw "Downloaded binary reports '$ActualVersion'; expected production version '$ExpectedVersion'"
   }
 
   Copy-Item -Path $Binary -Destination (Join-Path $InstallDir "opencodez.exe") -Force

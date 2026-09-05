@@ -33,6 +33,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { McpCatalog } from "./catalog"
 import { McpEvent } from "@opencode-ai/schema/mcp-event"
+import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import { McpBrowser } from "./browser"
 
 const DEFAULT_TIMEOUT = 30_000
@@ -314,7 +315,7 @@ const layer = Layer.effect(
                 return events
                   .publish(TuiEvent.ToastShow, {
                     title: "MCP Authentication Required",
-                    message: `Server "${key}" requires authentication. Run: opencode mcp auth ${key}`,
+                    message: `Server "${key}" requires authentication. Run: ${OpenCodezIdentity.cliName} mcp auth ${key}`,
                     variant: "warning",
                     duration: 8000,
                   })

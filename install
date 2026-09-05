@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 APP=opencodez
+REPOSITORY="${OPENCODEZ_UPDATE_REPOSITORY:-Krablante/opencodez}"
 
 MUTED='\033[0;2m'
 RED='\033[0;31m'
@@ -11,7 +12,7 @@ usage() {
     cat <<EOF
 OpenCodez Installer
 
-Usage: install.sh [options]
+Usage: install [options]
 
 Options:
     -h, --help              Display this help message
@@ -21,7 +22,7 @@ Options:
 
 Examples:
     curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install | bash
-    curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install | bash -s -- --version 1.0.180
+    curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install | bash -s -- --version 1.18.29+opencodez.1
     ./install --binary /path/to/opencodez
 EOF
 }
@@ -181,8 +182,8 @@ else
     fi
 
     if [ -z "$requested_version" ]; then
-        url="https://github.com/Krablante/opencodez/releases/latest/download/$filename"
-        specific_version=$(curl -s https://api.github.com/repos/Krablante/opencodez/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+        url="https://github.com/${REPOSITORY}/releases/latest/download/$filename"
+        specific_version=$(curl -fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: opencodez-installer" "https://api.github.com/repos/${REPOSITORY}/releases/latest" | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
 
         if [[ $? -ne 0 || -z "$specific_version" ]]; then
             echo -e "${RED}Failed to fetch version information${NC}"
@@ -191,17 +192,22 @@ else
     else
         # Strip leading 'v' if present
         requested_version="${requested_version#v}"
-        url="https://github.com/Krablante/opencodez/releases/download/v${requested_version}/$filename"
+        url="https://github.com/${REPOSITORY}/releases/download/v${requested_version}/$filename"
         specific_version=$requested_version
 
         # Verify the release exists before downloading
-        http_status=$(curl -sI -o /dev/null -w "%{http_code}" "https://github.com/Krablante/opencodez/releases/tag/v${requested_version}")
+        http_status=$(curl -sI -o /dev/null -w "%{http_code}" "https://github.com/${REPOSITORY}/releases/tag/v${requested_version}")
         if [ "$http_status" = "404" ]; then
             echo -e "${RED}Error: Release v${requested_version} not found${NC}"
             echo -e "${MUTED}Available releases: https://github.com/Krablante/opencodez/releases${NC}"
             exit 1
         fi
     fi
+fi
+
+if [ -z "$binary_path" ] && ! [[ "$specific_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\+opencodez\.[0-9]+$ ]]; then
+    echo -e "${RED}Error: Refusing non-production OpenCodez release version: ${specific_version:-unknown}${NC}" >&2
+    exit 1
 fi
 
 print_message() {
@@ -220,8 +226,6 @@ print_message() {
 
 check_version() {
     if command -v opencodez >/dev/null 2>&1; then
-        opencode_path=$(which opencodez)
-
         ## Check the installed version
         installed_version=$(opencodez --version 2>/dev/null || echo "")
 
@@ -231,6 +235,22 @@ check_version() {
             print_message info "${MUTED}Version ${NC}$specific_version${MUTED} already installed"
             exit 0
         fi
+    fi
+}
+
+verify_production_binary() {
+    local binary="$1"
+    local expected="${2:-}"
+    local actual
+    actual=$("$binary" --version 2>/dev/null || true)
+    actual="${actual#v}"
+    if ! [[ "$actual" =~ ^[0-9]+\.[0-9]+\.[0-9]+\+opencodez\.[0-9]+$ ]]; then
+        echo -e "${RED}Error: Refusing to install non-production OpenCodez binary (reported version: ${actual:-unknown})${NC}" >&2
+        exit 1
+    fi
+    if [ -n "$expected" ] && [ "$actual" != "${expected#v}" ]; then
+        echo -e "${RED}Error: Downloaded binary reports ${actual}, expected ${expected#v}${NC}" >&2
+        exit 1
     fi
 }
 
@@ -340,13 +360,15 @@ download_and_install() {
         unzip -q "$tmp_dir/$filename" -d "$tmp_dir"
     fi
 
+    chmod 755 "$tmp_dir/opencodez"
+    verify_production_binary "$tmp_dir/opencodez" "$specific_version"
     mv "$tmp_dir/opencodez" "$INSTALL_DIR"
-    chmod 755 "${INSTALL_DIR}/opencodez"
     rm -rf "$tmp_dir"
 }
 
 install_from_binary() {
     print_message info "\n${MUTED}Installing ${NC}opencodez ${MUTED}from: ${NC}$binary_path"
+    verify_production_binary "$binary_path"
     cp "$binary_path" "${INSTALL_DIR}/opencodez"
     chmod 755 "${INSTALL_DIR}/opencodez"
 }

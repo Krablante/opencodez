@@ -3,10 +3,11 @@ import { UI } from "@/cli/ui"
 import { errorMessage } from "@opencode-ai/tui/util/error"
 import { validateSession } from "../tui/validate-session"
 import { ServerAuth } from "@/server/auth"
+import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 
 export const AttachCommand = cmd({
   command: "attach <url>",
-  describe: "attach to a running opencode server",
+  describe: `attach to a running ${OpenCodezIdentity.productName} server`,
   builder: (yargs) =>
     yargs
       .positional("url", {

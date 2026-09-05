@@ -74,7 +74,7 @@ OpenCodez installs from GitHub Releases. It does not publish to npm and does not
 Linux and macOS install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install | bash
 ```
 
 Windows PowerShell install:
@@ -95,7 +95,19 @@ Check for updates without installing:
 opencodez update --check
 ```
 
-The update path is intentionally simple: GitHub Releases are the source of truth, the installer downloads the right release artifact for the current OS and architecture, and `opencodez update` uses the same release channel from inside the app.
+The update path is intentionally simple: GitHub Releases are the source of truth,
+the installer chooses the compatible OS, architecture, libc, and x64 CPU
+baseline artifact, and `opencodez update` uses the same release channel from
+inside the app. A production binary remembers its exact build target, so
+self-update preserves `baseline` and `musl` instead of silently switching binary
+flavor. On an older binary without that marker, update detects the host
+conservatively.
+
+Both installers and self-update run the downloaded binary before replacement.
+The reported version must match the release exactly and must have the production
+form `X.Y.Z+opencodez.N`; `dev`, preview, beta, branch, and plain upstream
+versions are rejected. `install.sh` remains a small compatibility redirect to
+the canonical `install` script and contains no separate platform logic.
 During the download, `opencodez update` prints progress to stderr. When GitHub
 provides `Content-Length`, progress includes total MB and percent; otherwise it
 prints downloaded MB only.
@@ -103,10 +115,6 @@ On Unix, OpenCodez asks for `sudo` only when the installed binary is in a
 protected system path such as `/usr/local/bin`. Installations older than
 `1.17.20+opencodez.2` need one bootstrap update with `sudo opencodez update`;
 later releases handle the protected target automatically.
-Managed deployments may install the narrow `/usr/local/sbin/opencodez-install`
-helper. When present, `opencodez update` uses it non-interactively to replace
-only `/usr/local/bin/opencodez`; ordinary public installs keep the interactive
-sudo fallback.
 If the installed binary is newer than the latest published release, `opencodez update` treats it as current instead of downgrading it.
 
 ## Run From Source
@@ -124,6 +132,9 @@ Production OpenCodez builds must explicitly set `OPENCODEZ_BUILD=1`,
 upstream-version, and other non-production OpenCodez metadata before generating
 an artifact. A valid build emits `opencodez-*` artifacts with an `opencodez`
 binary inside.
+Development/source binaries are never valid install or deployment artifacts.
+Do not copy them into an executable path or use them for a canary; build an
+explicit production artifact first.
 Normal public releases should use the `publish` GitHub Actions workflow. Give it an OpenCodez release version such as `1.18.29+opencodez.1`; the release version must include `opencodez` so accidental upstream-looking tags are rejected. The workflow embeds that complete version by default, typechecks the fork boundary, verifies generated-client drift, builds the `opencodez-*` assets, verifies their names and archive contents, uploads them to GitHub Releases, and publishes the release unless `draft` is enabled.
 
 ## Side-by-Side With OpenCode

@@ -72,7 +72,7 @@ export class Continuation {
 }
 
 function propertiesMatch(previous: Record<string, unknown>, next: Record<string, unknown>) {
-  return jsonEqual(requestProperties(previous), requestProperties(next), false)
+  return jsonEqual(requestProperties(previous), requestProperties(next))
 }
 
 function responseItemsEqual(left: unknown, right: unknown) {
@@ -124,19 +124,19 @@ function requestProperties(request: Record<string, unknown>) {
   return result
 }
 
-function jsonEqual(left: unknown, right: unknown, ignoreInternalMetadata: boolean): boolean {
+function jsonEqual(left: unknown, right: unknown): boolean {
   if (left === right) return true
   if (Array.isArray(left) || Array.isArray(right)) {
     if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false
-    return left.every((value, index) => jsonEqual(value, right[index], ignoreInternalMetadata))
+    return left.every((value, index) => jsonEqual(value, right[index]))
   }
   if (!isRecord(left) || !isRecord(right)) return false
 
-  const leftKeys = Object.keys(left).filter((key) => !ignoreInternalMetadata || key !== "_meta")
-  const rightKeys = Object.keys(right).filter((key) => !ignoreInternalMetadata || key !== "_meta")
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
   if (leftKeys.length !== rightKeys.length) return false
   for (const key of leftKeys) {
-    if (!(key in right) || !jsonEqual(left[key], right[key], ignoreInternalMetadata)) return false
+    if (!(key in right) || !jsonEqual(left[key], right[key])) return false
   }
   return true
 }

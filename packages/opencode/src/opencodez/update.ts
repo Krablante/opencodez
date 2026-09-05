@@ -2,7 +2,13 @@ import { z } from "zod"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { isCurrentOrNewerOpenCodezVersion } from "@opencode-ai/core/opencodez/version"
+import {
+  isCurrentOrNewerOpenCodezVersion,
+  isProductionOpenCodezVersion,
+  normalizeOpenCodezVersion,
+} from "@opencode-ai/core/opencodez/version"
+
+declare const OPENCODEZ_TARGET: string
 
 const RELEASE_REPOSITORY = process.env["OPENCODEZ_UPDATE_REPOSITORY"] ?? "Krablante/opencodez"
 const RELEASES_API = `https://api.github.com/repos/${RELEASE_REPOSITORY}/releases/latest`
@@ -62,6 +68,13 @@ export async function run(input: {
     }
   }
 
+  if (!isProductionOpenCodezVersion(release.tag_name)) {
+    return {
+      status: "error",
+      message: `Refusing non-production OpenCodez release version: ${release.tag_name}`,
+    }
+  }
+
   const current = input.current
   if (current && isCurrentOrNewerOpenCodezVersion(current, release.tag_name)) {
     return {
@@ -70,7 +83,7 @@ export async function run(input: {
     }
   }
 
-  const asset = selectAsset(release.assets)
+  const asset = await selectAsset(release.assets)
   if (input.check) {
     if (!asset) {
       return {
@@ -112,7 +125,12 @@ export async function run(input: {
     }
     const bytes = await downloadAsset(response, { asset: asset.name, onEvent: input.onEvent })
     emit(input.onEvent, { type: "installing", asset: asset.name, target })
-    await installAsset({ name: asset.name, bytes, target })
+    await installAsset({
+      name: asset.name,
+      bytes,
+      target,
+      expectedVersion: normalizeOpenCodezVersion(release.tag_name),
+    })
     return {
       status: "updated",
       message: `Updated OpenCodez to ${release.tag_name}.`,
@@ -181,16 +199,59 @@ function parseContentLength(value: string | null) {
   return parsed
 }
 
-function selectAsset(assets: Array<z.infer<typeof Asset>>) {
+async function selectAsset(assets: Array<z.infer<typeof Asset>>) {
   const platform = process.platform === "win32" ? "windows" : process.platform
   const arch = process.arch === "x64" ? "x64" : process.arch === "arm64" ? "arm64" : process.arch
-  const names = [
-    `opencodez-${platform}-${arch}`,
-    `opencodez-${platform}-${arch}.tar.gz`,
-    `opencodez-${platform}-${arch}.zip`,
-    `opencodez-${platform}-${arch}.gz`,
-  ]
-  return assets.find((asset) => names.includes(asset.name))
+  if (!(["linux", "darwin", "windows"] as string[]).includes(platform)) return undefined
+  if (arch !== "x64" && arch !== "arm64") return undefined
+  const embedded = typeof OPENCODEZ_TARGET === "string" ? OPENCODEZ_TARGET : undefined
+  const target = embedded?.startsWith(`${platform}-${arch}`) ? embedded : await compatibleTarget(platform, arch)
+  const extension = platform === "linux" ? ".tar.gz" : ".zip"
+  return assets.find((asset) => asset.name === `opencodez-${target}${extension}`)
+}
+
+async function compatibleTarget(platform: string, arch: "x64" | "arm64") {
+  const baseline = arch === "x64" && !(await supportsAvx2(platform))
+  const musl = platform === "linux" && (await usesMusl())
+  return [platform, arch, baseline ? "baseline" : undefined, musl ? "musl" : undefined].filter(Boolean).join("-")
+}
+
+async function supportsAvx2(platform: string) {
+  if (platform === "linux") {
+    return fs
+      .readFile("/proc/cpuinfo", "utf8")
+      .then((value) => /(^|\s)avx2(\s|$)/im.test(value))
+      .catch(() => false)
+  }
+  if (platform === "darwin") return (await commandOutput(["sysctl", "-n", "hw.optional.avx2_0"])) === "1"
+  if (platform !== "windows") return false
+  const script =
+    '(Add-Type -MemberDefinition "[DllImport(""kernel32.dll"")] public static extern bool IsProcessorFeaturePresent(int ProcessorFeature);" -Name Kernel32 -Namespace OpenCodezUpdate -PassThru)::IsProcessorFeaturePresent(40)'
+  const output =
+    (await commandOutput(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script])) ??
+    (await commandOutput(["pwsh", "-NoProfile", "-NonInteractive", "-Command", script]))
+  return output?.toLowerCase() === "true" || output === "1"
+}
+
+async function usesMusl() {
+  const alpine = await fs
+    .stat("/etc/alpine-release")
+    .then((value) => value.isFile())
+    .catch(() => false)
+  if (alpine) return true
+  return (await commandOutput(["ldd", "--version"]))?.toLowerCase().includes("musl") === true
+}
+
+async function commandOutput(command: string[]) {
+  if (!path.isAbsolute(command[0]) && !Bun.which(command[0])) return undefined
+  const proc = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "pipe" })
+  const [exit, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]).catch(() => [-1, "", ""] as const)
+  if (exit !== 0) return undefined
+  return `${stdout}\n${stderr}`.trim()
 }
 
 function installTarget() {
@@ -201,7 +262,7 @@ function installTarget() {
   return undefined
 }
 
-async function installAsset(input: { name: string; bytes: Uint8Array; target: string }) {
+async function installAsset(input: { name: string; bytes: Uint8Array; target: string; expectedVersion: string }) {
   const work = await fs.mkdtemp(path.join(os.tmpdir(), "opencodez-update-"))
   const tmp = path.join(path.dirname(input.target), `.${path.basename(input.target)}.${process.pid}.${Date.now()}.tmp`)
   try {
@@ -218,6 +279,7 @@ async function installAsset(input: { name: string; bytes: Uint8Array; target: st
       await fs.rename(archive, binary)
     }
     await fs.chmod(binary, 0o755)
+    await verifyProductionBinary(binary, input.expectedVersion)
     try {
       await fs.copyFile(binary, tmp)
       await fs.chmod(tmp, 0o755)
@@ -233,6 +295,17 @@ async function installAsset(input: { name: string; bytes: Uint8Array; target: st
   }
 }
 
+async function verifyProductionBinary(binary: string, expectedVersion: string) {
+  const actual = await commandOutput([binary, "--version"])
+  const version = actual ? normalizeOpenCodezVersion(actual) : undefined
+  if (!version || !isProductionOpenCodezVersion(version)) {
+    throw new Error(`Refusing non-production OpenCodez binary (reported version: ${version ?? "unknown"})`)
+  }
+  if (version !== expectedVersion) {
+    throw new Error(`Downloaded binary reports ${version}, expected ${expectedVersion}`)
+  }
+}
+
 async function installWithSudo(input: { binary: string; target: string; tmp: string }) {
   try {
     if (input.target === "/usr/local/bin/opencodez" && (await tryManagedInstall(input.binary))) return
@@ -242,6 +315,7 @@ async function installWithSudo(input: { binary: string; target: string; tmp: str
     await runSudo(["rm", "-f", input.tmp]).catch(() => undefined)
     throw new Error(
       `Cannot replace protected install target ${input.target}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     )
   }
 }

@@ -7,6 +7,8 @@ import path from "path"
 import { defaultPromptAssets } from "./default-prompts"
 import { SystemPrompt } from "@/session/system"
 
+let migration: { directory: string; promise: Promise<void> } | undefined
+
 export interface Entry {
   name: string
   path: string
@@ -25,8 +27,15 @@ export function directories() {
 
 export async function ensureDefaults() {
   const dirs = directories()
-  await fs.mkdir(dirs.system, { recursive: true })
-  await removeLegacyCopies(dirs.system)
+  if (migration?.directory === dirs.system) return migration.promise
+  const promise = fs.mkdir(dirs.system, { recursive: true }).then(() => removeLegacyCopies(dirs.system))
+  migration = { directory: dirs.system, promise }
+  try {
+    await promise
+  } catch (error) {
+    if (migration?.promise === promise) migration = undefined
+    throw error
+  }
 }
 
 export async function list(): Promise<Entry[]> {
@@ -56,9 +65,16 @@ export async function list(): Promise<Entry[]> {
 }
 
 export async function get(name: string) {
-  const entry = (await list()).find((item) => item.name === name)
-  if (!entry) return undefined
-  return entry
+  await ensureDefaults()
+  if (!validName(name)) return undefined
+  const library = path.join(directories().system, `${name}.md`)
+  if (await Bun.file(library).exists()) return { name, path: library, source: "library" as const }
+  if (`${name}.md` in defaultPromptAssets.core) {
+    return { name, path: `bundled:${name}.md`, source: "builtin" as const }
+  }
+  if (SystemPrompt.builtinPrompt(name) !== undefined)
+    return { name, path: `builtin:${name}`, source: "builtin" as const }
+  return undefined
 }
 
 export async function readPrompt(name: string) {
@@ -67,6 +83,10 @@ export async function readPrompt(name: string) {
   if (entry.source === "library") return Bun.file(entry.path).text()
   const bundled = (defaultPromptAssets.core as Record<string, string>)[`${name}.md`]
   return bundled ?? SystemPrompt.builtinPrompt(name)
+}
+
+function validName(name: string) {
+  return name.length > 0 && name !== "." && name !== ".." && path.basename(name) === name
 }
 
 export function helpText() {

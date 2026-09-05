@@ -24,7 +24,7 @@ variables use the `OPENCODEZ_` prefix.
 Install from the public fork:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install | bash
 ```
 
 Update an installed binary from GitHub Releases:
@@ -38,14 +38,22 @@ protected system path. Installations older than `1.17.20+opencodez.2` require
 one bootstrap run with `sudo opencodez update`; later releases elevate only the
 atomic replacement step automatically.
 
-Managed hosts can install `/usr/local/sbin/opencodez-install` with a scoped
-sudoers rule. The updater prefers that helper for a non-interactive atomic
-replacement of `/usr/local/bin/opencodez`, then falls back to the normal
-interactive sudo flow when the helper is absent.
-
 Release versions use the upstream base plus OpenCodez build metadata, for
 example `1.18.29+opencodez.1`. The release tag and embedded binary version must
 match exactly.
+
+The canonical Unix installer detects OS, architecture, musl versus glibc, and
+whether an x64 CPU needs the baseline build. The PowerShell installer applies
+the same conservative x64 baseline decision. Production binaries embed their
+complete target name, so self-update preserves an installed `baseline` or
+`musl` flavor exactly; binaries predating that marker fall back to host
+detection. `install.sh` is only a compatibility redirect to the canonical
+installer and carries no second copy of the selection logic.
+
+Installers and self-update execute the candidate before replacement and require
+its version to match the release exactly in `X.Y.Z+opencodez.N` form. A `dev`,
+local, beta, preview, branch, or plain upstream binary is never a valid
+installed, deployed, canary, or operator artifact.
 
 ## System Prompt Library
 
@@ -61,6 +69,12 @@ upstream OpenCode built-ins and custom files from this directory, using
 user file > OpenCodez bundled > OpenCode builtin precedence. During migration
 from the retired copy-once delivery mechanism, OpenCodez removes only files that
 still match an old bundled content hash exactly. Edited files remain overrides.
+That migration is deduplicated once per active config root. Model requests read
+the selected file directly instead of rebuilding and sorting the complete
+library. If a selected user file disappears or becomes unreadable, request
+preparation fails visibly rather than silently substituting an upstream System
+prompt; Web selection and refresh failures are also shown in the existing error
+surface.
 
 The same System selector is available in both generations of the Web/Desktop
 prompt composer. New sessions carry the selected prompt in submission metadata;
@@ -70,6 +84,10 @@ change.
 Session creation carries the same optional metadata through both the current
 Protocol API and the App compatibility adapter, so a selection made before the
 first message survives creation, reload, and later protocol upgrades.
+Persisted session metadata is authoritative. The process keeps only the 256
+most recently used selections as a short-lived UI bridge, removes stale entries
+when metadata no longer contains a selection, and clears an entry when its
+session is deleted.
 
 The Web prompt control stays in the compact model-control row. In the TUI the
 same selection is secondary status: it is rendered as `S: <name>`, omitted
@@ -518,6 +536,11 @@ OpenCodez config boundary:
   after one minute and the process retains at most 128 handoffs. Direct mid-turn
   continuation uses one internal non-network marker to satisfy the AI SDK's non-empty prompt
   validation; the request adapter removes it before network I/O.
+- `session-compaction.ts` owns the complete fork-specific remote-compaction
+  lifecycle: turn-profile journaling, transition detection, overflow accounting,
+  remote request preparation and retry, opaque-state persistence, and pending
+  input recovery. The upstream `session/compaction.ts` keeps local summary and
+  common marker behavior and delegates the remote branch through this one seam.
 - `attempt.ts` owns request kinds, bounded retry policy, and the lightweight
   sampling-attempt journal. It records only part IDs, permits rollback before a
   tool-call side-effect barrier, resumes from durable tool results without
@@ -539,10 +562,11 @@ OpenCodez config boundary:
   the prepared request controls through a pending mid-turn compact without a
   second storage layer.
 - `packages/opencode/src/session/prompt.ts` owns the explicit follow-up and
-  durable-output decision, while `packages/opencode/src/session/compaction.ts`
-  owns pre-turn replay, previous-model-first hash transitions with one
-  current-model fallback, complete mid-turn history, and the pending-input
-  boundary through the first post-compact continuation.
+  durable-output decision. Shared marker creation, local summarization, and
+  auto-continue stay in `packages/opencode/src/session/compaction.ts`; the
+  fork-owned remote module owns pre-turn replay, previous-model-first hash
+  transitions with one current-model fallback, complete mid-turn history, and
+  the pending-input boundary through the first post-compact continuation.
 - The transport pool retains at most 256 session entries; transport fallback
   remains sticky until explicit removal or bounded eviction.
   Continuation resets on reconnect, login change, abort, failure, or concurrent
@@ -679,6 +703,7 @@ packages/opencode/src/opencodez/codex-responses/compaction.ts
 packages/opencode/src/opencodez/codex-responses/continuation.ts
 packages/opencode/src/opencodez/codex-responses/protocol.ts
 packages/opencode/src/opencodez/codex-responses/request.ts
+packages/opencode/src/opencodez/codex-responses/session-compaction.ts
 packages/opencode/src/opencodez/codex-responses/transport.ts
 packages/opencode/src/plugin/openai/ws.ts
 packages/opencode/src/session/llm/request.ts

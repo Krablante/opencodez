@@ -4,6 +4,10 @@ export function normalizeOpenCodezVersion(value: string) {
   return value.replace(/^v/, "")
 }
 
+export function isProductionOpenCodezVersion(value: string) {
+  return /^\d+\.\d+\.\d+\+opencodez\.\d+$/.test(normalizeOpenCodezVersion(value))
+}
+
 export function isCurrentOrNewerOpenCodezVersion(current: string, latest: string) {
   const currentNormalized = normalizeOpenCodezVersion(current)
   const latestNormalized = normalizeOpenCodezVersion(latest)

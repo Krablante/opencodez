@@ -146,7 +146,7 @@ describe("plugin.openai.ws", () => {
   })
 })
 
-describe("plugin.openai.ws-pool", () => {
+describe("plugin.openai.codex-responses-transport", () => {
   test("reuses one healthy websocket for sequential requests", async () => {
     let connections = 0
     let messages = 0
