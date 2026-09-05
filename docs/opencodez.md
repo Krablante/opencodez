@@ -633,6 +633,15 @@ desktop spacing remains unchanged; Agent, System, and Variant become icon-only
 below the `sm` breakpoint so the Model stays readable and the Send action never
 leaves the composer.
 
+Browser drafts persist attachments in IndexedDB. Secure origins use SHA-256
+content IDs, preserving byte-level duplicate detection. Browsers do not expose
+`crypto.subtle` to ordinary LAN HTTP origins, so those origins use random
+128-bit IDs from `crypto.getRandomValues` instead. This keeps clipboard paste,
+drag-and-drop, and file-picker attachments operational without a hashing
+dependency, an additional file scan, or an HTTPS deployment requirement.
+Byte-level duplicate detection is unavailable on insecure origins; attachment
+persistence and submission behavior are otherwise unchanged.
+
 OpenCodez can embed the built web UI as one packed binary asset. Runtime delivery
 unpacks it in memory, applies SPA fallback, preserves MIME types, serves
 compressed variants, and emits `Vary: Accept-Encoding`. A versioned on-disk UI
@@ -677,6 +686,9 @@ packages/opencode/src/server/routes/instance/httpapi/groups/opencodez.ts
 packages/opencode/src/server/routes/instance/httpapi/handlers/opencodez.ts
 packages/tui/src/component/opencodez-dialogs.tsx
 packages/app/src/components/prompt-input.tsx
+packages/app/src/utils/draft-store.ts
+packages/session-ui/src/v2/components/prompt-input/attachments.ts
+packages/session-ui/src/v2/components/prompt-input/interaction.ts
 packages/session-ui/src/v2/components/prompt-input/index.tsx
 ```
 

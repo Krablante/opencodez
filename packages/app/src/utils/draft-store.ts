@@ -22,7 +22,14 @@ function blobUrl(id: string, blob: Blob) {
 }
 
 async function blobID(blob: Blob) {
-  const id = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer())))
+  const subtle = globalThis.crypto?.subtle
+  if (!subtle) {
+    // Browsers withhold SubtleCrypto on non-loopback HTTP origins but retain getRandomValues.
+    const bytes = globalThis.crypto?.getRandomValues(new Uint8Array(16))
+    if (!bytes) return `random-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`
+    return `random-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`
+  }
+  const id = Array.from(new Uint8Array(await subtle.digest("SHA-256", await blob.arrayBuffer())))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("")
   return id

@@ -53,6 +53,9 @@ OpenCodez keeps the normal OpenCode shape, but adds a few practical controls:
   roots clamp to `$HOME`, and background file indexing is disabled by default.
 - `opencodez update` prints GitHub release, download progress, and install
   stages instead of staying silent during large asset downloads.
+- Web image and file attachments work on ordinary LAN HTTP origins as well as
+  secure origins; clipboard, drag-and-drop, and file-picker input share the same
+  persisted browser draft store.
 
 OpenCodez is meant to be a small fork, not a full rebrand. Upstream internals, docs, workflows, integrations, and package surfaces should stay as close to OpenCode as practical unless a fork-specific change is genuinely needed.
 

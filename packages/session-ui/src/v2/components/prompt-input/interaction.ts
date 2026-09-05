@@ -377,7 +377,7 @@ export function createPromptInputV2Controller(input: {
         attachments &&
         (Array.from(clipboard?.items ?? []).some((item) => item.kind === "file") || !clipboard?.getData("text/plain"))
       ) {
-        void attachments.handlePaste(event)
+        void attachments.handlePaste(event).catch(input.attachments!.onError)
         return
       }
       input.view.onPaste?.(event)
