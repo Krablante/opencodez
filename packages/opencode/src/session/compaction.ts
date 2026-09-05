@@ -319,6 +319,8 @@ const layer = Layer.effect(
               : CodexResponsesCatalog.resolve(
                   input.model,
                   CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access),
+                  undefined,
+                  OpenCodezSettings.responsesContextWindow(cfg),
                 )
         limit = OpenCodezSettings.responsesCompactionLimit(
           cfg,
@@ -394,7 +396,12 @@ const layer = Layer.effect(
       }
       if (existing?.profile) return existing
       yield* Effect.promise(() => CodexResponsesCatalog.settleRefresh(accountKey))
-      const profile = CodexResponsesCatalog.resolve(input.model, accountKey)
+      const profile = CodexResponsesCatalog.resolve(
+        input.model,
+        accountKey,
+        undefined,
+        OpenCodezSettings.responsesContextWindow(cfg),
+      )
       if (existing?.compHash && profile?.compHash && existing.compHash !== profile.compHash) {
         throw new Error(
           "The ChatGPT backend changed while resuming the active turn. Retry with a new message to continue safely.",
@@ -468,7 +475,12 @@ const layer = Layer.effect(
       const accountKey = CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access)
       if (!accountKey) return undefined
       yield* Effect.promise(() => CodexResponsesCatalog.settleRefresh(accountKey))
-      const profile = CodexResponsesCatalog.resolve(input.model, accountKey)
+      const profile = CodexResponsesCatalog.resolve(
+        input.model,
+        accountKey,
+        undefined,
+        OpenCodezSettings.responsesContextWindow(cfg),
+      )
       if (!profile) return undefined
       const info = yield* session.get(input.sessionID).pipe(Effect.orDie)
       const settings = CodexResponsesCompaction.turnSettings(info.metadata)
@@ -527,7 +539,12 @@ const layer = Layer.effect(
         const previousProfile =
           previous?.profile?.modelID === previousModel.value.api.id
             ? previous.profile
-            : CodexResponsesCatalog.resolve(previousModel.value, accountKey)
+            : CodexResponsesCatalog.resolve(
+                previousModel.value,
+                accountKey,
+                undefined,
+                OpenCodezSettings.responsesContextWindow(cfg),
+              )
         const previousWindow = modelContextWindow(previousModel.value, previousProfile)
         const currentWindow = modelContextWindow(input.model, profile)
         if (
@@ -928,7 +945,12 @@ const layer = Layer.effect(
         turnSettings?.profile?.modelID === targetModel.api.id
           ? turnSettings.profile
           : accountKey
-            ? CodexResponsesCatalog.resolve(targetModel, accountKey)
+            ? CodexResponsesCatalog.resolve(
+                targetModel,
+                accountKey,
+                undefined,
+                OpenCodezSettings.responsesContextWindow(cfg),
+              )
             : undefined
       if (remote) {
         if (!accountKey) throw new Error("OpenAI remote compaction requires a verified ChatGPT account identity")

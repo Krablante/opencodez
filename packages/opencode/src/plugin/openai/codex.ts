@@ -43,10 +43,12 @@ function base64UrlEncode(buffer: ArrayBuffer): string {
 
 export interface IdTokenClaims {
   chatgpt_account_id?: string
+  chatgpt_compute_residency?: string
   organizations?: Array<{ id: string }>
   email?: string
   "https://api.openai.com/auth"?: {
     chatgpt_account_id?: string
+    chatgpt_compute_residency?: string
   }
 }
 
@@ -75,6 +77,14 @@ export function extractAccountId(tokens: TokenResponse): string | undefined {
     return claims ? extractAccountIdFromClaims(claims) : undefined
   }
   return undefined
+}
+
+export function extractResidency(token: string): string | undefined {
+  const claims = parseJwtClaims(token)
+  const residency =
+    claims?.["https://api.openai.com/auth"]?.chatgpt_compute_residency ?? claims?.chatgpt_compute_residency
+  if (!residency || residency === "no_constraint") return undefined
+  return residency
 }
 
 function buildAuthorizeUrl(redirectUri: string, pkce: PkceCodes, state: string): string {
@@ -267,11 +277,13 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
   const codexApiEndpoint = options.codexApiEndpoint ?? CODEX_API_ENDPOINT
   let websocketFetchInstalled = false
   let responsesWire: "legacy" | "codex" = "codex"
+  let responsesContextWindow: number | undefined
   const websocketFetches: Array<ReturnType<typeof CodexResponsesTransport.createWebSocketFetch>> = []
 
   return {
     async config(config) {
       responsesWire = OpenCodezSettings.responsesWire(config)
+      responsesContextWindow = OpenCodezSettings.responsesContextWindow(config)
     },
     async dispose() {
       for (const websocketFetch of websocketFetches) websocketFetch.close()
@@ -292,8 +304,11 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               if (ALLOWED_MODELS.has(model.api.id)) return true
               if (DISALLOWED_MODELS.has(model.api.id)) return false
               if (model.api.id === "gpt-5.6") return false
-              const match = model.api.id.match(/^gpt-(\d+\.\d+)/)
-              return match ? parseFloat(match[1]) > 5.4 : false
+              const match = model.api.id.match(/^gpt-(\d+)(?:\.(\d+))?/)
+              if (!match) return false
+              const major = Number(match[1])
+              const minor = Number(match[2] ?? 0)
+              return major > 5 || (major === 5 && minor > 4)
             })
             .map(([modelID, model]) => [
               modelID,
@@ -304,16 +319,11 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                   output: 0,
                   cache: { read: 0, write: 0 },
                 },
-                limit: model.id.includes("gpt-5.5")
-                  ? {
-                      context: 400_000,
-                      input: 272_000,
-                      output: 128_000,
-                    }
-                  : model.id.includes("gpt-5.6")
+                limit:
+                  model.id.includes("gpt-5.5") || model.id.includes("gpt-5.6")
                     ? {
-                        context: 500_000,
-                        input: 372_000,
+                        context: 400_000,
+                        input: 272_000,
                         output: 128_000,
                       }
                     : model.limit,
@@ -331,7 +341,26 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
           )
         )
           return models
-        return CodexResponsesCatalog.initialize(models, { auth: ctx.auth, endpoint: codexApiEndpoint })
+        await CodexResponsesCatalog.initialize(models, { auth: ctx.auth, endpoint: codexApiEndpoint })
+        if (responsesContextWindow === undefined) return models
+        const accountKey = CodexResponsesProtocol.accountKey(ctx.auth.accountId, ctx.auth.access)
+        return Object.fromEntries(
+          Object.entries(models).map(([modelID, model]) => {
+            const profile = CodexResponsesCatalog.resolve(model, accountKey, undefined, responsesContextWindow)
+            if (!profile) return [modelID, model]
+            return [
+              modelID,
+              {
+                ...model,
+                limit: {
+                  ...model.limit,
+                  context: Math.max(model.limit.context, profile.contextWindow),
+                  input: profile.contextWindow,
+                },
+              },
+            ]
+          }),
+        )
       },
     },
     auth: {
@@ -451,10 +480,12 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               requestInput instanceof URL
                 ? requestInput
                 : new URL(typeof requestInput === "string" ? requestInput : requestInput.url)
-            const url =
-              parsed.pathname.includes("/v1/responses") || parsed.pathname.includes("/chat/completions")
-                ? new URL(codexApiEndpoint)
-                : parsed
+            const rewrite = parsed.pathname.includes("/v1/responses") || parsed.pathname.includes("/chat/completions")
+            const url = rewrite ? new URL(codexApiEndpoint) : parsed
+            if (rewrite) {
+              const residency = extractResidency(currentAuth.access)
+              if (residency) headers.set("x-openai-internal-codex-residency", residency)
+            }
             const codexRequest = codexCapability && parsed.pathname.endsWith("/responses")
 
             const handoff = headers.get(CodexResponsesCompaction.HEADER) ?? undefined
@@ -490,6 +521,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                   )
                 : undefined
             if (lowered?.responsesLite) headers.set(CodexResponsesCatalog.RESPONSES_LITE_HEADER, "true")
+            if (codexRequest && lowered?.routingHint) headers.set("x-codex-routing-hint", lowered.routingHint)
 
             const requestInit = {
               ...init,

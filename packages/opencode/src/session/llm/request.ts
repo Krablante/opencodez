@@ -108,7 +108,13 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   const hasRemoteCompaction = CodexResponsesCompaction.has(input.sessionMetadata)
   const profile =
     codexResponses || hasRemoteCompaction
-      ? (turnProfile ?? CodexResponsesCatalog.resolve(input.model, accountKey))
+      ? (turnProfile ??
+        CodexResponsesCatalog.resolve(
+          input.model,
+          accountKey,
+          undefined,
+          OpenCodezSettings.responsesContextWindow(input.config),
+        ))
       : undefined
   if (hasRemoteCompaction && !isOpenaiOauth) {
     return yield* Effect.fail(
@@ -319,9 +325,9 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
                   ),
                 }
               : {}),
-            ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
             "User-Agent": USER_AGENT,
           }),
+      ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
       ...input.model.headers,
       ...headers,
       ...(isOpenaiOauth ? { [CodexResponsesCapability.HEADER]: codexResponses ? "true" : "false" } : {}),

@@ -6,7 +6,11 @@
 
 - Made default-disabled FFF a true zero-index mode: OpenCodez no longer starts the upstream `rg --files` fallback or retains a background path index when `OPENCODE_DISABLE_FFF=1`. Directory browsing and explicit agent file tools remain available.
 - Made the v2 Web composer controls shrink and truncate inside narrow/mobile layouts, with icon-only Agent, System, and Variant controls and readable Model priority, so every control remains contained without changing desktop spacing.
-- Updated the fork base from upstream OpenCode `1.18.13` to `1.18.18` while keeping the OpenCodez prompt, project, updater, embedded Web UI, Responses wire, and remote compaction layers isolated.
+- Updated the fork base from upstream OpenCode `1.18.18` to `1.18.29` while keeping the OpenCodez prompt, project, updater, embedded Web UI, Responses wire, and remote compaction layers isolated.
+- Added GPT-6 Astra model defaults and an adapted bundled System prompt from stable Codex `rust-v0.153.4`; Luna, Terra, and Sol now share the current Codex prompt while their existing selector names remain compatible.
+- Added `opencodez.responses.context_window` for supported ChatGPT OAuth models. Astra keeps the 272k Codex working default and accepts an explicit value up to its advertised 872k client ceiling, with the remote-compaction trigger derived from the effective window.
+- Aligned Responses Lite with the current Codex request contract by grouping ordinary tools under the `functions` namespace, assigning stable thread-scoped prefix IDs, sending model/tier routing hints, and falling back immediately to HTTP after WebSocket close code 1009.
+- Bundled prompts now stay embedded in the binary instead of becoming stale copy-once user files. Exact unchanged legacy copies are removed on upgrade, while edited files remain user overrides.
 - Adopted upstream fixes for MCP SSE reconnect loops, configurable interleaved reasoning fields, stale prompt controls and session tabs, narrow file-tree tabs, directory selection, external desktop links, right-to-left layouts, localized desktop surfaces, and responsive worker-based Markdown rendering.
 - Adopted upstream chronological message boundaries across prompt execution, history revert and fork, App/TUI rendering, and shared-session views; OpenCodez remote-compaction boundaries now use the same persisted order instead of comparing raw IDs.
 - Adopted upstream's current project-scoped MCP state loading.

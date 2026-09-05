@@ -8,6 +8,7 @@ export const RESPONSES_LITE_METADATA = "ws_request_header_x_openai_internal_code
 export type Profile = {
   readonly modelID: string
   readonly contextWindow: number
+  readonly maxContextWindow?: number
   readonly autoCompactTokenLimit?: number
   readonly compHash?: string
   readonly responsesLite: boolean
@@ -33,6 +34,12 @@ export function isProfile(value: unknown): value is Profile {
   if (!("contextWindow" in value) || typeof value.contextWindow !== "number" || !Number.isFinite(value.contextWindow))
     return false
   if (
+    "maxContextWindow" in value &&
+    value.maxContextWindow !== undefined &&
+    (typeof value.maxContextWindow !== "number" || !Number.isFinite(value.maxContextWindow))
+  )
+    return false
+  if (
     "autoCompactTokenLimit" in value &&
     value.autoCompactTokenLimit !== undefined &&
     (typeof value.autoCompactTokenLimit !== "number" || !Number.isFinite(value.autoCompactTokenLimit))
@@ -55,6 +62,7 @@ type Catalog = Snapshot & {
 type RemoteModel = {
   readonly slug: string
   readonly context_window: number
+  readonly max_context_window?: number | null
   readonly auto_compact_token_limit?: number | null
   readonly comp_hash?: string | null
   readonly use_responses_lite?: boolean
@@ -68,12 +76,56 @@ const CACHE_TTL = 5 * 60 * 1000
 const FAILURE_TTL = 60 * 1000
 const CACHE_LIMIT = 8
 const FALLBACK_PROFILES: Profile[] = [
-  { modelID: "gpt-5.4", contextWindow: 272_000, compHash: "2911", responsesLite: false },
-  { modelID: "gpt-5.4-mini", contextWindow: 272_000, compHash: "2911", responsesLite: false },
-  { modelID: "gpt-5.5", contextWindow: 272_000, compHash: "2911", responsesLite: false },
-  { modelID: "gpt-5.6-luna", contextWindow: 272_000, compHash: "3000", responsesLite: true },
-  { modelID: "gpt-5.6-terra", contextWindow: 272_000, compHash: "3000", responsesLite: true },
-  { modelID: "gpt-5.6-sol", contextWindow: 272_000, compHash: "3000", responsesLite: true },
+  {
+    modelID: "gpt-5.4",
+    contextWindow: 272_000,
+    maxContextWindow: 1_000_000,
+    compHash: "2911",
+    responsesLite: false,
+  },
+  {
+    modelID: "gpt-5.4-mini",
+    contextWindow: 272_000,
+    maxContextWindow: 272_000,
+    compHash: "2911",
+    responsesLite: false,
+  },
+  {
+    modelID: "gpt-5.5",
+    contextWindow: 272_000,
+    maxContextWindow: 272_000,
+    compHash: "2911",
+    responsesLite: false,
+  },
+  {
+    modelID: "gpt-5.6-luna",
+    contextWindow: 272_000,
+    maxContextWindow: 872_000,
+    compHash: "3000",
+    responsesLite: true,
+  },
+  {
+    modelID: "gpt-5.6-terra",
+    contextWindow: 272_000,
+    maxContextWindow: 872_000,
+    compHash: "3000",
+    responsesLite: true,
+  },
+  {
+    modelID: "gpt-5.6-sol",
+    contextWindow: 272_000,
+    maxContextWindow: 872_000,
+    compHash: "3000",
+    responsesLite: true,
+  },
+  {
+    modelID: "gpt-6-astra",
+    contextWindow: 272_000,
+    maxContextWindow: 872_000,
+    autoCompactTokenLimit: 244_800,
+    compHash: "3000",
+    responsesLite: true,
+  },
 ]
 const FALLBACK = new Map(FALLBACK_PROFILES.map((profile) => [profile.modelID, profile]))
 
@@ -99,17 +151,35 @@ export async function initialize<T extends Record<string, Model>>(
   return models
 }
 
-export function resolve(model: Model, accountKey?: string, snapshot?: Snapshot): Profile | undefined {
-  return resolveID(model.api.id, accountKey, snapshot)
+export function resolve(
+  model: Model,
+  accountKey?: string,
+  snapshot?: Snapshot,
+  requestedContextWindow?: number,
+): Profile | undefined {
+  return resolveID(model.api.id, accountKey, snapshot, requestedContextWindow)
 }
 
-export function resolveID(modelID: string, accountKey?: string, snapshot?: Snapshot): Profile | undefined {
+export function resolveID(
+  modelID: string,
+  accountKey?: string,
+  snapshot?: Snapshot,
+  requestedContextWindow?: number,
+): Profile | undefined {
   const cached = accountKey ? cache.get(accountKey) : undefined
   if (cached && accountKey) {
     cache.delete(accountKey)
     cache.set(accountKey, cached)
   }
-  return (cached ?? snapshot)?.profiles.get(modelID) ?? FALLBACK.get(modelID)
+  const profile = (cached ?? snapshot)?.profiles.get(modelID) ?? FALLBACK.get(modelID)
+  if (!profile || requestedContextWindow === undefined) return profile
+  const contextWindow = Math.min(requestedContextWindow, profile.maxContextWindow ?? profile.contextWindow)
+  if (contextWindow === profile.contextWindow) return profile
+  return {
+    ...profile,
+    contextWindow,
+    autoCompactTokenLimit: Math.floor(contextWindow * 0.9),
+  }
 }
 
 export function needsRefresh(auth: Extract<Auth.Info, { type: "oauth" }>) {
@@ -245,6 +315,7 @@ function parseModel(value: unknown): Profile[] {
     {
       modelID: value.slug,
       contextWindow: model.context_window,
+      maxContextWindow: typeof model.max_context_window === "number" ? model.max_context_window : undefined,
       autoCompactTokenLimit:
         typeof model.auto_compact_token_limit === "number" ? model.auto_compact_token_limit : undefined,
       compHash: typeof model.comp_hash === "string" ? model.comp_hash : undefined,

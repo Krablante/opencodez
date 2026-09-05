@@ -44,7 +44,7 @@ replacement of `/usr/local/bin/opencodez`, then falls back to the normal
 interactive sudo flow when the helper is absent.
 
 Release versions use the upstream base plus OpenCodez build metadata, for
-example `1.18.18+opencodez.1`. The release tag and embedded binary version must
+example `1.18.29+opencodez.1`. The release tag and embedded binary version must
 match exactly.
 
 ## System Prompt Library
@@ -56,9 +56,11 @@ in:
 ~/.config/opencodez/prompts/core/<name>.md
 ```
 
-Bundled files are copied only when missing, so user edits are preserved. The
-selector combines bundled Codex prompts, upstream OpenCode built-ins, and custom
-files from this directory.
+Bundled prompts are embedded in the binary. The selector combines them with
+upstream OpenCode built-ins and custom files from this directory, using
+user file > OpenCodez bundled > OpenCode builtin precedence. During migration
+from the retired copy-once delivery mechanism, OpenCodez removes only files that
+still match an old bundled content hash exactly. Edited files remain overrides.
 
 The same System selector is available in both generations of the Web/Desktop
 prompt composer. New sessions carry the selected prompt in submission metadata;
@@ -86,12 +88,15 @@ codex_gpt_5_4_mini
 codex_gpt_5_5
 codex_gpt_5_6_luna_terra
 codex_gpt_5_6_sol
+codex_gpt_6_astra
 ```
 
-The GPT 5.5, GPT 5.6 Luna/Terra, and GPT 5.6 Sol prompts come from the official
-Codex `rust-v0.144.1` model catalog. Luna and Terra share one prompt. Sol has a
-separate prompt. The official GPT 5.6 Personality sections remain embedded in
-their System prompts.
+The current Codex-derived prompts are pinned to stable Codex `rust-v0.153.4`.
+Luna, Terra, and Sol now share the same upstream prompt while retaining both
+legacy selector names. The Astra prompt follows the same catalog template with
+only unavailable Codex-product contracts removed or renamed for OpenCodez tools.
+`codex_gpt_5_3_codex` remains a legacy compatibility prompt because the current
+Codex catalog no longer publishes that model asset.
 
 ## Model Defaults
 
@@ -109,6 +114,7 @@ gpt-5.5 -> codex_gpt_5_5
 gpt-5.6-luna -> codex_gpt_5_6_luna_terra
 gpt-5.6-terra -> codex_gpt_5_6_luna_terra
 gpt-5.6-sol -> codex_gpt_5_6_sol
+gpt-6-astra -> codex_gpt_6_astra
 ```
 
 Users can override defaults in `~/.config/opencodez/opencode.jsonc`:
@@ -118,6 +124,7 @@ Users can override defaults in `~/.config/opencodez/opencode.jsonc`:
   "opencodez": {
     "responses": {
       "wire": "codex",
+      "context_window": 872000,
       "compaction": {
         "threshold": 0.9,
         "token_limit": 300000,
@@ -135,8 +142,8 @@ Users can override defaults in `~/.config/opencodez/opencode.jsonc`:
 
 ## Responses Wire Mode
 
-ChatGPT OAuth sessions can use the stateful Responses WebSocket protocol from
-Codex `rust-v0.146.0`. The first request in a fresh transport chain sends the
+ChatGPT OAuth sessions can use the stateful Responses WebSocket protocol aligned
+with Codex `rust-v0.153.4`. The first request in a fresh transport chain sends the
 full conversation. Later compatible requests send only new input items together
 with `previous_response_id` when the conversation prefix and model settings
 still match. This continuation can cross a logical user-turn boundary, while
@@ -166,12 +173,16 @@ uses known fallback profiles for one minute instead of blocking model access;
 an uncached failure applies that fallback only to its current request.
 
 When a model advertises Responses Lite, OpenCodez applies the Codex Lite shape at
-the authenticated fetch boundary. Tools become an `additional_tools` developer
+the authenticated fetch boundary. Ordinary functions and custom tools are
+grouped into the `functions` namespace inside an `additional_tools` developer
 item, base instructions become a developer message, top-level instructions are
 empty, parallel tool calls are disabled, reasoning context is `all_turns`, and
-image `detail` fields are removed. HTTP carries the Lite header and WebSocket
-requests carry the matching client-metadata marker. Legacy wire mode bypasses
-this transformation.
+image `detail` fields are removed. The two synthetic prefix items use stable
+thread-scoped UUIDv5 identifiers derived from their visible payload, preserving
+identity across retries and resume without persistent state. HTTP carries the
+Lite header and WebSocket requests carry the matching client-metadata marker.
+Both transports receive `x-codex-routing-hint` with the model and optional
+service tier. Legacy wire mode bypasses this transformation.
 
 Fast aliases supplied by the model catalog keep the base model id and use
 `service_tier: "priority"`. ChatGPT's Codex backend also requires the Codex
@@ -200,7 +211,9 @@ and returns it in subsequent sampling and remote-compaction requests. Bun's
 client exposes neither rejected-upgrade status nor headers, so standalone
 binaries switch an opaque non-101 handshake directly to HTTP for that request
 and wait one minute before probing WebSocket again. Exact 426 responses and a
-fully exhausted WebSocket retry cycle remain session-sticky HTTP fallbacks. This
+WebSocket close code 1009 and a fully exhausted retry cycle remain session-sticky
+HTTP fallbacks. A 1009 switches the current request immediately instead of
+spending the remaining WebSocket retry budget. This
 keeps transient authentication and server failures recoverable without adding a
 second socket stack or repeatedly probing an unsupported endpoint. The
 logical turn ID survives synthetic compaction markers and is intentionally
@@ -281,7 +294,7 @@ Automatic and manual compaction use Codex Remote Compaction V2 for ChatGPT
 OAuth. OpenCodez sends a normal streamed `/responses` request through the same
 transport as sampling and appends exactly one `compaction_trigger` input item.
 The server must complete the stream with exactly one opaque compaction item.
-This is the default ChatGPT wire implementation in Codex `rust-v0.146.0`; the
+This is the default ChatGPT wire implementation in Codex `rust-v0.153.4`; the
 public [OpenAI compaction guide](https://developers.openai.com/api/docs/guides/compaction)
 documents the related public API through `context_management` and standalone
 `/responses/compact`, not this Codex-specific trigger. OpenCodez does not ask the
@@ -356,8 +369,8 @@ conservative 10,000-patch maximum. Only when the payload would exceed the
 Codex-safe request window does OpenCodez replace older tool outputs across the
 request with a bounded marker. The authenticated Codex model catalog supplies
 the current context and automatic compaction limit. Its fallback profiles mirror
-Codex `rust-v0.146.0` with a `272000` context and a 90% trigger, so Luna, Terra,
-and Sol use `244800` while the remote catalog is temporarily unavailable. Only
+Codex `rust-v0.153.4` with a `272000` context and a 90% trigger, so Luna, Terra,
+Sol, and Astra use `244800` while the remote catalog is temporarily unavailable. Only
 verbatim tool outputs receive a second conservative estimate because Codex caps
 them on insertion while OpenCode preserves them durably. Ordinary text is not
 globally doubled and can use the full safe window. Every tool result in the
@@ -415,6 +428,19 @@ a successful compaction.
 
 #### Compaction Policy
 
+`opencodez.responses.context_window` optionally requests a positive ChatGPT
+OAuth working window. OpenCodez applies it only through the authenticated model
+profile and clamps it to that profile's `max_context_window`; a model with no
+larger advertised ceiling cannot be enlarged. The effective value is frozen in
+the existing turn journal, so config or catalog changes cannot alter a running
+tool loop.
+
+GPT-6 Astra exposes a 1,050,000-token API context and 128,000-token maximum
+output. Codex defaults its working context to `272000` and currently permits a
+config override up to `872000`; OpenAI long-context pricing begins above 272,000
+input tokens. OpenCodez follows those defaults. At `872000`, the default 90%
+automatic-compaction trigger becomes `784800`.
+
 `opencodez.responses.compaction.threshold` controls the fraction of the
 Codex-safe ChatGPT Responses context at which compaction runs. That context is
 the smaller of the provider input limit and the authenticated model catalog's
@@ -430,7 +456,7 @@ is:
 min(min(provider_input_window, catalog_context) * threshold, token_limit when set, usable_input_limit)
 ```
 
-For the fallback Luna, Terra, and Sol profiles, the default trigger is `244800`
+For the fallback Luna, Terra, Sol, and Astra profiles, the default trigger is `244800`
 tokens. Setting `threshold` to `0.8` moves it to `217600`; setting `token_limit`
 to `200000` lowers it further to `200000`.
 
@@ -444,9 +470,10 @@ approximation would make compaction timing unstable.
 The fork-specific implementation stays inside the existing OpenAI plugin and
 OpenCodez config boundary:
 
-- `packages/core/src/v1/config/opencodez.ts` defines the public wire and
-  compaction policy, while `packages/core/src/opencodez/settings.ts` owns the
-  `codex` and 90% defaults without embedding live model metadata.
+- `packages/core/src/v1/config/opencodez.ts` defines the public wire,
+  context-window request, and compaction policy, while
+  `packages/core/src/opencodez/settings.ts` owns the `codex` and 90% defaults
+  without embedding live model metadata.
 - `packages/opencode/src/plugin/openai/codex.ts` enables the mode only when a
   request-scoped capability marker confirms ChatGPT OAuth and the official
   OpenAI adapter. It consumes that marker, supplies the Codex product originator
@@ -465,10 +492,12 @@ OpenCodez config boundary:
 - `catalog.ts` owns an eight-account least-recently-used catalog map. Each
   account has an independent five-minute cache, in-flight refresh, and short
   scheduling barrier for upgrade-header ETags; a missing verified identity uses
-  an uncached request and cannot create reusable state.
+  an uncached request and cannot create reusable state. It also owns the
+  per-profile `max_context_window` clamp and derives the 90% compaction limit
+  when a supported model accepts a configured working window.
 - `request.ts` is the single raw request boundary for metadata, Responses Lite
-  shaping, persisted-state injection, and removal of the internal continuation
-  marker.
+  shaping, deterministic Lite prefix identifiers, routing hints,
+  persisted-state injection, and removal of the internal continuation marker.
 - `continuation.ts` owns prefix matching, response item normalization,
   `previous_response_id`, and continuation invalidation. Continuation is reused
   across compatible requests and logical user turns; the sticky routing token
