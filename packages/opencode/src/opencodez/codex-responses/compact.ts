@@ -258,8 +258,19 @@ export function estimateInput(value: unknown) {
       return
     }
     if (!isRecord(item)) return
-    if (item.type === "input_image" && typeof item.image_url === "string") {
-      const payload = inlineImagePayload(item.image_url)
+    // Tool-result preflight sees the persisted SessionV1 FilePart before the
+    // provider lowers it to an input_image. Treat both forms as the same media.
+    const imageURL =
+      item.type === "input_image" && typeof item.image_url === "string"
+        ? item.image_url
+        : item.type === "file" &&
+            typeof item.mime === "string" &&
+            item.mime.startsWith("image/") &&
+            typeof item.url === "string"
+          ? item.url
+          : undefined
+    if (imageURL) {
+      const payload = inlineImagePayload(imageURL)
       if (payload) {
         estimate =
           Math.max(0, estimate - estimateText(payload)) +

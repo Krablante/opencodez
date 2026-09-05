@@ -348,7 +348,11 @@ treated as mid-turn and is included rather than discarded. Before a follow-up
 request, OpenCodez also adds newly completed tool-output size to the provider's
 last usage. A large result can therefore start mid-turn compaction before the
 provider rejects the next request; if rejection still occurs, the durable
-assistant/tool progress keeps recovery in the same mid-turn phase.
+assistant/tool progress keeps recovery in the same mid-turn phase. This
+preflight recognizes both persisted OpenCode `FilePart` image attachments and
+their lowered Responses `input_image` form. Inline image data therefore uses the
+same media estimate at both boundaries instead of being counted as base64 text
+before provider lowering.
 
 The active runner freezes the prepared effective System, transformed options,
 and model-visible tool schemas used for sampling, then reuses that snapshot for

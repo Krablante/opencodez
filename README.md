@@ -304,9 +304,11 @@ crossing the threshold. Compact requests use the same effective System and tool
 schemas as sampling; steering input waits until the mandatory post-compact
 continuation even when provider-side overflow recovery follows a rejected
 request. Inline images use model-visible token estimates rather than their
-base64 text size. If the complete compact payload is still too large, older tool
-outputs are bounded across the request while images from the complete active
-parallel-tool batch are preserved.
+base64 text size. The same estimate applies to newly completed tool attachments
+before provider lowering, so a native image result cannot trigger mid-turn
+compaction merely because its data URL is large. If the complete compact payload
+is still too large, older tool outputs are bounded across the request while
+images from the complete active parallel-tool batch are preserved.
 Only verbatim tool output receives an additional estimation margin; ordinary
 text is not globally double-counted, and `detail: "original"` images use a safe
 10,000-token maximum. When the backend does not include retained encrypted
