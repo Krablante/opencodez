@@ -29,7 +29,7 @@ OpenCodez is for people who want OpenCode to stay OpenCode, but with flexible pr
 | -------------- | ------------------------------------------------------------------------------------------------------------- |
 | Prompt control | TUI command and web composer control for the active System prompt.                                            |
 | Prompt library | Upstream built-ins, bundled Codex presets, and user prompt files in one shared selector.                      |
-| Model defaults | Configurable System defaults, with Codex-style defaults for OpenAI Responses GPT models out of the box.       |
+| Model defaults | Configurable System and context-window defaults for supported OpenAI Responses GPT models.                    |
 | Session state  | A manual System choice stays with the session and does not reset on `/model`.                                 |
 | Responses wire | ChatGPT OAuth can send incremental Codex-style WebSocket requests instead of resending the full conversation. |
 | Updates        | `opencodez update` uses GitHub Releases.                                                                      |
@@ -48,10 +48,14 @@ OpenCodez keeps the normal OpenCode shape, but adds a few practical controls:
 - The TUI shows the concrete active System prompt id while you work.
 - ChatGPT OAuth can use Codex-compatible stateful Responses WebSocket requests with safe full-request fallback.
 - ChatGPT OAuth uses server-side Responses compaction for long sessions and persists the opaque compacted context across restart and reconnect.
+- GPT-6 Astra uses a 272k working window by default and supports an explicit ChatGPT context-window override up to its advertised 872k client ceiling.
 - Non-git projects stay scoped to the selected directory, explicit filesystem
   roots clamp to `$HOME`, and background file indexing is disabled by default.
 - `opencodez update` prints GitHub release, download progress, and install
   stages instead of staying silent during large asset downloads.
+- Web image and file attachments work on ordinary LAN HTTP origins as well as
+  secure origins; clipboard, drag-and-drop, and file-picker input share the same
+  persisted browser draft store.
 
 OpenCodez is meant to be a small fork, not a full rebrand. Upstream internals, docs, workflows, integrations, and package surfaces should stay as close to OpenCode as practical unless a fork-specific change is genuinely needed.
 
@@ -70,7 +74,7 @@ OpenCodez installs from GitHub Releases. It does not publish to npm and does not
 Linux and macOS install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install | bash
 ```
 
 Windows PowerShell install:
@@ -91,7 +95,19 @@ Check for updates without installing:
 opencodez update --check
 ```
 
-The update path is intentionally simple: GitHub Releases are the source of truth, the installer downloads the right release artifact for the current OS and architecture, and `opencodez update` uses the same release channel from inside the app.
+The update path is intentionally simple: GitHub Releases are the source of truth,
+the installer chooses the compatible OS, architecture, libc, and x64 CPU
+baseline artifact, and `opencodez update` uses the same release channel from
+inside the app. A production binary remembers its exact build target, so
+self-update preserves `baseline` and `musl` instead of silently switching binary
+flavor. On an older binary without that marker, update detects the host
+conservatively.
+
+Both installers and self-update run the downloaded binary before replacement.
+The reported version must match the release exactly and must have the production
+form `X.Y.Z+opencodez.N`; `dev`, preview, beta, branch, and plain upstream
+versions are rejected. `install.sh` remains a small compatibility redirect to
+the canonical `install` script and contains no separate platform logic.
 During the download, `opencodez update` prints progress to stderr. When GitHub
 provides `Content-Length`, progress includes total MB and percent; otherwise it
 prints downloaded MB only.
@@ -99,10 +115,6 @@ On Unix, OpenCodez asks for `sudo` only when the installed binary is in a
 protected system path such as `/usr/local/bin`. Installations older than
 `1.17.20+opencodez.2` need one bootstrap update with `sudo opencodez update`;
 later releases handle the protected target automatically.
-Managed deployments may install the narrow `/usr/local/sbin/opencodez-install`
-helper. When present, `opencodez update` uses it non-interactively to replace
-only `/usr/local/bin/opencodez`; ordinary public installs keep the interactive
-sudo fallback.
 If the installed binary is newer than the latest published release, `opencodez update` treats it as current instead of downgrading it.
 
 ## Run From Source
@@ -116,11 +128,14 @@ For local development, run the source-checkout launcher directly:
 
 Production OpenCodez builds must explicitly set `OPENCODEZ_BUILD=1`,
 `OPENCODE_CHANNEL=latest`, and an `OPENCODE_VERSION` such as
-`1.18.18+opencodez.1`. The build rejects missing, preview-channel, plain
+`1.18.29+opencodez.1`. The build rejects missing, preview-channel, plain
 upstream-version, and other non-production OpenCodez metadata before generating
 an artifact. A valid build emits `opencodez-*` artifacts with an `opencodez`
 binary inside.
-Normal public releases should use the `publish` GitHub Actions workflow. Give it an OpenCodez release version such as `1.18.18+opencodez.1`; the release version must include `opencodez` so accidental upstream-looking tags are rejected. The workflow embeds that complete version by default, typechecks the fork boundary, verifies generated-client drift, builds the `opencodez-*` assets, verifies their names and archive contents, uploads them to GitHub Releases, and publishes the release unless `draft` is enabled.
+Development/source binaries are never valid install or deployment artifacts.
+Do not copy them into an executable path or use them for a canary; build an
+explicit production artifact first.
+Normal public releases should use the `publish` GitHub Actions workflow. Give it an OpenCodez release version such as `1.18.29+opencodez.1`; the release version must include `opencodez` so accidental upstream-looking tags are rejected. The workflow embeds that complete version by default, typechecks the fork boundary, verifies generated-client drift, builds the `opencodez-*` assets, verifies their names and archive contents, uploads them to GitHub Releases, and publishes the release unless `draft` is enabled.
 
 ## Side-by-Side With OpenCode
 
@@ -154,10 +169,14 @@ It covers System prompt defaults, Responses wire modes, config roots, session be
 Prompt library paths:
 
 ```text
-~/.config/opencodez/prompts/core/<name>.md
+~/.config/opencodez/prompts/core/<name>.md  # user overrides
 ```
 
-Bundled Codex-derived prompt files use the `codex_` prefix. User-created prompt files do not need that prefix.
+Bundled Codex-derived prompts are embedded in the binary and use the `codex_`
+prefix. A user file with the same name overrides its bundled prompt; user-created
+files do not need that prefix. On upgrade, OpenCodez removes only unchanged files
+created by the retired copy-once delivery mechanism, identified by their exact
+content hash. Edited files remain user overrides.
 
 Bundled Core/System prompts:
 
@@ -170,6 +189,7 @@ codex_gpt_5_4_mini
 codex_gpt_5_5
 codex_gpt_5_6_luna_terra
 codex_gpt_5_6_sol
+codex_gpt_6_astra
 ```
 
 Out-of-the-box OpenAI Responses GPT System defaults:
@@ -185,6 +205,7 @@ gpt-5.5 -> codex_gpt_5_5
 gpt-5.6-luna -> codex_gpt_5_6_luna_terra
 gpt-5.6-terra -> codex_gpt_5_6_luna_terra
 gpt-5.6-sol -> codex_gpt_5_6_sol
+gpt-6-astra -> codex_gpt_6_astra
 ```
 
 Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one prompt name for all models, or a mapping keyed by model id, family, `provider/model`, or `default`:
@@ -194,6 +215,7 @@ Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one p
   "opencodez": {
     "responses": {
       "wire": "codex",
+      "context_window": 872000,
       "compaction": {
         "threshold": 0.9,
         "token_limit": 300000,
@@ -233,11 +255,12 @@ adapters, and other providers bypass Codex request lowering and keep their
 existing behavior.
 
 OpenCodez reads ChatGPT model capabilities from the authenticated Codex model
-catalog and refreshes them on the catalog ETag. GPT-5.6 models that advertise
-Responses Lite receive the Codex Lite request shape: tools and base instructions
-move into developer input items, image `detail` hints are removed, reasoning
-context covers all turns, and both HTTP and WebSocket requests carry the Lite
-marker. A small built-in profile set keeps known models usable while the catalog
+catalog and refreshes them on the catalog ETag. GPT-5.6 and GPT-6 models that
+advertise Responses Lite receive the Codex Lite request shape: tools and base
+instructions move into deterministic developer input items, ordinary tools are
+grouped under the `functions` namespace, image `detail` hints are removed,
+reasoning context covers all turns, and HTTP and WebSocket requests carry the
+Lite marker and model/tier routing hint. A small built-in profile set keeps known models usable while the catalog
 is temporarily unavailable; it is a fallback, not the primary source of model
 context, automatic-compaction limits, `comp_hash`, or Lite support.
 
@@ -262,7 +285,7 @@ safely under the new account.
 An expired OAuth token gets one response-driven refresh and safe retry before any
 model output, provided the refreshed account identity still matches the request;
 an identity change fails the attempt so the next request starts from canonical
-session state. WebSocket upgrade status 426 switches that session to HTTP
+session state. WebSocket upgrade status 426 or close code 1009 switches that session to HTTP
 immediately. A runtime that cannot expose the rejected upgrade status uses HTTP
 for the current request and waits one minute before probing WebSocket again. If
 account identity cannot be verified, OpenCodez uses uncached HTTP and the current
@@ -295,9 +318,11 @@ crossing the threshold. Compact requests use the same effective System and tool
 schemas as sampling; steering input waits until the mandatory post-compact
 continuation even when provider-side overflow recovery follows a rejected
 request. Inline images use model-visible token estimates rather than their
-base64 text size. If the complete compact payload is still too large, older tool
-outputs are bounded across the request while images from the complete active
-parallel-tool batch are preserved.
+base64 text size. The same estimate applies to newly completed tool attachments
+before provider lowering, so a native image result cannot trigger mid-turn
+compaction merely because its data URL is large. If the complete compact payload
+is still too large, older tool outputs are bounded across the request while
+images from the complete active parallel-tool batch are preserved.
 Only verbatim tool output receives an additional estimation margin; ordinary
 text is not globally double-counted, and `detail: "original"` images use a safe
 10,000-token maximum. When the backend does not include retained encrypted
@@ -314,15 +339,24 @@ two retries on each transport, for at most six requests. Both honor a server
 `Retry-After` delay, remain cancellable with the session, and have no hidden
 retry multiplication; compaction still has no local-summary fallback.
 
+`opencodez.responses.context_window` is an optional positive integer requested
+for ChatGPT OAuth models. A model accepts the value only within its authenticated
+catalog profile and clamps it to `max_context_window`; models without a larger
+advertised ceiling cannot be enlarged. GPT-6 Astra has a 1,050,000-token API
+context, defaults to the Codex 272,000-token working window, and currently
+accepts an explicit override up to the Codex client ceiling of 872,000. Values
+above 272,000 may use OpenAI long-context pricing.
+
 `opencodez.responses.compaction.threshold` is a fraction of the model's input
 window and defaults to the Codex policy of `0.9`. It accepts values greater than
 `0` and no greater than `0.9`, so configuration can compact earlier but never
 later than the safe default. Optional `token_limit` adds an absolute positive
 token cap. The effective trigger is the minimum of the percentage limit, the
 absolute cap, OpenCode's usable-input limit, and the authenticated Codex model
-catalog. The built-in fallback profiles use the `272000` context advertised by
-Codex `rust-v0.146.0` for current Luna, Terra, and Sol models, producing a
-`244800` default trigger when the catalog is temporarily unavailable.
+catalog. The built-in fallback profiles mirror Codex `rust-v0.153.4`; Luna,
+Terra, Sol, and Astra default to a `272000` working context and a `244800`
+trigger. An Astra override of `872000` produces a `784800` trigger before any
+lower threshold or absolute cap is applied.
 
 ## Commands
 

@@ -108,7 +108,13 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   const hasRemoteCompaction = CodexResponsesCompaction.has(input.sessionMetadata)
   const profile =
     codexResponses || hasRemoteCompaction
-      ? (turnProfile ?? CodexResponsesCatalog.resolve(input.model, accountKey))
+      ? (turnProfile ??
+        CodexResponsesCatalog.resolve(
+          input.model,
+          accountKey,
+          undefined,
+          OpenCodezSettings.responsesContextWindow(input.config),
+        ))
       : undefined
   if (hasRemoteCompaction && !isOpenaiOauth) {
     return yield* Effect.fail(
@@ -124,20 +130,28 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   const compactionHandoff =
     isOpenaiOauth && !input.allowCompHashMismatch && CodexResponsesCompaction.handoff(input.sessionMetadata)
   const opencodezPrompts = OpenCodezIdentity.enabled
-    ? yield* Effect.promise(async () => {
-        const opencodez = OpenCodezSession.effective({
-          config: input.config,
-          model: input.model,
-          modelID: input.model.id,
-          sessionID: input.sessionID,
-          metadata: input.sessionMetadata,
-        })
-        return {
-          systemDisabled: opencodez.systemManual && !opencodez.system,
-          system: opencodez.system
-            ? await OpenCodezPromptLibrary.readPrompt(opencodez.system).catch(() => undefined)
-            : undefined,
-        }
+    ? yield* Effect.tryPromise({
+        try: async () => {
+          const opencodez = OpenCodezSession.effective({
+            config: input.config,
+            model: input.model,
+            modelID: input.model.id,
+            sessionID: input.sessionID,
+            metadata: input.sessionMetadata,
+          })
+          const system = opencodez.system ? await OpenCodezPromptLibrary.readPrompt(opencodez.system) : undefined
+          if (opencodez.system && system === undefined) {
+            throw new Error(`Selected System prompt is unavailable: ${opencodez.system}`)
+          }
+          return {
+            systemDisabled: opencodez.systemManual && !opencodez.system,
+            system,
+          }
+        },
+        catch: (error) =>
+          new Error(
+            `Unable to load the selected System prompt: ${error instanceof Error ? error.message : String(error)}`,
+          ),
       })
     : {
         systemDisabled: false,
@@ -319,9 +333,9 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
                   ),
                 }
               : {}),
-            ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
             "User-Agent": USER_AGENT,
           }),
+      ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
       ...input.model.headers,
       ...headers,
       ...(isOpenaiOauth ? { [CodexResponsesCapability.HEADER]: codexResponses ? "true" : "false" } : {}),

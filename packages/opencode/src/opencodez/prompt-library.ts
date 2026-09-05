@@ -2,11 +2,12 @@ export * as OpenCodezPromptLibrary from "./prompt-library"
 
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { Global } from "@opencode-ai/core/global"
-import { Filesystem } from "@/util/filesystem"
 import fs from "fs/promises"
 import path from "path"
 import { defaultPromptAssets } from "./default-prompts"
 import { SystemPrompt } from "@/session/system"
+
+let migration: { directory: string; promise: Promise<void> } | undefined
 
 export interface Entry {
   name: string
@@ -26,8 +27,15 @@ export function directories() {
 
 export async function ensureDefaults() {
   const dirs = directories()
-  await fs.mkdir(dirs.system, { recursive: true })
-  await copyMissing(dirs.system)
+  if (migration?.directory === dirs.system) return migration.promise
+  const promise = fs.mkdir(dirs.system, { recursive: true }).then(() => removeLegacyCopies(dirs.system))
+  migration = { directory: dirs.system, promise }
+  try {
+    await promise
+  } catch (error) {
+    if (migration?.promise === promise) migration = undefined
+    throw error
+  }
 }
 
 export async function list(): Promise<Entry[]> {
@@ -46,22 +54,39 @@ export async function list(): Promise<Entry[]> {
     ...item,
     source: "builtin" as const,
   }))
-  return Array.from(new Map([...builtin, ...library].map((item) => [item.name, item])).values()).sort((a, b) =>
-    a.name.localeCompare(b.name),
+  const bundled = Object.keys(defaultPromptAssets.core).map((file) => ({
+    name: path.basename(file, ext),
+    path: `bundled:${file}`,
+    source: "builtin" as const,
+  }))
+  return Array.from(new Map([...builtin, ...bundled, ...library].map((item) => [item.name, item])).values()).sort(
+    (a, b) => a.name.localeCompare(b.name),
   )
 }
 
 export async function get(name: string) {
-  const entry = (await list()).find((item) => item.name === name)
-  if (!entry) return
-  return entry
+  await ensureDefaults()
+  if (!validName(name)) return undefined
+  const library = path.join(directories().system, `${name}.md`)
+  if (await Bun.file(library).exists()) return { name, path: library, source: "library" as const }
+  if (`${name}.md` in defaultPromptAssets.core) {
+    return { name, path: `bundled:${name}.md`, source: "builtin" as const }
+  }
+  if (SystemPrompt.builtinPrompt(name) !== undefined)
+    return { name, path: `builtin:${name}`, source: "builtin" as const }
+  return undefined
 }
 
 export async function readPrompt(name: string) {
   const entry = await get(name)
-  if (!entry) return
-  if (entry.source === "builtin") return SystemPrompt.builtinPrompt(name)
-  return Bun.file(entry.path).text()
+  if (!entry) return undefined
+  if (entry.source === "library") return Bun.file(entry.path).text()
+  const bundled = (defaultPromptAssets.core as Record<string, string>)[`${name}.md`]
+  return bundled ?? SystemPrompt.builtinPrompt(name)
+}
+
+function validName(name: string) {
+  return name.length > 0 && name !== "." && name !== ".." && path.basename(name) === name
 }
 
 export function helpText() {
@@ -79,13 +104,35 @@ export function helpText() {
   ].join("\n")
 }
 
-async function copyMissing(targetDir: string) {
-  const files = Object.entries(defaultPromptAssets.core)
+const legacyHashes: Record<string, string> = {
+  "codex_gpt_5_2.md": "c9b2fa097ac69cae82c3d2ae12271083890a96521c55ad8dc14cae5168ad3f39",
+  "codex_gpt_5_2_codex.md": "a8b5587d46c06d2748b935d48c1b5a8b686429dda932f6280a4e291a792696c4",
+  "codex_gpt_5_3_codex.md": "77f4ad48f22cb727fc968fb64672334109bce8077d3662d5e0b45abf2669e78e",
+  "codex_gpt_5_4.md": "a3e62c34ca3d50e4e56be6574fa2ef7b7b2f3f80da245881bcaa130bb056bc59",
+  "codex_gpt_5_4_mini.md": "1d4d6bd1590a85b53efe59e511db8be839905a95786689f8db9c0b0b284aa39b",
+  "codex_gpt_5_5.md": "f58a70533110f7272227c73b8fe26ddec9b315a5cce7e2964b216b6de074e362",
+  "codex_gpt_5_6_luna_terra.md": "3aeec1d261e8f8345f8243b233a17f95fa7a6d0f7e6693f3cede952481cafab6",
+  "codex_gpt_5_6_sol.md": "556d9e9c911b0c53081acabc92d3cc285dc64e230213cc60d49f15056881ebe2",
+}
+
+async function removeLegacyCopies(targetDir: string) {
+  const files = await fs.readdir(targetDir).catch(() => [])
   await Promise.all(
-    files.map(async ([file, content]) => {
+    files.flatMap((file) => {
+      const expected = legacyHashes[file]
+      if (!expected) return []
       const target = path.join(targetDir, file)
-      if (await Filesystem.exists(target)) return
-      await fs.writeFile(target, content)
+      return [
+        fs
+          .readFile(target)
+          .then(async (content) => {
+            const actual = new Bun.CryptoHasher("sha256").update(content).digest("hex")
+            if (actual === expected) await fs.unlink(target)
+          })
+          .catch((error: NodeJS.ErrnoException) => {
+            if (error.code !== "ENOENT") throw error
+          }),
+      ]
     }),
   )
 }

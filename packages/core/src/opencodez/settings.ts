@@ -5,6 +5,7 @@ export type ConfigLike = Record<string, unknown> & {
     responses?: {
       system?: string | Record<string, string>
       wire?: "legacy" | "codex"
+      context_window?: number
       compaction?: {
         threshold?: number
         token_limit?: number
@@ -27,7 +28,7 @@ export type ModelLike =
 
 export const defaults = {
   compaction: {
-    // Codex rust-v0.146.0 advertises a 272k context window for the ChatGPT
+    // Codex rust-v0.153.4 defaults to a 272k working window for the ChatGPT
     // Responses models even when the general provider catalog is larger.
     context: 272_000,
     threshold: 0.9,
@@ -44,6 +45,7 @@ export const defaults = {
     "gpt-5.6-luna": "codex_gpt_5_6_luna_terra",
     "gpt-5.6-terra": "codex_gpt_5_6_luna_terra",
     "gpt-5.6-sol": "codex_gpt_5_6_sol",
+    "gpt-6-astra": "codex_gpt_6_astra",
   },
 }
 
@@ -57,6 +59,10 @@ export function defaultSystem(config: ConfigLike | undefined, model: ModelLike |
 
 export function responsesWire(config: ConfigLike | undefined) {
   return config?.opencodez?.responses?.wire ?? "codex"
+}
+
+export function responsesContextWindow(config: ConfigLike | undefined) {
+  return config?.opencodez?.responses?.context_window
 }
 
 export function responsesCompaction(config: ConfigLike | undefined) {

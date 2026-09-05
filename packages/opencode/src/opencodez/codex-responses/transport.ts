@@ -201,11 +201,12 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
           }
           invalidate(entry)
         },
-        onConnectionInvalid: () => {
+        onConnectionInvalid: (_error, closeCode) => {
           transaction?.fail()
           entry.busy = false
           entry.lastUsedAt = Date.now()
-          if (!entry.fallback) recordStreamFailure(entry, requestStreamRetries)
+          if (closeCode === OpenAIWebSocket.MESSAGE_TOO_BIG_CLOSE_CODE) entry.fallback = true
+          else if (!entry.fallback) recordStreamFailure(entry, requestStreamRetries)
           invalidate(entry)
           resolveFirstEvent(false)
         },
@@ -269,7 +270,8 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
           headers: { "content-type": "application/json", ...first.headers },
         })
       }
-      return response
+      if (!entry.fallback) return response
+      return fallbackFetch(httpFetch, input, httpInit, entry, turnID, options?.wire === "codex")
     } catch (error) {
       entry.busy = false
       entry.lastUsedAt = Date.now()

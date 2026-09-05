@@ -142,16 +142,16 @@ const targets = singleFlag
         return false
       }
 
+      // A single native build uses the host ABI. ABI-specific artifacts are
+      // produced only by the complete release matrix.
+      if (item.abi !== undefined) return false
+
       // When building for the current platform, prefer a single native binary by default.
       // Baseline binaries require additional Bun artifacts and can be flaky to download.
       if (item.avx2 === false) {
         return baselineFlag
       }
-
-      // also skip abi-specific builds for the same reason
-      if (item.abi !== undefined) {
-        return false
-      }
+      if (baselineFlag && item.arch === "x64") return false
 
       return true
     })
@@ -222,6 +222,7 @@ for (const item of targets) {
       OPENCODE_WORKER_PATH: workerPath,
       OPENCODE_CHANNEL: `'${Script.channel}'`,
       OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
+      OPENCODEZ_TARGET: `'${name.replace(`${artifactName}-`, "")}'`,
       ...(item.os === "linux" ? { "process.env.OPENTUI_LIBC": JSON.stringify(item.abi ?? "glibc") } : {}),
     },
   })

@@ -2,6 +2,7 @@ import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import { createMemo, For, type Accessor } from "solid-js"
 import { DEFAULT_THEMES, useTheme } from "../../context/theme"
 import { useCommandShortcut } from "../../keymap"
+import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 
 const themeCount = Object.keys(DEFAULT_THEMES).length
 
@@ -211,7 +212,7 @@ const TIPS: Tip[] = [
     return `Use ${items.map(shortcutText).join(" / ")} for parent/child sessions`
   },
   "Create {highlight}opencode.json{/highlight} for server settings, and {highlight}tui.json{/highlight} for TUI",
-  "Place TUI settings in {highlight}~/.config/opencode/tui.json{/highlight} for global config",
+  `Place TUI settings in {highlight}${OpenCodezIdentity.globalConfigDirectory}/tui.json{/highlight} for global config`,
   "Add {highlight}$schema{/highlight} to your config for autocomplete in your editor",
   "Configure {highlight}model{/highlight} in config to set your default model",
   "Override any keybind in {highlight}tui.json{/highlight} via the {highlight}keybinds{/highlight} section",
@@ -233,18 +234,18 @@ const TIPS: Tip[] = [
   "Tool definitions can invoke scripts written in Python, Go, etc",
   "Add {highlight}.ts{/highlight} files to {highlight}.opencode/plugins/{/highlight} for event hooks",
   "Use plugins to send OS notifications when sessions complete",
-  "Create a plugin to prevent OpenCode from reading sensitive files",
-  "Use {highlight}opencode run{/highlight} for non-interactive scripting",
-  "Use {highlight}opencode --continue{/highlight} to resume the last session",
-  "Use {highlight}opencode run -f file.ts{/highlight} to attach files via CLI",
+  `Create a plugin to prevent ${OpenCodezIdentity.productName} from reading sensitive files`,
+  `Use {highlight}${OpenCodezIdentity.cliName} run{/highlight} for non-interactive scripting`,
+  `Use {highlight}${OpenCodezIdentity.cliName} --continue{/highlight} to resume the last session`,
+  `Use {highlight}${OpenCodezIdentity.cliName} run -f file.ts{/highlight} to attach files via CLI`,
   "Use {highlight}--format json{/highlight} for machine-readable output in scripts",
-  "Run {highlight}opencode serve{/highlight} for headless API access to OpenCode",
-  "Use {highlight}opencode run --attach{/highlight} to connect to a running server",
-  "Run {highlight}opencode upgrade{/highlight} to update to the latest version",
-  "Run {highlight}opencode auth list{/highlight} to see all configured providers",
-  "Run {highlight}opencode agent create{/highlight} for guided agent creation",
+  `Run {highlight}${OpenCodezIdentity.cliName} serve{/highlight} for headless API access to ${OpenCodezIdentity.productName}`,
+  `Use {highlight}${OpenCodezIdentity.cliName} run --attach{/highlight} to connect to a running server`,
+  `Run {highlight}${OpenCodezIdentity.cliName} update{/highlight} to update to the latest version`,
+  `Run {highlight}${OpenCodezIdentity.cliName} auth list{/highlight} to see all configured providers`,
+  `Run {highlight}${OpenCodezIdentity.cliName} agent create{/highlight} for guided agent creation`,
   "Use {highlight}/opencode{/highlight} in GitHub issues/PRs to trigger AI actions",
-  "Run {highlight}opencode github install{/highlight} to set up the GitHub workflow",
+  `Run {highlight}${OpenCodezIdentity.cliName} github install{/highlight} to set up the GitHub workflow`,
   "Comment {highlight}/opencode fix this{/highlight} on issues to auto-create PRs",
   "Comment {highlight}/oc{/highlight} on PR code lines for targeted code reviews",
   'Use {highlight}"theme": "system"{/highlight} to match your terminal\'s colors',
@@ -264,7 +265,7 @@ const TIPS: Tip[] = [
   "Run {highlight}/unshare{/highlight} to remove a session from public access",
   "Permission {highlight}doom_loop{/highlight} prevents infinite tool call loops",
   "Permission {highlight}external_directory{/highlight} protects files outside project",
-  "Run {highlight}opencode debug config{/highlight} to troubleshoot configuration",
+  `Run {highlight}${OpenCodezIdentity.cliName} debug config{/highlight} to troubleshoot configuration`,
   "Use {highlight}--print-logs{/highlight} flag to see detailed logs in stderr",
   (shortcuts) => `Use ${commandText("/timeline", shortcuts.sessionTimeline())} to jump to specific messages`,
   (shortcuts) => press(shortcuts.messagesToggleConceal(), "to toggle code block visibility in messages"),

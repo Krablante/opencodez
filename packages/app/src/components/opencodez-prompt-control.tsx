@@ -5,6 +5,7 @@ import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
+import { showToast } from "@/utils/toast"
 
 type Options = {
   sessionID: Accessor<string | undefined>
@@ -47,6 +48,7 @@ export function createOpenCodezPromptControl(options: Options): {
   let trigger: HTMLButtonElement | undefined
   let menu: HTMLDivElement | undefined
   let request = 0
+  let refreshError: string | undefined
 
   const refresh = async () => {
     const current = ++request
@@ -57,11 +59,20 @@ export function createOpenCodezPromptControl(options: Options): {
         metadata: sessionID ? undefined : state.metadata,
         model: options.model(),
       })
-      .then((value) => value.data ?? undefined)
-      .catch(() => undefined)
-    if (!result || current !== request) return
-    setState("prompt", result.state)
-    if (!sessionID) setState("metadata", result.metadata)
+      .then((value) => ({ data: value.data ?? undefined }))
+      .catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }))
+    if (current !== request) return
+    if ("error" in result || !result.data) {
+      const description = "error" in result ? result.error : language.t("common.requestFailed")
+      setState("error", description)
+      if (refreshError !== description) showToast({ title: language.t("common.requestFailed"), description })
+      refreshError = description
+      return
+    }
+    refreshError = undefined
+    setState("error", undefined)
+    setState("prompt", result.data.state)
+    if (!sessionID) setState("metadata", result.data.metadata)
   }
 
   createEffect(
@@ -91,14 +102,16 @@ export function createOpenCodezPromptControl(options: Options): {
     setState({ loading: true, error: undefined })
     const entries = await sdk()
       .client.opencodez.prompt.list()
-      .then((value) => value.data ?? undefined)
-      .catch(() => undefined)
+      .then((value) => ({ data: value.data ?? undefined }))
+      .catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }))
     setState("loading", false)
-    if (!entries) {
-      setState("error", language.t("common.requestFailed"))
+    if ("error" in entries || !entries.data) {
+      const description = "error" in entries ? entries.error : language.t("common.requestFailed")
+      setState("error", description)
+      showToast({ title: language.t("common.requestFailed"), description })
       return
     }
-    setState({ entries, loaded: true })
+    setState({ entries: entries.data, loaded: true })
   }
 
   const position = () => {
@@ -160,11 +173,16 @@ export function createOpenCodezPromptControl(options: Options): {
         model: options.model(),
         name,
       })
-      .then((value) => value.data ?? undefined)
-      .catch(() => undefined)
-    if (!result) return
-    setState("prompt", result.state)
-    if (!sessionID) setState("metadata", result.metadata)
+      .then((value) => ({ data: value.data ?? undefined }))
+      .catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }))
+    if ("error" in result || !result.data) {
+      const description = "error" in result ? result.error : language.t("common.requestFailed")
+      showToast({ title: language.t("common.requestFailed"), description })
+      await refresh()
+      return
+    }
+    setState("prompt", result.data.state)
+    if (!sessionID) setState("metadata", result.data.metadata)
     setOpen(false)
   }
 

@@ -5,9 +5,9 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { Installation } from "@/installation"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import { Effect, Queue, Schema } from "effect"
+import { Effect, Queue } from "effect"
 import * as Stream from "effect/Stream"
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
@@ -20,14 +20,6 @@ function eventData(data: unknown): Sse.Event {
     event: "message",
     id: undefined,
     data: JSON.stringify(data),
-  }
-}
-
-function parseBody(body: string) {
-  try {
-    return JSON.parse(body || "{}") as unknown
-  } catch {
-    return undefined
   }
 }
 
@@ -97,35 +89,32 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
 
     const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {
       if (OpenCodezIdentity.enabled) {
-        return {
-          status: 400,
-          body: {
+        return HttpServerResponse.jsonUnsafe(
+          {
             success: false as const,
             error: "OpenCodez uses GitHub Releases for updates. Run `opencodez update` or `opencodez update --check`.",
           },
-        }
+          { status: 400 },
+        )
       }
       const method = yield* installation.method()
       if (method === "unknown") {
-        return {
-          status: 400,
-          body: { success: false as const, error: "Unknown installation method" },
-        }
+        return HttpServerResponse.jsonUnsafe(
+          { success: false as const, error: "Unknown installation method" },
+          { status: 400 },
+        )
       }
-      const target = ctx.payload.target || (yield* installation.latest(method))
+      const target = ctx.payload.target
       const result = yield* installation.upgrade(method, target).pipe(
-        Effect.as({ status: 200, body: { success: true as const, version: target } }),
+        Effect.as({ success: true as const, version: target }),
         Effect.catch((err) =>
           Effect.succeed({
-            status: 500,
-            body: {
-              success: false as const,
-              error: err instanceof Error ? err.message : String(err),
-            },
+            success: false as const,
+            error: err instanceof Error ? err.message : String(err),
           }),
         ),
       )
-      if (!result.body.success) return result
+      if (!result.success) return HttpServerResponse.jsonUnsafe(result, { status: 500 })
       GlobalBus.emit("event", {
         directory: "global",
         payload: {
@@ -133,26 +122,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
           properties: { version: target },
         },
       })
-      return result
-    })
-
-    const upgradeRaw = Effect.fn("GlobalHttpApi.upgradeRaw")(function* (ctx: {
-      request: HttpServerRequest.HttpServerRequest
-    }) {
-      const body = yield* Effect.orDie(ctx.request.text)
-      const json = parseBody(body)
-      if (json === undefined) {
-        return HttpServerResponse.jsonUnsafe({ success: false, error: "Invalid request body" }, { status: 400 })
-      }
-      const payload = yield* Schema.decodeUnknownEffect(GlobalUpgradeInput)(json).pipe(
-        Effect.map((payload) => ({ valid: true as const, payload })),
-        Effect.catch(() => Effect.succeed({ valid: false as const })),
-      )
-      if (!payload.valid) {
-        return HttpServerResponse.jsonUnsafe({ success: false, error: "Invalid request body" }, { status: 400 })
-      }
-      const result = yield* upgrade({ payload: payload.payload })
-      return HttpServerResponse.jsonUnsafe(result.body, { status: result.status })
+      return HttpServerResponse.jsonUnsafe(result)
     })
 
     return handlers
@@ -161,6 +131,6 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("configGet", configGet)
       .handle("configUpdate", configUpdate)
       .handle("dispose", dispose)
-      .handleRaw("upgrade", upgradeRaw)
+      .handle("upgrade", upgrade)
   }),
 )

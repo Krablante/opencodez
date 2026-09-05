@@ -12,6 +12,7 @@ export type PersistedState = {
 }
 
 const metadataKey = "opencodez"
+const selectionLimit = 256
 const selections = new Map<string, Selection>()
 const listeners = new Set<() => void>()
 let pendingSelection: Selection = {}
@@ -42,7 +43,7 @@ export function pending() {
 
 export function consumePending(sessionID: string) {
   if (Object.keys(pendingSelection).length === 0) return
-  selections.set(sessionID, { ...pendingSelection })
+  cacheSelection(sessionID, { ...pendingSelection })
   pendingSelection = {}
   notify()
 }
@@ -53,7 +54,7 @@ export function apply(sessionID: string | undefined, selection: Selection, metad
     notify()
     return
   }
-  selections.set(sessionID, merge(selectionForSession(sessionID, metadata), selection))
+  cacheSelection(sessionID, merge(selectionForSession(sessionID, metadata), selection))
   notify()
 }
 
@@ -107,13 +108,21 @@ export function indicatorFromMetadata(input: {
 
 export function hydrate(sessionID: string | undefined, metadata?: Record<string, unknown>) {
   if (!sessionID) return
-  const state = fromMetadata(metadata)
-  let changed = false
-  if (state.selection && !sameSelection(selections.get(sessionID), state.selection)) {
-    selections.set(sessionID, state.selection)
-    changed = true
+  const selection = fromMetadata(metadata).selection
+  if (!selection) {
+    if (selections.delete(sessionID)) notify()
+    return
   }
-  if (changed) notify()
+  if (sameSelection(selections.get(sessionID), selection)) {
+    cacheSelection(sessionID, selection)
+    return
+  }
+  cacheSelection(sessionID, selection)
+  notify()
+}
+
+export function clear(sessionID: string) {
+  if (selections.delete(sessionID)) notify()
 }
 
 export function pendingMetadata() {
@@ -125,7 +134,7 @@ export function pendingMetadata() {
 export function metadataWithSessionState(metadata: Record<string, unknown> | undefined, sessionID: string | undefined) {
   if (!sessionID) return metadata ?? {}
   return withState(metadata, {
-    selection: cleanSelection(selectionForSession(sessionID, metadata)),
+    selection: cleanSelection(selections.get(sessionID) ?? fromMetadata(metadata).selection ?? {}),
   })
 }
 
@@ -146,7 +155,7 @@ export function fromMetadata(metadata?: Record<string, unknown>): PersistedState
 }
 
 export function withState(metadata: Record<string, unknown> | undefined, state: PersistedState) {
-  const next = { ...(metadata ?? {}) }
+  const next = { ...metadata }
   const selection = cleanSelection(state.selection ?? {})
   const opencodez = {
     version: 1,
@@ -177,7 +186,21 @@ function effectiveForSelection(
 }
 
 function selectionForSession(sessionID: string, metadata?: Record<string, unknown>) {
-  return selections.get(sessionID) ?? fromMetadata(metadata).selection ?? {}
+  if (metadata !== undefined) return fromMetadata(metadata).selection ?? {}
+  const selection = selections.get(sessionID)
+  if (!selection) return {}
+  cacheSelection(sessionID, selection)
+  return selection
+}
+
+function cacheSelection(sessionID: string, selection: Selection) {
+  selections.delete(sessionID)
+  selections.set(sessionID, selection)
+  while (selections.size > selectionLimit) {
+    const oldest = selections.keys().next().value
+    if (oldest === undefined) return
+    selections.delete(oldest)
+  }
 }
 
 function upstreamSystemPromptID(model: OpenCodezSettings.ModelLike | undefined) {

@@ -47,8 +47,9 @@ The upstream full-request WebSocket transport is enabled by default on `local`,
 For ChatGPT OAuth, the fetch adapter preserves the established Codex product
 originator in both wire modes.
 Model-catalog Fast aliases already lower to the same base model with
-`service_tier: "priority"`; the product originator is the only additional
-routing requirement. API-key OpenAI requests do not pass through this adapter.
+`service_tier: "priority"`. Codex requests also carry an
+`x-codex-routing-hint` derived from the final API model and optional service
+tier. API-key OpenAI requests do not pass through this adapter.
 Alternate OpenAI model adapters can share OAuth but still fail closed into their
 unchanged request path because they cannot receive a true capability marker.
 
@@ -58,9 +59,11 @@ minutes or when a stream reports a new `x-models-etag`, with one deduplicated
 in-flight request and a short known-profile fallback. Responses Lite models move
 tools and instructions into developer input items, use `all_turns` reasoning
 context, strip image `detail`, and carry the required HTTP header or WebSocket
-metadata marker. Without verified identity, a request can use its fresh catalog
-response but does not add it to the reusable account cache. Legacy wire mode
-keeps the unmodified request shape.
+metadata marker. Direct function and custom tools are grouped under the
+reserved `functions` namespace, and developer instruction/tool items receive
+stable thread-scoped IDs. Without verified identity, a request can use its fresh
+catalog response but does not add it to the reusable account cache. Legacy wire
+mode keeps the unmodified request shape.
 
 The first request records a bounded turn profile containing account affinity,
 the base API model, context limits, `comp_hash`, and Responses Lite capability.
@@ -93,6 +96,8 @@ message starts a fresh lane while durable encrypted compaction remains portable.
 - `websocket_connection_limit_reached` consumes the same retry budget and HTTP fallback.
 - WebSocket upgrade status 426 selects sticky HTTP fallback immediately without
   spending the WebSocket retry budget.
+- WebSocket close code 1009 retries the current request over HTTP and selects
+  sticky HTTP for later requests in that session.
 - An opaque Bun upgrade rejection uses HTTP immediately but is not treated as a
   permanent 426; WebSocket becomes eligible again after the one-minute cooldown.
 - For a Codex-wire request, an HTTP or pre-output WebSocket 401 performs one
@@ -174,8 +179,12 @@ still have no local fallback.
 
 The default trigger is 90% of the Codex-safe ChatGPT Responses context from the
 authenticated model catalog, capped by the model and usable input limits. The
-fallback profiles mirror Codex `rust-v0.146.0` at `272000`, making their default
-trigger `244800` during a catalog outage.
+fallback profiles mirror Codex `rust-v0.153.4`. GPT-6 Astra defaults to a
+`272000` working window and accepts `opencodez.responses.context_window` up to
+its advertised `872000` client ceiling; its default trigger is `244800` and the
+largest configurable trigger is `784800`. The backend API advertises a larger
+maximum, but OpenCodez does not opt into long-context pricing automatically.
+Models without a larger `max_context_window` remain at their catalog default.
 `opencodez.responses.compaction.threshold` may lower that percentage and
 `token_limit` may add a lower absolute cap. Both settings affect only ChatGPT
 OAuth remote compaction; other providers continue to use upstream OpenCode

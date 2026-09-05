@@ -3,6 +3,7 @@ import { STATUS_CODES } from "http"
 import { iife } from "@/util/iife"
 import type { ProviderV2 } from "@opencode-ai/core/provider"
 import { isContextOverflow } from "@opencode-ai/llm"
+import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 
 export class HeaderTimeoutError extends Error {
   public override readonly name = "ProviderHeaderTimeoutError"
@@ -58,7 +59,7 @@ function message(providerID: ProviderV2.ID, e: APICallError) {
     // provide a human-readable message instead of dumping raw markup
     if (/^\s*<!doctype|^\s*<html/i.test(e.responseBody)) {
       if (e.statusCode === 401) {
-        return "Unauthorized: request was blocked by a gateway or proxy. Your authentication token may be missing or expired — try running `opencode auth login <your provider URL>` to re-authenticate."
+        return `Unauthorized: request was blocked by a gateway or proxy. Your authentication token may be missing or expired — try running \`${OpenCodezIdentity.cliName} auth login <your provider URL>\` to re-authenticate.`
       }
       if (e.statusCode === 403) {
         return "Forbidden: request was blocked by a gateway or proxy. You may not have permission to access this resource — check your account and provider settings."
@@ -143,6 +144,13 @@ export function parseStreamError(input: unknown): ParsedStreamError | undefined 
         isRetryable: true,
         responseBody,
       }
+  }
+
+  return {
+    type: "api_error",
+    message: typeof body?.error?.message === "string" ? body.error.message : "Server error.",
+    isRetryable: true,
+    responseBody,
   }
 }
 

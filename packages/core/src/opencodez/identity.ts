@@ -15,3 +15,5 @@ export const enabled =
 
 export const cliName = process.env["OPENCODE_CLI_NAME"] || (enabled ? "opencodez" : "opencode")
 export const appName = process.env["OPENCODE_APP_NAME"] || (enabled ? "opencodez" : "opencode")
+export const productName = enabled ? "OpenCodez" : "OpenCode"
+export const globalConfigDirectory = `~/.config/${appName}`

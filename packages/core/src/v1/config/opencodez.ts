@@ -19,6 +19,10 @@ export const Responses = Schema.Struct({
   wire: Schema.optional(Schema.Literals(["legacy", "codex"])).annotate({
     description: "ChatGPT OAuth Responses wire mode (default: codex)",
   }),
+  context_window: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))).annotate({
+    description:
+      "Requested ChatGPT OAuth working context window; supported models clamp it to their advertised maximum",
+  }),
   compaction: Schema.optional(Compaction).annotate({
     description: "ChatGPT OAuth server-side Responses compaction policy",
   }),

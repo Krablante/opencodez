@@ -1153,8 +1153,8 @@ const layer = Layer.effect(
             lastAssistant?.finish === "unknown"
               ? yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
               : undefined
-          const unknownNeedsFollowUp = unknownModel ? yield* isCodexResponses(unknownModel) : false
-          const modelNeedsFollowUp = hasToolCalls || lastAssistant?.finish === "tool-calls" || unknownNeedsFollowUp
+          const modelNeedsFollowUp =
+            hasToolCalls || lastAssistant?.finish === "tool-calls" || lastAssistant?.finish === "unknown"
           const directRemoteCompactionPart =
             lastAssistant?.summary === true &&
             lastAssistant.parentID === lastUser.id &&
@@ -1227,7 +1227,7 @@ const layer = Layer.effect(
             continue
           }
 
-          const codexResponses = unknownModel ? unknownNeedsFollowUp : yield* isCodexResponses(model)
+          const codexResponses = yield* isCodexResponses(model)
           const activeTurnID = codexResponses || directRemoteCompaction ? candidateTurnID : lastUser.id
 
           const remoteTransition = yield* compaction.remoteTransition({
