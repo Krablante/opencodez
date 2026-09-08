@@ -77,10 +77,12 @@ export function responsesCompactionLimit(
   config: ConfigLike | undefined,
   model: { input?: number; context: number },
   responsesContext?: number,
+  autoCompactTokenLimit?: number,
 ) {
   const policy = responsesCompaction(config)
   const base = responsesCompactionContext(model, responsesContext)
   let limit = Math.max(1, Math.floor(base * policy.threshold))
+  if (autoCompactTokenLimit !== undefined) limit = Math.min(limit, autoCompactTokenLimit)
   if (policy.token_limit !== undefined) limit = Math.min(limit, policy.token_limit)
   return limit
 }

@@ -48,7 +48,7 @@ OpenCodez keeps the normal OpenCode shape, but adds a few practical controls:
 - The TUI shows the concrete active System prompt id while you work.
 - ChatGPT OAuth can use Codex-compatible stateful Responses WebSocket requests with safe full-request fallback.
 - ChatGPT OAuth uses server-side Responses compaction for long sessions and persists the opaque compacted context across restart and reconnect.
-- GPT-6 Astra uses a 272k working window by default and supports an explicit ChatGPT context-window override up to its advertised 872k client ceiling.
+- GPT-6 Astra uses a 272k working window by default and supports an explicit ChatGPT context-window override up to the authenticated model catalog's advertised ceiling. Automatic and manual compaction honor the same effective window.
 - Non-git projects stay scoped to the selected directory, explicit filesystem
   roots clamp to `$HOME`, and background file indexing is disabled by default.
 - `opencodez update` prints GitHub release, download progress, and install

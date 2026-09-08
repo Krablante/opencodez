@@ -137,7 +137,8 @@ export function make(deps: Dependencies) {
         ? OpenCodezSettings.responsesCompactionLimit(
             cfg,
             input.model.limit,
-            profile?.autoCompactTokenLimit ?? profile?.contextWindow,
+            profile?.contextWindow,
+            profile?.autoCompactTokenLimit,
           )
         : undefined
     return isOverflow({
@@ -513,6 +514,9 @@ export function make(deps: Dependencies) {
                   isWorkflow: false,
                   config: input.cfg,
                   allowCompHashMismatch: true,
+                  codexResponsesTurn: CodexResponsesCompaction.turnSettings(sessionInfo.metadata).find(
+                    (turn) => turn.turnID === input.turnID && turn.model.apiModelID === attemptModel.api.id,
+                  ),
                 })
               })
           return yield* CodexResponsesCompact.compact({
@@ -525,10 +529,7 @@ export function make(deps: Dependencies) {
             items: active.items,
             sessionID: input.sessionID,
             accountKey,
-            turnProfile:
-              prepared.codexResponsesTurn?.settings.profile?.modelID === attemptModel.api.id
-                ? prepared.codexResponsesTurn.settings.profile
-                : undefined,
+            turnProfile: prepared.codexResponsesProfile,
             windowID: input.previousCompaction?.messageID ?? input.sessionID,
             turnID: input.phase === "mid-turn" ? input.turnID : undefined,
             compaction: {

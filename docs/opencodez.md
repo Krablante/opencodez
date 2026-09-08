@@ -373,8 +373,8 @@ same media estimate at both boundaries instead of being counted as base64 text
 before provider lowering.
 
 The active runner freezes the prepared effective System, transformed options,
-and model-visible tool schemas used for sampling, then reuses that snapshot for
-mid-turn compact while lowering the current history with all newly completed
+model profile, and model-visible tool schemas used for sampling, then reuses that
+snapshot for mid-turn compact while lowering the current history with all newly completed
 tool work. Manual compaction and restart recovery reconstruct the same context
 through the shared preparation boundary because no in-memory sampling snapshot
 exists. If user steering arrives around compaction, it remains pending: it is
@@ -389,23 +389,35 @@ truncates only at Unicode code-point boundaries. Automatically resized images
 use Codex's 1,844-token estimate; `detail: "original"` uses the provider's
 conservative 10,000-patch maximum. Only when the payload would exceed the
 Codex-safe request window does OpenCodez replace older tool outputs across the
-request with a bounded marker. The authenticated Codex model catalog supplies
-the current context and automatic compaction limit. Its fallback profiles mirror
-Codex `rust-v0.153.4` with a `272000` context and a 90% trigger, so Luna, Terra,
-Sol, and Astra use `244800` while the remote catalog is temporarily unavailable. Only
+request with a bounded marker. Compaction uses the effective profile returned by
+the shared request preparation, including a configured working window. A
+persisted active-turn profile also survives reconstruction after restart; manual
+compaction without an active turn resolves the selected model with current
+configuration. The payload builder never independently re-resolves the catalog,
+so pre-turn, manual, and mid-turn compaction cannot silently revert to the
+default working window. The authenticated Codex model catalog supplies the
+current context and automatic compaction limit. Without a context override, its
+fallback profiles use a `272000` context and a `244800` trigger. Only
 verbatim tool outputs receive a second conservative estimate because Codex caps
 them on insertion while OpenCode preserves them durably. Ordinary text is not
 globally doubled and can use the full safe window. Every tool result in the
 active parallel-output batch keeps its image input even if its text must be
 bounded, so the latest visual state cannot be lost merely because a short sibling
 result was serialized later. If bounding all eligible tool outputs still cannot
-fit the safe request window, OpenCodez fails before network I/O with a clear
-remote-compaction input error. User
-messages, tool calls, and pending input are never summarized or dropped locally,
+fit the safe request window, OpenCodez fails before network I/O. The session error
+explicitly says that nothing was sent to OpenAI and identifies the model,
+estimated input size, and safe request budget. This is a local preflight failure,
+not a provider rejection. User messages, tool calls, and pending input are never
+summarized or dropped locally,
 and the durable local history remains unchanged. Each compaction stream retries
 transient failure at most twice per transport inside one 20-minute cancellable
 operation. A valid server `Retry-After` value replaces the local exponential
 delay for that retry, and Stop does not leave a request running in the background.
+
+The `prepared remote compaction` log records the selected model, phase,
+estimated tokens, request budget, and number of shortened tool outputs once per
+prepared request. It contains no conversation content and makes local size
+checks distinguishable from transport or provider failures.
 
 Remote output follows pinned Codex V2 semantics: additional stream output items
 are ignored, exactly one completed opaque compaction item is installed as-is,
@@ -457,16 +469,16 @@ larger advertised ceiling cannot be enlarged. The effective value is frozen in
 the existing turn journal, so config or catalog changes cannot alter a running
 tool loop.
 
-GPT-6 Astra exposes a 1,050,000-token API context and 128,000-token maximum
-output. Codex defaults its working context to `272000` and currently permits a
-config override up to `872000`; OpenAI long-context pricing begins above 272,000
-input tokens. OpenCodez follows those defaults. At `872000`, the default 90%
-automatic-compaction trigger becomes `784800`.
+The effective working window is not necessarily the provider's total context
+size: input/output limits and the authenticated catalog can advertise different
+ceilings. For example, an effective `872000` working window has a default 90%
+trigger of `784800`. Requesting a million tokens does not bypass a smaller
+advertised ceiling. The turn journal records the profile actually used.
 
 `opencodez.responses.compaction.threshold` controls the fraction of the
-Codex-safe ChatGPT Responses context at which compaction runs. That context is
-the smaller of the provider input limit and the authenticated model catalog's
-context or automatic-compaction limit. The threshold defaults to `0.9`, matching
+effective ChatGPT Responses context at which compaction runs. That context is
+the smaller of the provider input limit and the effective model profile's
+working window. The threshold defaults to `0.9`, matching
 Codex, and accepts values greater than `0` and no greater than `0.9`. This
 permits earlier compaction without allowing a less safe threshold than Codex.
 
@@ -475,12 +487,26 @@ acts like Codex's absolute `model_auto_compact_token_limit`. The effective limit
 is:
 
 ```text
-min(min(provider_input_window, catalog_context) * threshold, token_limit when set, usable_input_limit)
+min(effective_input_window * threshold, catalog_auto_compact_limit when set, token_limit when set, usable_input_limit)
 ```
 
 For the fallback Luna, Terra, Sol, and Astra profiles, the default trigger is `244800`
 tokens. Setting `threshold` to `0.8` moves it to `217600`; setting `token_limit`
 to `200000` lowers it further to `200000`.
+
+The catalog's automatic-compaction limit is already a trigger, not another
+context window: it caps the result without being multiplied by the threshold
+again. The request budget is separate: remote compaction can use 90% of the
+effective input window regardless of an earlier configured trigger. Lowering
+`token_limit` therefore starts compaction sooner without forcing the existing
+history into that smaller request budget. Neither calculation raises a model's
+advertised input limit.
+
+The trigger compares the last provider usage plus estimates for context not yet
+accounted for, including newly completed tool results and retained reasoning
+when the server has not included it. This can cross the configured threshold
+even when the last displayed provider usage is below it; the local request-size
+estimate used to bound tool outputs is a separate calculation.
 
 The accounting scope is the full active context, which is the Codex default.
 The advanced Codex `body_after_prefix` scope is intentionally not exposed
@@ -526,9 +552,9 @@ OpenCodez config boundary:
   has a shorter turn-scoped lifetime, while the transport connection has a
   longer independent lifetime.
 - `compact.ts` builds the canonical V2 trigger request with the existing
-  Responses lowering, bounds only oversized tool output, requires exactly one
-  completed `compaction`/`compaction_summary` item with encrypted content, and
-  installs bounded retained user context.
+  Responses lowering and prepared effective model profile, bounds only oversized
+  tool output, requires exactly one completed `compaction`/`compaction_summary`
+  item with encrypted content, and installs bounded retained user context.
 - `compaction.ts` finds persisted compaction items without writing a second
   state store, keeps the bounded turn-settings journal and frozen catalog
   profile, and checks model/backend-snapshot compatibility. A random one-shot

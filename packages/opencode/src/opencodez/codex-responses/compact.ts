@@ -60,7 +60,7 @@ export function compact(input: {
   items: unknown[]
   sessionID: string
   accountKey: string
-  turnProfile?: CodexResponsesCatalog.Profile
+  turnProfile: CodexResponsesCatalog.Profile | undefined
   windowID: string
   turnID?: string
   compaction: {
@@ -75,28 +75,23 @@ export function compact(input: {
     const body = yield* toCompactInput(input)
     if (!Array.isArray(body.input)) throw new Error("OpenAI compact input must be an array")
     const request = compactBody(body, [...input.items.filter((item) => !isSystemMessage(item)), ...body.input])
-    const profile =
-      input.turnProfile?.modelID === input.model.api.id
-        ? input.turnProfile
-        : CodexResponsesCatalog.resolve(input.model, input.accountKey)
+    // Preparation owns the effective profile, including context overrides and
+    // frozen turn settings. Re-resolving here would restore the default window.
     const bounded = trimOutputs(
       request,
-      OpenCodezSettings.responsesCompactionPayloadLimit(
-        input.model.limit,
-        profile?.autoCompactTokenLimit ?? profile?.contextWindow,
-      ),
+      OpenCodezSettings.responsesCompactionPayloadLimit(input.model.limit, input.turnProfile?.contextWindow),
       input.preserveActiveToolMedia,
     )
-    if (bounded.rewritten > 0) {
-      yield* Effect.logInfo("bounded remote compaction tool outputs", {
-        count: bounded.rewritten,
-        estimated_tokens: bounded.estimate,
-        limit: bounded.limit,
-      })
-    }
+    yield* Effect.logInfo("prepared remote compaction", {
+      model: input.model.api.id,
+      phase: input.compaction.phase,
+      trimmed_outputs: bounded.rewritten,
+      estimated_tokens: bounded.estimate,
+      limit: bounded.limit,
+    })
     if (bounded.estimate > bounded.limit) {
       throw new Error(
-        `OpenAI remote compaction input exceeds the safe request window after bounding tool outputs (${bounded.estimate} > ${bounded.limit} tokens)`,
+        `Compaction was not sent to OpenAI: the estimated input (${bounded.estimate} tokens) exceeds the safe request budget (${bounded.limit} tokens) for ${input.model.api.id}, even after shortening tool results. Local session history is unchanged.`,
       )
     }
 

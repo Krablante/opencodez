@@ -51,6 +51,7 @@ type PrepareInput = {
 
 export type Prepared = {
   readonly codexResponses: boolean
+  readonly codexResponsesProfile?: CodexResponsesCatalog.Profile
   readonly codexResponsesTurn?: {
     readonly settings: CodexResponsesCompaction.TurnSettings
     serverReasoningIncluded?: boolean
@@ -287,6 +288,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
 
   return {
     codexResponses,
+    codexResponsesProfile: profile,
     ...(codexResponses && input.codexResponsesTurn
       ? {
           codexResponsesTurn: {
