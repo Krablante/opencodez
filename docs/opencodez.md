@@ -107,14 +107,33 @@ codex_gpt_5_5
 codex_gpt_5_6_luna_terra
 codex_gpt_5_6_sol
 codex_gpt_6_astra
+codex_gpt_6_sol
+codex_gpt_6_luna
 ```
 
-The current Codex-derived prompts are pinned to stable Codex `rust-v0.153.4`.
-Luna, Terra, and Sol now share the same upstream prompt while retaining both
-legacy selector names. The Astra prompt follows the same catalog template with
-only unavailable Codex-product contracts removed or renamed for OpenCodez tools.
-`codex_gpt_5_3_codex` remains a legacy compatibility prompt because the current
-Codex catalog no longer publishes that model asset.
+The prompt library is reviewed against stable Codex `rust-v0.156.1`. GPT-6
+Astra, Sol, and Luna each use their own `model_messages.instructions_template`
+from `codex-rs/models-manager/models.json`. GPT-5.4 and GPT-5.5 include the
+personality text embedded by that release. GPT-5.6 Luna, Terra, and Sol still
+share one template and retain their existing selector names. Unchanged templates
+keep their existing bytes; an upstream release does not require rewriting them.
+
+GPT-5.2 and GPT-5.2 Codex retain their unchanged upstream file-based prompts.
+GPT-5.4 Mini retains its last catalog template from `rust-v0.153.4`, and
+GPT-5.3 Codex retains its existing legacy asset because neither has a template
+in the current catalog. Keeping these selectable assets preserves saved choices;
+it does not imply that the provider still offers the corresponding models.
+
+Adaptation is limited to the host tool contract: unsupported Codex Apps,
+orchestrator skill discovery, automatic approval review, and exec-wrapper
+instructions are removed or expressed through OpenCodez's available tools.
+Model-specific writing, autonomy, and verification guidance stays model-specific;
+Sol and Luna are not aliases of Astra or each other. No personality manager or
+runtime prompt downloader is involved. Maintain assets and their exports in
+`default-prompts/`, model mappings in `core/src/opencodez/settings.ts`, and the
+upstream builtin registry in `session/system.ts` together. The upstream
+`gpt-astra` builtin remains separately selectable and is the provider fallback
+for GPT-6 when no OpenCodez System is selected by configuration.
 
 ## Model Defaults
 
@@ -133,9 +152,16 @@ gpt-5.6-luna -> codex_gpt_5_6_luna_terra
 gpt-5.6-terra -> codex_gpt_5_6_luna_terra
 gpt-5.6-sol -> codex_gpt_5_6_sol
 gpt-6-astra -> codex_gpt_6_astra
+gpt-6-sol -> codex_gpt_6_sol
+gpt-6-luna -> codex_gpt_6_luna
 ```
 
 Users can override defaults in `~/.config/opencodez/opencode.jsonc`:
+
+A configured System string or mapping takes precedence over the built-in
+mapping as a whole. Add entries for new models to an existing user mapping if
+its `default` should not apply to them. A saved manual session choice also
+remains authoritative. Updating the binary never rewrites edited user prompts.
 
 ```jsonc
 {
@@ -209,6 +235,14 @@ the existing authenticated fetch boundary. No extra request, entitlement probe,
 warning, or UI state is involved. The response may still report
 `service_tier: "default"`; paired Standard/Fast latency checks are the reliable
 product-level validation.
+
+In Codex wire mode, an omitted `service_tier` uses the authenticated model
+profile's `default_service_tier`, frozen with the other turn settings. The
+bundled GPT-6 Sol and Luna fallback profiles default to `priority`, matching
+Codex `rust-v0.156.1`. An explicit request tier, including `default` or `auto`,
+wins. HTTP, WebSocket, routing hints, and remote compaction use the same lowered
+value. This adds no probe, entitlement check, warning, or persistent store;
+legacy mode and API-key requests do not inherit it.
 
 OpenCodez automatically sends a full request after a reconnect, interrupted
 response, context compaction, history edit, relevant model-setting change, or
@@ -490,7 +524,7 @@ is:
 min(effective_input_window * threshold, catalog_auto_compact_limit when set, token_limit when set, usable_input_limit)
 ```
 
-For the fallback Luna, Terra, Sol, and Astra profiles, the default trigger is `244800`
+For the fallback GPT-5.6 and GPT-6 profiles, the default trigger is `244800`
 tokens. Setting `threshold` to `0.8` moves it to `217600`; setting `token_limit`
 to `200000` lowers it further to `200000`.
 
@@ -711,6 +745,11 @@ tools continue to work. Set `OPENCODE_DISABLE_FFF=0` to opt into upstream FFF;
 when FFF is unavailable, upstream's ripgrep fallback remains available for that
 explicit opt-in mode.
 
+The directory picker may browse ancestors and unrelated folders. File listing
+applies project ignore rules only to descendants of that project; external
+folders are not passed to the gitignore matcher. This keeps explicit browsing
+working without widening the project identity or starting a background scan.
+
 ## Implementation Map
 
 ```text
@@ -755,6 +794,12 @@ its current draft, attachment, localization, accessibility, and directionality
 behavior first, then reconnect the isolated System control at the existing
 model-control seam. Generated Protocol, OpenAPI, and SDK files must come from
 their normal generators rather than manual edits.
+
+The current OpenCode base is `v1.18.32`. Prompt provenance (`rust-v0.156.1`)
+is separate from the Responses protocol baseline (`rust-v0.153.4` with the
+documented catalog-tier addition). Updating prompts does not claim complete
+parity with every new Codex subsystem. In particular, the fork does not import
+Codex Guardian, daemon, workspace-routing, or post-final compaction machinery.
 
 The release workflow deliberately uses typechecks, generated-client drift,
 archive verification, and a production build instead of carrying the broad

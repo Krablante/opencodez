@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### 1.18.32+opencodez.1
+
+- Keep explicit directory browsing outside the project root from failing in the
+  gitignore matcher, without adding a fallback index or filesystem scan.
+- Update the upstream base to OpenCode v1.18.32, preserving the isolated runtime,
+  System controls, project safety, embedded web UI, and Codex Responses lifecycle.
+- Add distinct GPT-6 Sol and Luna System presets and model defaults; refresh the
+  GPT-5.4 and GPT-5.5 presets against Codex rust-v0.156.1.
+- Include GPT-6 Sol and Luna in the existing catalog fallback and honor the
+  turn-frozen default service tier unless the request explicitly selects one.
+- Expose upstream's GPT-6 `gpt-astra` System in the shared builtin selector.
+- Preserve the new upstream OpenAI SDK service-tier fix and ACP/TUI/provider
+  compatibility fixes. Document prompt provenance separately from wire parity.
+
 ### Changed
 
 - Made default-disabled FFF a true zero-index mode: OpenCodez no longer starts the upstream `rg --files` fallback or retains a background path index when `OPENCODE_DISABLE_FFF=1`. Directory browsing and explicit agent file tools remain available.

@@ -6,6 +6,8 @@ import CODEX_GPT_5_4_MINI from "./core/codex_gpt_5_4_mini.md" with { type: "text
 import CODEX_GPT_5_5 from "./core/codex_gpt_5_5.md" with { type: "text" }
 import CODEX_GPT_5_6_LUNA_TERRA from "./core/codex_gpt_5_6_luna_terra.md" with { type: "text" }
 import CODEX_GPT_6_ASTRA from "./core/codex_gpt_6_astra.md" with { type: "text" }
+import CODEX_GPT_6_SOL from "./core/codex_gpt_6_sol.md" with { type: "text" }
+import CODEX_GPT_6_LUNA from "./core/codex_gpt_6_luna.md" with { type: "text" }
 
 export const defaultPromptAssets = {
   core: {
@@ -18,5 +20,7 @@ export const defaultPromptAssets = {
     "codex_gpt_5_6_luna_terra.md": CODEX_GPT_5_6_LUNA_TERRA,
     "codex_gpt_5_6_sol.md": CODEX_GPT_5_6_LUNA_TERRA,
     "codex_gpt_6_astra.md": CODEX_GPT_6_ASTRA,
+    "codex_gpt_6_sol.md": CODEX_GPT_6_SOL,
+    "codex_gpt_6_luna.md": CODEX_GPT_6_LUNA,
   },
 } as const

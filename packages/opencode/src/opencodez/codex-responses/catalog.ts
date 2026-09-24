@@ -12,6 +12,7 @@ export type Profile = {
   readonly autoCompactTokenLimit?: number
   readonly compHash?: string
   readonly responsesLite: boolean
+  readonly defaultServiceTier?: string
 }
 
 export function encodeProfile(profile: Profile) {
@@ -46,6 +47,12 @@ export function isProfile(value: unknown): value is Profile {
   )
     return false
   if ("compHash" in value && value.compHash !== undefined && typeof value.compHash !== "string") return false
+  if (
+    "defaultServiceTier" in value &&
+    value.defaultServiceTier !== undefined &&
+    typeof value.defaultServiceTier !== "string"
+  )
+    return false
   return "responsesLite" in value && typeof value.responsesLite === "boolean"
 }
 
@@ -66,6 +73,7 @@ type RemoteModel = {
   readonly auto_compact_token_limit?: number | null
   readonly comp_hash?: string | null
   readonly use_responses_lite?: boolean
+  readonly default_service_tier?: string | null
 }
 
 type Model = {
@@ -76,6 +84,14 @@ const CACHE_TTL = 5 * 60 * 1000
 const FAILURE_TTL = 60 * 1000
 const CACHE_LIMIT = 8
 const FALLBACK_PROFILES: Profile[] = [
+  ...["gpt-6-sol", "gpt-6-luna"].map((modelID) => ({
+    modelID,
+    contextWindow: 272_000,
+    maxContextWindow: 872_000,
+    compHash: "3000",
+    responsesLite: true,
+    defaultServiceTier: "priority",
+  })),
   {
     modelID: "gpt-5.4",
     contextWindow: 272_000,
@@ -320,6 +336,7 @@ function parseModel(value: unknown): Profile[] {
         typeof model.auto_compact_token_limit === "number" ? model.auto_compact_token_limit : undefined,
       compHash: typeof model.comp_hash === "string" ? model.comp_hash : undefined,
       responsesLite: model.use_responses_lite === true,
+      defaultServiceTier: typeof model.default_service_tier === "string" ? model.default_service_tier : undefined,
     },
   ]
 }

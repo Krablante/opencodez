@@ -245,9 +245,11 @@ function profilesEqual(left: Profile | undefined, right: Profile | undefined) {
   return (
     left.modelID === right.modelID &&
     left.contextWindow === right.contextWindow &&
+    left.maxContextWindow === right.maxContextWindow &&
     left.autoCompactTokenLimit === right.autoCompactTokenLimit &&
     left.compHash === right.compHash &&
-    left.responsesLite === right.responsesLite
+    left.responsesLite === right.responsesLite &&
+    left.defaultServiceTier === right.defaultServiceTier
   )
 }
 

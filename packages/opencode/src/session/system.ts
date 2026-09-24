@@ -8,6 +8,7 @@ import PROMPT_DEFAULT from "./prompt/default.txt"
 import PROMPT_BEAST from "./prompt/beast.txt"
 import PROMPT_GEMINI from "./prompt/gemini.txt"
 import PROMPT_GPT from "./prompt/gpt.txt"
+import PROMPT_ASTRA from "./prompt/gpt-astra.txt"
 import PROMPT_KIMI from "./prompt/kimi.txt"
 import PROMPT_META from "./prompt/meta.txt"
 
@@ -31,6 +32,7 @@ const builtin = {
   default: PROMPT_DEFAULT,
   gemini: PROMPT_GEMINI,
   gpt: PROMPT_GPT,
+  "gpt-astra": PROMPT_ASTRA,
   kimi: PROMPT_KIMI,
   meta: PROMPT_META,
   trinity: PROMPT_TRINITY,
@@ -52,6 +54,7 @@ export function builtinPrompt(name: string) {
 export function providerNameFromID(modelID: string) {
   if (modelID.includes("muse") || modelID.toLowerCase().includes("meta")) return "meta"
   if (modelID.includes("gpt-4") || modelID.includes("o1") || modelID.includes("o3")) return "beast"
+  if (modelID.includes("gpt-6")) return "gpt-astra"
   if (modelID.includes("gpt")) return modelID.includes("codex") ? "codex" : "gpt"
   if (modelID.includes("gemini-")) return "gemini"
   if (modelID.includes("claude")) return "anthropic"

@@ -235,3 +235,22 @@ A login change discards account-scoped continuation and sends a fresh full
 request. The encrypted compaction item remains in that request as durable session
 history, matching Codex without carrying response or reasoning IDs across the
 account boundary.
+## Model catalog defaults
+
+GPT-6 Sol and Luna use the same account-scoped catalog and turn snapshot as
+Astra. Their bundled fallback profiles follow Codex `rust-v0.156.1`: a 272k
+working window, 872k maximum, `comp_hash: "3000"`, Responses Lite, and default
+service tier `priority`. The live catalog remains authoritative. The profile's
+optional `defaultServiceTier` is persisted with existing turn metadata; old
+profiles without the field remain valid. Profile equality includes it so a
+durable snapshot cannot silently omit a tier update.
+
+`request.ts` fills only an absent `service_tier` and derives the routing hint
+from that effective value. Explicit tiers win, and sampling and remote
+compaction share this lowering. API-key and legacy paths bypass it. The
+upstream OpenAI SDK patch preserves explicit tiers without hardcoded model
+eligibility checks; it does not replace the Codex product originator.
+
+Prompt assets are separately reviewed against `rust-v0.156.1`. The wire baseline
+remains `rust-v0.153.4` plus the documented catalog defaults, not a claim
+that all newer Codex product features are implemented.

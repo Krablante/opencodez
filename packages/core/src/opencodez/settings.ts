@@ -46,6 +46,8 @@ export const defaults = {
     "gpt-5.6-terra": "codex_gpt_5_6_luna_terra",
     "gpt-5.6-sol": "codex_gpt_5_6_sol",
     "gpt-6-astra": "codex_gpt_6_astra",
+    "gpt-6-sol": "codex_gpt_6_sol",
+    "gpt-6-luna": "codex_gpt_6_luna",
   },
 }
 

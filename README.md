@@ -190,6 +190,8 @@ codex_gpt_5_5
 codex_gpt_5_6_luna_terra
 codex_gpt_5_6_sol
 codex_gpt_6_astra
+codex_gpt_6_sol
+codex_gpt_6_luna
 ```
 
 Out-of-the-box OpenAI Responses GPT System defaults:
@@ -206,9 +208,18 @@ gpt-5.6-luna -> codex_gpt_5_6_luna_terra
 gpt-5.6-terra -> codex_gpt_5_6_luna_terra
 gpt-5.6-sol -> codex_gpt_5_6_sol
 gpt-6-astra -> codex_gpt_6_astra
+gpt-6-sol -> codex_gpt_6_sol
+gpt-6-luna -> codex_gpt_6_luna
 ```
 
 Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one prompt name for all models, or a mapping keyed by model id, family, `provider/model`, or `default`:
+
+The library is reviewed against Codex `rust-v0.156.1`, with separate GPT-6
+Astra, Sol, and Luna presets. Older presets without a current upstream asset
+remain available for saved selections. See the [prompt provenance and adaptation
+contract](docs/opencodez.md#system-prompt-library) for the exact sources.
+An existing user mapping overrides built-in defaults, so add the new model
+entries there if its global `default` should not apply to them.
 
 ```jsonc
 {
@@ -263,6 +274,11 @@ reasoning context covers all turns, and HTTP and WebSocket requests carry the
 Lite marker and model/tier routing hint. A small built-in profile set keeps known models usable while the catalog
 is temporarily unavailable; it is a fallback, not the primary source of model
 context, automatic-compaction limits, `comp_hash`, or Lite support.
+
+In Codex wire mode, GPT-6 Sol and Luna use their catalog's default service tier
+when none is explicitly requested; their bundled fallback defaults to `priority`.
+Explicit request tiers take precedence. This uses the existing turn profile and
+request boundary, without extra network checks.
 
 ChatGPT OAuth Fast model entries keep the same underlying model and send the
 catalog's `service_tier: "priority"` through the Codex product route. Switching

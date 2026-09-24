@@ -36,6 +36,9 @@ export function lower(
   }
   const merged = context ? inject(input, context.items) : removeContinueMarker(input)
   const result: Record<string, unknown> = { ...value, input: merged }
+  if (result.service_tier === undefined && profile?.defaultServiceTier) {
+    result.service_tier = profile.defaultServiceTier
+  }
   if (responsesLite) {
     result.instructions = ""
     delete result.tools
@@ -48,7 +51,7 @@ export function lower(
   }
   const routingHint =
     typeof value.model === "string"
-      ? `model=${value.model}${typeof value.service_tier === "string" ? `;tier=${value.service_tier}` : ""}`
+      ? `model=${value.model}${typeof result.service_tier === "string" ? `;tier=${result.service_tier}` : ""}`
       : undefined
   return { body: JSON.stringify(CodexResponsesProtocol.enrich(result, headers)), responsesLite, routingHint }
 }
