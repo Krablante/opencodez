@@ -22,7 +22,7 @@ Options:
 
 Examples:
     curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install | bash
-    curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install | bash -s -- --version 1.18.29+opencodez.1
+    curl -fsSL https://raw.githubusercontent.com/Krablante/opencodez/main/install | bash -s -- --version 1.18.33+opencodez.1
     ./install --binary /path/to/opencodez
 EOF
 }

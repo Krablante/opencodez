@@ -39,7 +39,7 @@ one bootstrap run with `sudo opencodez update`; later releases elevate only the
 atomic replacement step automatically.
 
 Release versions use the upstream base plus OpenCodez build metadata, for
-example `1.18.29+opencodez.1`. The release tag and embedded binary version must
+example `1.18.33+opencodez.1`. The release tag and embedded binary version must
 match exactly.
 
 The canonical Unix installer detects OS, architecture, musl versus glibc, and
@@ -109,17 +109,21 @@ codex_gpt_5_6_sol
 codex_gpt_6_astra
 codex_gpt_6_sol
 codex_gpt_6_luna
+codex_gpt_6_1_sol
 ```
 
-The prompt library is reviewed against stable Codex `rust-v0.156.1`. GPT-6
-Astra, Sol, and Luna each use their own `model_messages.instructions_template`
-from `codex-rs/models-manager/models.json`. GPT-5.4 and GPT-5.5 include the
+The prompt library is reviewed against stable Codex `rust-v0.159.1`. GPT-6
+Astra, Sol, Luna, and GPT-6.1 Sol each use their own
+`model_messages.instructions_template` from `codex-rs/models-manager/models.json`.
+GPT-5.5 includes the
 personality text embedded by that release. GPT-5.6 Luna, Terra, and Sol still
 share one template and retain their existing selector names. Unchanged templates
 keep their existing bytes; an upstream release does not require rewriting them.
 
 GPT-5.2 and GPT-5.2 Codex retain their unchanged upstream file-based prompts.
-GPT-5.4 Mini retains its last catalog template from `rust-v0.153.4`, and
+GPT-5.4 retains its adapted template from the earlier catalog because it is
+absent from `rust-v0.159.1`. GPT-5.4 Mini retains its last catalog template
+from `rust-v0.153.4`, and
 GPT-5.3 Codex retains its existing legacy asset because neither has a template
 in the current catalog. Keeping these selectable assets preserves saved choices;
 it does not imply that the provider still offers the corresponding models.
@@ -128,8 +132,8 @@ Adaptation is limited to the host tool contract: unsupported Codex Apps,
 orchestrator skill discovery, automatic approval review, and exec-wrapper
 instructions are removed or expressed through OpenCodez's available tools.
 Model-specific writing, autonomy, and verification guidance stays model-specific;
-Sol and Luna are not aliases of Astra or each other. No personality manager or
-runtime prompt downloader is involved. Maintain assets and their exports in
+Sol, Luna, and GPT-6.1 Sol are not aliases of Astra or each other. No personality
+manager or runtime prompt downloader is involved. Maintain assets and exports in
 `default-prompts/`, model mappings in `core/src/opencodez/settings.ts`, and the
 upstream builtin registry in `session/system.ts` together. The upstream
 `gpt-astra` builtin remains separately selectable and is the provider fallback
@@ -154,6 +158,7 @@ gpt-5.6-sol -> codex_gpt_5_6_sol
 gpt-6-astra -> codex_gpt_6_astra
 gpt-6-sol -> codex_gpt_6_sol
 gpt-6-luna -> codex_gpt_6_luna
+gpt-6.1-sol -> codex_gpt_6_1_sol
 ```
 
 Users can override defaults in `~/.config/opencodez/opencode.jsonc`:
@@ -178,6 +183,7 @@ remains authoritative. Updating the binary never rewrites edited user prompts.
         "gpt-5.6-luna": "codex_gpt_5_6_luna_terra",
         "gpt-5.6-terra": "codex_gpt_5_6_luna_terra",
         "gpt-5.6-sol": "codex_gpt_5_6_sol",
+        "gpt-6.1-sol": "codex_gpt_6_1_sol",
       },
     },
   },
@@ -239,8 +245,10 @@ product-level validation.
 In Codex wire mode, an omitted `service_tier` uses the authenticated model
 profile's `default_service_tier`, frozen with the other turn settings. The
 bundled GPT-6 Sol and Luna fallback profiles default to `priority`, matching
-Codex `rust-v0.156.1`. An explicit request tier, including `default` or `auto`,
-wins. HTTP, WebSocket, routing hints, and remote compaction use the same lowered
+Codex `rust-v0.159.1`. GPT-6.1 Sol has the same 272k working window, 872k
+maximum, `comp_hash: "3000"`, and Responses Lite support but no default tier.
+An explicit request tier, including `default` or `auto`, wins. HTTP, WebSocket,
+routing hints, and remote compaction use the same lowered
 value. This adds no probe, entitlement check, warning, or persistent store;
 legacy mode and API-key requests do not inherit it.
 
@@ -795,7 +803,7 @@ behavior first, then reconnect the isolated System control at the existing
 model-control seam. Generated Protocol, OpenAPI, and SDK files must come from
 their normal generators rather than manual edits.
 
-The current OpenCode base is `v1.18.32`. Prompt provenance (`rust-v0.156.1`)
+The current OpenCode base is `v1.18.33`. Prompt provenance (`rust-v0.159.1`)
 is separate from the Responses protocol baseline (`rust-v0.153.4` with the
 documented catalog-tier addition). Updating prompts does not claim complete
 parity with every new Codex subsystem. In particular, the fork does not import

@@ -76,6 +76,7 @@ beforeAll(async () => {
   await fs.writeFile(path.join(root, "codex_gpt_5_5.md"), "GPT 5.5 SYSTEM")
   await fs.writeFile(path.join(root, "codex_gpt_5_6_luna_terra.md"), "GPT 5.6 LUNA TERRA SYSTEM")
   await fs.writeFile(path.join(root, "codex_gpt_5_6_sol.md"), "GPT 5.6 SOL SYSTEM")
+  await fs.writeFile(path.join(root, "codex_gpt_6_1_sol.md"), "GPT 6.1 SOL SYSTEM")
   await fs.writeFile(path.join(root, "manual_system.md"), "MANUAL SYSTEM")
   LLMRequestPrep = (await import("../../src/session/llm/request")).LLMRequestPrep
 })
@@ -93,6 +94,7 @@ describe("LLMRequestPrep", () => {
     ["gpt-5.6-luna", "GPT 5.6 LUNA TERRA SYSTEM"],
     ["gpt-5.6-terra", "GPT 5.6 LUNA TERRA SYSTEM"],
     ["gpt-5.6-sol", "GPT 5.6 SOL SYSTEM"],
+    ["gpt-6.1-sol", "GPT 6.1 SOL SYSTEM"],
   ])("uses the mapped System for %s", async (modelID, expected) => {
     const prepared = await Effect.runPromise(
       LLMRequestPrep.prepare({

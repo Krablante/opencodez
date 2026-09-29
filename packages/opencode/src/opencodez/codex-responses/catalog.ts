@@ -93,6 +93,13 @@ const FALLBACK_PROFILES: Profile[] = [
     defaultServiceTier: "priority",
   })),
   {
+    modelID: "gpt-6.1-sol",
+    contextWindow: 272_000,
+    maxContextWindow: 872_000,
+    compHash: "3000",
+    responsesLite: true,
+  },
+  {
     modelID: "gpt-5.4",
     contextWindow: 272_000,
     maxContextWindow: 1_000_000,

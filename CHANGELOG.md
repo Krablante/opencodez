@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### 1.18.33+opencodez.1
+
+- Merge upstream OpenCode v1.18.33, including MCP browser and OAuth URL safety,
+  redacted debug configuration, Cloudflare AI Gateway timeouts, and Gemini fixes.
+- Add GPT-6.1 Sol's distinct Codex `rust-v0.159.1` System prompt and model default.
+  Keep older saved prompt names and user overrides available.
+- Add a catalog-outage fallback for GPT-6.1 Sol's Responses Lite profile without
+  assigning a service tier the Codex catalog does not specify.
+- Preserve the OpenCodez updater, isolated runtime roots, Web/TUI System control,
+  project-safety guards, multiserver UI, and ChatGPT OAuth Responses lifecycle.
+
 ### 1.18.32+opencodez.1
 
 - Keep explicit directory browsing outside the project root from failing in the

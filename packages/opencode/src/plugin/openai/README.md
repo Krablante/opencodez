@@ -245,12 +245,17 @@ optional `defaultServiceTier` is persisted with existing turn metadata; old
 profiles without the field remain valid. Profile equality includes it so a
 durable snapshot cannot silently omit a tier update.
 
+GPT-6.1 Sol uses the same catalog and context/hash/Lite fallback. Its Codex
+`rust-v0.159.1` catalog entry has no default service tier, so the fallback
+also omits it. The model remains selectable through the existing ChatGPT OAuth
+model filter; the provider model list and account entitlement govern availability.
+
 `request.ts` fills only an absent `service_tier` and derives the routing hint
 from that effective value. Explicit tiers win, and sampling and remote
 compaction share this lowering. API-key and legacy paths bypass it. The
 upstream OpenAI SDK patch preserves explicit tiers without hardcoded model
 eligibility checks; it does not replace the Codex product originator.
 
-Prompt assets are separately reviewed against `rust-v0.156.1`. The wire baseline
+Prompt assets are separately reviewed against `rust-v0.159.1`. The wire baseline
 remains `rust-v0.153.4` plus the documented catalog defaults, not a claim
 that all newer Codex product features are implemented.
