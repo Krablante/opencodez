@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 1.18.33+opencodez.4
+
+- Reduce System prompt text to 13 px on phones and 14 px on tablets, with compact
+  readable line spacing and unchanged touch controls.
+
 ### 1.18.33+opencodez.3
 
 - Make the System prompt library fill the phone's visible screen from both

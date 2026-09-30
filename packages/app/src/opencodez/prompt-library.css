@@ -660,13 +660,15 @@
     border-color: transparent;
     background: transparent;
   }
-  .oz-library input:not([type="checkbox"]),
-  .oz-library .oz-text {
+  .oz-library input:not([type="checkbox"]) {
     font-size: 16px;
   }
   .oz-library .oz-text {
-    padding: 10px;
-    line-height: 1.45;
+    /* Render 13px text while retaining Safari's 16px focus-zoom threshold. */
+    font-size: 16px !important;
+    zoom: 0.8125;
+    padding: 12px;
+    line-height: 1.5;
   }
   .oz-library select {
     min-height: 44px;
@@ -748,5 +750,12 @@
   }
   .oz-alert > span {
     flex-basis: 100%;
+  }
+}
+@media (min-width: 760px) and (max-width: 1023px) {
+  .oz-library .oz-text {
+    font-size: 16px !important;
+    zoom: 0.875;
+    line-height: 1.5;
   }
 }

@@ -36,7 +36,8 @@ area; Save and Use share a single action row below it. The header's back arrow
 returns to the list or the preceding editor. Description and context information
 are under **Prompt details**. Copy, export, deletion, and reasoning defaults are
 available from the action menu. On a wide screen, the list and editor are shown
-together.
+together. Prompt text uses compact 13 px type on phones and 14 px on tablets,
+with a 1.5 line height. Controls retain their touch sizes.
 
 When the keyboard reduces or pans the visible area, the window follows that
 area. A short editing viewport folds the metadata and assignment row while
@@ -191,6 +192,9 @@ Viewport sizing is scoped to the library's dialog and is released when its scree
 closes. Resize, viewport pan, and focus notifications are coalesced per animation
 frame; the feature adds no keyboard service or polling loop. Preserve one native
 textarea scroll area and a separate action row when changing the mobile layout.
+The compact editor scales a 16 px native textarea with CSS `zoom`, preserving
+the touch-input focus threshold while rendering smaller text. Keep this scoped
+to the prompt text; browser zoom and the rest of the touch controls remain available.
 
 The fork seams are the Settings entry, composer entry, variant selection,
 unsaved-dialog navigation guard, and active-turn capture. Keep the implementation
