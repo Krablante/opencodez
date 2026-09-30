@@ -17,7 +17,7 @@ identity, and name cannot be changed or deleted through the library API. Choose
 **Create from this** to open an independent editable copy. Copying a prompt does
 not copy its model assignments or switch the current chat.
 
-For your own prompt, enter a name, an optional description, and the instructions,
+For your own prompt, enter a name, an optional description under **Prompt details**, and the instructions,
 then choose **Save**. The normal save keyboard shortcut also works. Renaming does
 not change its identity, so existing chats and assignments remain connected.
 Unsaved edits are protected when leaving the editor or closing its dialog.
@@ -31,17 +31,28 @@ chat's quick selector, **Automatic** follows model defaults and **No core prompt
 disables the selectable instructions. Environment, project, agent, skill, and
 tool instructions continue to use OpenCode's normal preparation mechanisms.
 
-On a phone, the library fills the screen and moves between the list, editor, and
-assignment panel. The text gets the main editing area. Less frequent actions,
-including exporting a set and reasoning defaults, are in the header's action
-menu. On a wide screen, the list and editor are shown together.
+On a phone, both entry points fill the visible screen. The text gets the main
+area; Save and Use share a single action row below it. The header's back arrow
+returns to the list or the preceding editor. Description and context information
+are under **Prompt details**. Copy, export, deletion, and reasoning defaults are
+available from the action menu. On a wide screen, the list and editor are shown
+together.
+
+When the keyboard reduces or pans the visible area, the window follows that
+area. A short editing viewport folds the metadata and assignment row while
+retaining the prompt name, server, text, and actions. The editor scrolls
+independently; actions occupy their own space and never float over the text.
+Closing the keyboard restores the normal layout without leaving the editor.
 
 ## Model and family defaults
 
-Open **Default for → Edit assignments** in a prompt's card. Search by model name,
-ID, provider, or family. A family can be expanded to inspect its models and exact
-personal exceptions. Families use the provider catalog; equally named families
-from different providers remain separate.
+Open **Default for** in a prompt's card. Switch between **Models** and **Families**,
+then search by name, ID, or provider. Each provider has one group heading.
+**This prompt** assigns the open prompt to the selected target; **Inherit** removes
+its personal rule, and **Built-in** explicitly returns that target to its bundled
+choice. A family can be expanded to inspect its models and exact personal
+exceptions, including staged exceptions before applying changes. Families use the
+provider catalog; equally named families from different providers remain separate.
 
 Choose the current prompt for one model or a whole family, then **Apply
 assignments**. A personal family rule overrides bundled assignments for its
@@ -175,6 +186,11 @@ Catalog responses contain metadata rather than all prompt bodies.
 | HTTP boundary and catalog validation           | Existing `opencodez` HttpApi group and handlers           |
 | Shared responsive screen and client refresh    | `app/src/opencodez/`                                      |
 | Active-turn lifetime                           | Narrow hooks in session preparation and remote compaction |
+
+Viewport sizing is scoped to the library's dialog and is released when its screen
+closes. Resize, viewport pan, and focus notifications are coalesced per animation
+frame; the feature adds no keyboard service or polling loop. Preserve one native
+textarea scroll area and a separate action row when changing the mobile layout.
 
 The fork seams are the Settings entry, composer entry, variant selection,
 unsaved-dialog navigation guard, and active-turn capture. Keep the implementation

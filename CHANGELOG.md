@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### 1.18.33+opencodez.3
+
+- Make the System prompt library fill the phone's visible screen from both
+  Settings and the chat selector, including keyboard resize and viewport panning.
+- Give the text editor the main area, keep Save and Use in one compact row, and
+  move description and secondary actions into explicit disclosures.
+- Keep the focused editor scrollable with the keyboard open. The action row
+  occupies its own space and no longer covers the text.
+- Add separate model/family views with provider grouping, compact assignment
+  rows, family coverage, and clear personal exception markers.
+- Preserve prompt storage, live updates, reasoning defaults, and portable
+  import/export behavior.
+
 ### 1.18.33+opencodez.2
 
 - Add one responsive System prompt library to Settings and the chat selector,

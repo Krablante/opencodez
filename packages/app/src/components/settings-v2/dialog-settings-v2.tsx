@@ -1,4 +1,4 @@
-import { Component, createMemo, createSignal, startTransition } from "solid-js"
+import { Component, Show, createMemo, createSignal, startTransition } from "solid-js"
 import { Dialog } from "@opencode-ai/ui/v2/dialog-v2"
 import { TabsV2 } from "@opencode-ai/ui/v2/tabs-v2"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -124,12 +124,14 @@ export const DialogSettings: Component<{
           <SettingsModelsV2 />
         </TabsV2.Content>
         <TabsV2.Content value="prompts" class="settings-v2-panel oz-settings-content">
-          <PromptLibrary
-            onNavigate={(guard) => {
-              leavePrompts = guard
-            }}
-            onSettingsBack={() => leavePrompts?.(() => setTab("general"))}
-          />
+          <Show when={tab() === "prompts"}>
+            <PromptLibrary
+              onNavigate={(guard) => {
+                leavePrompts = guard
+              }}
+              onSettingsBack={() => leavePrompts?.(() => setTab("general"))}
+            />
+          </Show>
         </TabsV2.Content>
       </TabsV2>
     </Dialog>

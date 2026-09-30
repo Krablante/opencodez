@@ -45,6 +45,9 @@ export function PromptLibrary(props: Props) {
     includeRules: boolean
     exportIDs: string[]
     policyBase: string
+    targets: "models" | "families"
+    properties: boolean
+    compactEditor: boolean
   }>({
     filter: "all",
     search: "",
@@ -62,10 +65,16 @@ export function PromptLibrary(props: Props) {
     includeRules: false,
     exportIDs: [],
     policyBase: "",
+    targets: "models",
+    properties: false,
+    compactEditor: false,
   })
   let file: HTMLInputElement | undefined
   let nameInput: HTMLInputElement | undefined
   let root: HTMLDivElement | undefined
+  let viewportFrame: HTMLElement | undefined
+  let viewportUpdate: number | undefined
+  let disposed = false
   let pending: (() => void) | undefined
   let reading = 0
   let opened = false
@@ -146,6 +155,7 @@ export function PromptLibrary(props: Props) {
         mobileDetail: true,
         revision: library.state.data?.revision ?? "0",
         confirm: undefined,
+        properties: false,
       })
     } catch (value) {
       error(value)
@@ -163,7 +173,7 @@ export function PromptLibrary(props: Props) {
       deleted: false,
       version: "",
       sourceUpdated: false,
-      origin: source ? { id: source.id, version: source.version } : undefined,
+      origin: source?.id ? { id: source.id, version: source.version } : source?.origin,
     }
     setState({
       item,
@@ -175,6 +185,7 @@ export function PromptLibrary(props: Props) {
       saved: false,
       error: undefined,
       revision: library.state.data?.revision ?? "0",
+      properties: false,
     })
     requestAnimationFrame(() => nameInput?.focus())
   }
@@ -230,6 +241,7 @@ export function PromptLibrary(props: Props) {
         rules,
         variants,
         policyBase: JSON.stringify(pane === "rules" ? rules : variants),
+        targets: "models",
       })
     })
   const ruleKey = (rule: Pick<OpenCodezPrompts.Rule, "scope" | "providerID" | "target">) =>
@@ -287,6 +299,19 @@ export function PromptLibrary(props: Props) {
         : undefined
     return model?.effectivePrompt ? { scope, providerID, target, prompt: model.effectivePrompt } : rule
   }
+  const targetGroups = createMemo(() => {
+    const models = state.targets === "families" ? families() : matchingModels()
+    return [...new Set(models.map((model) => model.providerID))].map((id) => ({
+      id,
+      name: models.find((model) => model.providerID === id)!.providerName,
+      models: models.filter((model) => model.providerID === id),
+    }))
+  })
+  const back = () =>
+    guard(() => {
+      if (state.pane !== "editor") setState("pane", "editor")
+      else setState("mobileDetail", false)
+    })
   const download = (name: string, value: string, type: string) => {
     const url = URL.createObjectURL(new Blob([value], { type }))
     const anchor = document.createElement("a")
@@ -386,60 +411,57 @@ export function PromptLibrary(props: Props) {
   }
   window.addEventListener("beforeunload", beforeUnload)
   const resize = () => {
-    const frame = root?.closest("[data-slot='dialog-container']")
-    if (frame instanceof HTMLElement)
-      frame.style.setProperty(
-        "--oz-viewport-height",
-        `${Math.round(window.visualViewport?.height ?? window.innerHeight)}px`,
-      )
+    if (disposed) return
+    const frame = viewportFrame ?? root?.closest("[data-component='dialog-v2'], [data-component='dialog']")
+    const height = window.visualViewport?.height ?? window.innerHeight
+    if (frame instanceof HTMLElement) {
+      viewportFrame = frame
+      frame.setAttribute("data-oz-prompts", "")
+      frame.style.setProperty("--oz-viewport-height", `${Math.round(height)}px`)
+      frame.style.setProperty("--oz-viewport-top", `${Math.round(window.visualViewport?.offsetTop ?? 0)}px`)
+    }
+    const focused = document.activeElement
+    setState(
+      "compactEditor",
+      focused instanceof HTMLTextAreaElement &&
+        !!root?.contains(focused) &&
+        (height < 500 || window.innerHeight - height > 120),
+    )
+  }
+  const scheduleResize = () => {
+    // Removing a focused node can emit focusout after the owner's cleanup.
+    if (disposed) return
+    if (viewportUpdate !== undefined) cancelAnimationFrame(viewportUpdate)
+    viewportUpdate = requestAnimationFrame(() => {
+      viewportUpdate = undefined
+      resize()
+    })
   }
   onMount(resize)
-  window.visualViewport?.addEventListener("resize", resize)
-  window.addEventListener("resize", resize)
+  window.visualViewport?.addEventListener("resize", scheduleResize)
+  window.visualViewport?.addEventListener("scroll", scheduleResize)
+  window.addEventListener("resize", scheduleResize)
   onCleanup(() => {
+    disposed = true
     reading++
     window.removeEventListener("beforeunload", beforeUnload)
     props.onNavigate?.(undefined)
-    window.visualViewport?.removeEventListener("resize", resize)
-    window.removeEventListener("resize", resize)
-    const frame = root?.closest("[data-slot='dialog-container']")
-    if (frame instanceof HTMLElement) frame.style.removeProperty("--oz-viewport-height")
+    window.visualViewport?.removeEventListener("resize", scheduleResize)
+    window.visualViewport?.removeEventListener("scroll", scheduleResize)
+    window.removeEventListener("resize", scheduleResize)
+    if (viewportUpdate !== undefined) cancelAnimationFrame(viewportUpdate)
+    const frame = viewportFrame
+    if (frame instanceof HTMLElement) {
+      frame.removeAttribute("data-oz-prompts")
+      frame.style.removeProperty("--oz-viewport-height")
+      frame.style.removeProperty("--oz-viewport-top")
+    }
   })
 
-  const ruleRow = (
-    scope: "model" | "family",
-    providerID: string,
-    target: string,
-    label: string,
-    providerName: string,
-  ) => (
+  const ruleRow = (scope: "model" | "family", providerID: string, target: string, label: string) => (
     <div class="oz-rule" data-target={`${providerID}/${target}`}>
       <div class="oz-rule-label">
         <strong dir="auto">{label}</strong>
-        <span dir="auto">{providerName}</span>
-        <Show when={scope === "family"}>
-          <details>
-            <summary>{t("opencodez.prompts.coverage")}</summary>
-            <For
-              each={library.state.data?.models.filter(
-                (model) => model.providerID === providerID && model.family === target,
-              )}
-            >
-              {(model) => (
-                <div class="oz-coverage">
-                  <bdi>{model.name}</bdi>
-                  <Show
-                    when={personal().some(
-                      (rule) => rule.scope === "model" && rule.providerID === providerID && rule.target === model.id,
-                    )}
-                  >
-                    <span>{t("opencodez.prompts.exceptions")}</span>
-                  </Show>
-                </div>
-              )}
-            </For>
-          </details>
-        </Show>
         <Show when={currentRule(scope, providerID, target)}>
           {(rule) => (
             <span>
@@ -461,12 +483,12 @@ export function PromptLibrary(props: Props) {
       >
         <option value="">
           {personal().some((rule) => ruleKey(rule) === ruleKey({ scope, providerID, target }))
-            ? t("opencodez.prompts.inherit")
-            : t("opencodez.prompts.auto")}
+            ? t("opencodez.prompts.inheritShort")
+            : t("opencodez.prompts.autoShort")}
         </option>
-        <option value="@builtin">{t("opencodez.prompts.reset")}</option>
+        <option value="@builtin">{t("opencodez.prompts.resetShort")}</option>
         <Show when={state.item?.id}>
-          <option value={state.item?.id}>{state.item?.name}</option>
+          <option value={state.item?.id}>{t("opencodez.prompts.thisPrompt")}</option>
         </Show>
         <Show when={ruleFor(scope, providerID, target)}>
           {(rule) => (
@@ -476,6 +498,35 @@ export function PromptLibrary(props: Props) {
           )}
         </Show>
       </select>
+      <Show when={scope === "family"}>
+        <details class="oz-family-coverage">
+          <summary>
+            {t("opencodez.prompts.coverage")} ·{" "}
+            {
+              library.state.data?.models.filter((model) => model.providerID === providerID && model.family === target)
+                .length
+            }
+          </summary>
+          <For
+            each={library.state.data?.models.filter(
+              (model) => model.providerID === providerID && model.family === target,
+            )}
+          >
+            {(model) => (
+              <div class="oz-coverage">
+                <bdi>{model.name}</bdi>
+                <Show
+                  when={state.rules.some(
+                    (rule) => rule.scope === "model" && rule.providerID === providerID && rule.target === model.id,
+                  )}
+                >
+                  <span title={t("opencodez.prompts.exceptions")}>{t("opencodez.prompts.exception")}</span>
+                </Show>
+              </div>
+            )}
+          </For>
+        </details>
+      </Show>
     </div>
   )
 
@@ -485,11 +536,17 @@ export function PromptLibrary(props: Props) {
       ref={root}
       data-component="opencodez-prompt-library"
       data-detail={state.mobileDetail ? "true" : "false"}
+      data-pane={state.pane}
+      data-properties={state.properties}
+      data-editing={state.compactEditor}
+      onFocusIn={scheduleResize}
+      onFocusOut={scheduleResize}
     >
       <input
         ref={file}
         hidden
         type="file"
+        disabled={state.busy}
         accept=".json,.md,application/json,text/markdown"
         onChange={(event) => {
           const selected = event.currentTarget.files?.[0]
@@ -497,9 +554,18 @@ export function PromptLibrary(props: Props) {
         }}
       />
       <header class="oz-header">
+        <Show when={state.mobileDetail}>
+          <button
+            class="oz-header-back oz-icon"
+            aria-label={t(state.pane === "editor" ? "opencodez.prompts.back" : "opencodez.prompts.backEditor")}
+            onClick={back}
+          >
+            <Icon name="arrow-left" />
+          </button>
+        </Show>
         <Show when={props.onSettingsBack}>
           <button
-            class="oz-settings-back oz-icon"
+            class="oz-settings-back oz-icon oz-list-action"
             aria-label={t("settings.tab.general")}
             onClick={() => props.onSettingsBack?.()}
           >
@@ -507,7 +573,7 @@ export function PromptLibrary(props: Props) {
           </button>
         </Show>
         <div class="oz-header-main">
-          <h2>{t("opencodez.prompts.title")}</h2>
+          <h2 dir="auto">{state.compactEditor ? state.name : t("opencodez.prompts.title")}</h2>
           <span class="oz-server">
             <Icon name="server" size="small" />
             <bdi>{library.server().server.displayName ?? library.server().url}</bdi>
@@ -516,7 +582,7 @@ export function PromptLibrary(props: Props) {
         <div class="oz-actions">
           <button
             type="button"
-            class="oz-icon"
+            class="oz-icon oz-list-action"
             aria-label={t("opencodez.prompts.create")}
             title={t("opencodez.prompts.create")}
             onClick={() => guard(() => create())}
@@ -525,7 +591,7 @@ export function PromptLibrary(props: Props) {
           </button>
           <button
             type="button"
-            class="oz-icon"
+            class="oz-icon oz-list-action"
             aria-label={t("opencodez.prompts.import")}
             title={t("opencodez.prompts.import")}
             onClick={() => guard(() => file?.click())}
@@ -563,6 +629,76 @@ export function PromptLibrary(props: Props) {
               <Icon name="dot-grid" />
             </summary>
             <div class="oz-more-menu">
+              <Show when={state.pane === "editor" && state.mobileDetail && state.item}>
+                {(item) => (
+                  <>
+                    <button
+                      onClick={(event) => {
+                        event.currentTarget.closest("details")?.removeAttribute("open")
+                        setState("properties", !state.properties)
+                      }}
+                    >
+                      <Icon name="sliders" size="small" />
+                      {t("opencodez.prompts.properties")}
+                    </button>
+                    <button
+                      onClick={(event) => {
+                        const original = item()
+                        event.currentTarget.closest("details")?.removeAttribute("open")
+                        guard(() => create(state.item ?? original))
+                      }}
+                    >
+                      <Icon name="plus" size="small" />
+                      {t("opencodez.prompts.copy")}
+                    </button>
+                    <button
+                      disabled={!item().id}
+                      onClick={(event) => {
+                        event.currentTarget.closest("details")?.removeAttribute("open")
+                        setState("exportIDs", [item().id])
+                        panel("export")
+                      }}
+                    >
+                      <Icon name="download" size="small" />
+                      {t("opencodez.prompts.export")}
+                    </button>
+                    <Show when={item().source !== "builtin" && item().id}>
+                      <button
+                        class="oz-danger"
+                        onClick={(event) => {
+                          event.currentTarget.closest("details")?.removeAttribute("open")
+                          if (item().deleted) void status("restore")
+                          else setState("confirm", "delete")
+                        }}
+                      >
+                        <Icon name={item().deleted ? "arrow-undo-down" : "trash"} size="small" />
+                        {t(item().deleted ? "opencodez.prompts.restore" : "opencodez.prompts.delete")}
+                      </button>
+                    </Show>
+                    <hr />
+                  </>
+                )}
+              </Show>
+              <Show when={state.mobileDetail}>
+                <button
+                  onClick={(event) => {
+                    event.currentTarget.closest("details")?.removeAttribute("open")
+                    guard(() => create())
+                  }}
+                >
+                  <Icon name="plus" size="small" />
+                  {t("opencodez.prompts.create")}
+                </button>
+                <button
+                  onClick={(event) => {
+                    event.currentTarget.closest("details")?.removeAttribute("open")
+                    guard(() => file?.click())
+                  }}
+                >
+                  <Icon name="arrow-up" size="small" />
+                  {t("opencodez.prompts.import")}
+                </button>
+              </Show>
               <button
                 onClick={(event) => {
                   event.currentTarget.closest("details")?.removeAttribute("open")
@@ -659,7 +795,14 @@ export function PromptLibrary(props: Props) {
               onClick={() => {
                 if (state.confirm === "delete") void status("delete")
                 else {
-                  setState("confirm", undefined)
+                  const item = state.item?.id ? state.item : undefined
+                  setState({
+                    confirm: undefined,
+                    item,
+                    name: item?.name ?? "",
+                    description: item?.description ?? "",
+                    text: item?.text ?? "",
+                  })
                   pending?.()
                 }
               }}
@@ -725,15 +868,7 @@ export function PromptLibrary(props: Props) {
           </div>
         </aside>
         <section class="oz-detail">
-          <button
-            class="oz-back"
-            onClick={() =>
-              guard(() => {
-                if (state.pane !== "editor") setState("pane", "editor")
-                else setState("mobileDetail", false)
-              })
-            }
-          >
+          <button class="oz-back" onClick={back}>
             <Icon name="arrow-left" size="small" />
             {t("opencodez.prompts.back")}
           </button>
@@ -777,16 +912,27 @@ export function PromptLibrary(props: Props) {
                             : "opencodez.prompts.mine",
                       )}
                     </span>
+                    <button
+                      class="oz-icon oz-properties-toggle"
+                      aria-label={t("opencodez.prompts.properties")}
+                      aria-expanded={state.properties}
+                      onClick={() => setState("properties", !state.properties)}
+                    >
+                      <Icon name="chevron-down" size="small" />
+                    </button>
                   </div>
-                  <Show when={item().source !== "builtin"}>
-                    <input
-                      class="oz-description"
-                      aria-label={t("opencodez.prompts.description")}
-                      placeholder={t("opencodez.prompts.description")}
-                      value={state.description}
-                      onInput={(event) => setState({ description: event.currentTarget.value, saved: false })}
-                    />
-                  </Show>
+                  <div class="oz-properties">
+                    <Show when={item().source !== "builtin"}>
+                      <input
+                        class="oz-description"
+                        aria-label={t("opencodez.prompts.description")}
+                        placeholder={t("opencodez.prompts.description")}
+                        value={state.description}
+                        onInput={(event) => setState({ description: event.currentTarget.value, saved: false })}
+                      />
+                    </Show>
+                    <p class="oz-hint">{t("opencodez.prompts.coreHint")}</p>
+                  </div>
                   <Show when={item().deleted}>
                     <p class="oz-muted">{t("opencodez.prompts.deletedHint")}</p>
                   </Show>
@@ -820,34 +966,36 @@ export function PromptLibrary(props: Props) {
                       }
                     }}
                   />
-                  <div class="oz-defaults">
-                    <div>
-                      <span class="oz-label">{t("opencodez.prompts.defaults")}</span>
-                      <span class="oz-assignment-summary">
-                        <Show
-                          when={assignments().length}
-                          fallback={<span class="oz-muted">{t("opencodez.prompts.unassigned")}</span>}
-                        >
-                          <For each={assignments().slice(0, 3)}>
-                            {(rule) => (
-                              <bdi class="oz-chip">
-                                {rule.scope === "all"
-                                  ? t("opencodez.prompts.global")
-                                  : rule.scope === "fallback"
-                                    ? t("opencodez.prompts.fallback")
-                                    : rule.target}
-                              </bdi>
-                            )}
-                          </For>
-                          <Show when={assignments().length > 3}>+{assignments().length - 3}</Show>
-                        </Show>
-                      </span>
-                    </div>
-                    <button disabled={!item().id || item().deleted} onClick={() => panel("rules")}>
-                      {t("opencodez.prompts.assign")}
-                    </button>
-                  </div>
-                  <footer class="oz-footer">
+                  <button
+                    class="oz-defaults"
+                    disabled={!item().id || item().deleted}
+                    aria-label={t("opencodez.prompts.assign")}
+                    onClick={() => panel("rules")}
+                  >
+                    <Icon name="sliders" size="small" />
+                    <span class="oz-defaults-label">{t("opencodez.prompts.defaults")}</span>
+                    <span class="oz-assignment-summary">
+                      <Show
+                        when={assignments().length}
+                        fallback={<span class="oz-muted">{t("opencodez.prompts.unassignedShort")}</span>}
+                      >
+                        <For each={assignments().slice(0, 1)}>
+                          {(rule) => (
+                            <bdi class="oz-chip">
+                              {rule.scope === "all"
+                                ? t("opencodez.prompts.global")
+                                : rule.scope === "fallback"
+                                  ? t("opencodez.prompts.fallback")
+                                  : rule.target}
+                            </bdi>
+                          )}
+                        </For>
+                        <Show when={assignments().length > 1}>+{assignments().length - 1}</Show>
+                      </Show>
+                    </span>
+                    <Icon name="chevron-right" size="small" />
+                  </button>
+                  <footer class="oz-footer oz-editor-footer">
                     <div class="oz-actions">
                       <Show when={item().source !== "builtin" && !item().deleted}>
                         <button
@@ -855,14 +1003,21 @@ export function PromptLibrary(props: Props) {
                           disabled={state.busy || !state.name.trim() || !state.text.trim() || (!!item().id && !dirty())}
                           onClick={() => void save()}
                         >
-                          {t("opencodez.prompts.save")}
+                          {t(state.saved && !dirty() ? "opencodez.prompts.savedShort" : "opencodez.prompts.save")}
                         </button>
                       </Show>
-                      <button disabled={state.busy} onClick={() => guard(() => create(item()))}>
+                      <button
+                        class={item().source === "builtin" ? "oz-copy-action" : "oz-desktop-action"}
+                        disabled={state.busy}
+                        onClick={() => {
+                          const original = item()
+                          guard(() => create(state.item ?? original))
+                        }}
+                      >
                         {t("opencodez.prompts.copy")}
                       </button>
                       <button
-                        class="oz-icon"
+                        class="oz-icon oz-desktop-action"
                         disabled={!item().id}
                         aria-label={t("opencodez.prompts.export")}
                         onClick={() => {
@@ -874,7 +1029,7 @@ export function PromptLibrary(props: Props) {
                       </button>
                       <Show when={item().source !== "builtin" && item().id}>
                         <button
-                          class="oz-icon"
+                          class="oz-icon oz-desktop-action"
                           aria-label={t(item().deleted ? "opencodez.prompts.restore" : "opencodez.prompts.delete")}
                           onClick={() => (item().deleted ? void status("restore") : setState("confirm", "delete"))}
                         >
@@ -884,13 +1039,19 @@ export function PromptLibrary(props: Props) {
                     </div>
                     <Show when={props.onUse && !item().deleted}>
                       <button
+                        class="oz-use-action"
                         disabled={state.busy || !state.name.trim() || !state.text.trim()}
                         onClick={async () => {
                           if (dirty() && !(await save())) return
                           if (state.item?.id) await props.onUse?.(state.item.id)
                         }}
                       >
-                        {t(dirty() ? "opencodez.prompts.saveUse" : "opencodez.prompts.use")}
+                        <span class="oz-desktop-copy">
+                          {t(dirty() ? "opencodez.prompts.saveUse" : "opencodez.prompts.use")}
+                        </span>
+                        <span class="oz-mobile-copy">
+                          {t(dirty() ? "opencodez.prompts.saveUseShort" : "opencodez.prompts.useShort")}
+                        </span>
                       </button>
                     </Show>
                     <span class="oz-save-status" role="status">
@@ -903,7 +1064,6 @@ export function PromptLibrary(props: Props) {
                             : ""}
                     </span>
                   </footer>
-                  <p class="oz-hint">{t("opencodez.prompts.coreHint")}</p>
                 </>
               )}
             </Show>
@@ -920,6 +1080,14 @@ export function PromptLibrary(props: Props) {
                 value={state.modelSearch}
                 onInput={(event) => setState("modelSearch", event.currentTarget.value)}
               />
+              <div class="oz-target-tabs" role="group" aria-label={t("opencodez.prompts.defaults")}>
+                <button aria-pressed={state.targets === "models"} onClick={() => setState("targets", "models")}>
+                  {t("opencodez.prompts.models")}
+                </button>
+                <button aria-pressed={state.targets === "families"} onClick={() => setState("targets", "families")}>
+                  {t("opencodez.prompts.families")}
+                </button>
+              </div>
               <Show
                 when={
                   (state.rules.find((rule) => rule.scope === "all")?.prompt ??
@@ -953,13 +1121,22 @@ export function PromptLibrary(props: Props) {
                 >
                   <p class="oz-hint">{t("opencodez.prompts.globalWillReset")}</p>
                 </Show>
-                <h4>{t("opencodez.prompts.family")}</h4>
-                <For each={families()}>
-                  {(model) => ruleRow("family", model.providerID, model.family, model.family, model.providerName)}
-                </For>
-                <h4>{t("opencodez.prompts.models")}</h4>
-                <For each={matchingModels()}>
-                  {(model) => ruleRow("model", model.providerID, model.id, model.name, model.providerName)}
+                <For each={targetGroups()} fallback={<p class="oz-muted">{t("palette.empty")}</p>}>
+                  {(group) => (
+                    <>
+                      <h4 class="oz-provider-heading">
+                        <bdi>{group.name}</bdi>
+                        <span>{group.models.length}</span>
+                      </h4>
+                      <For each={group.models}>
+                        {(model) =>
+                          state.targets === "families"
+                            ? ruleRow("family", model.providerID, model.family, model.family)
+                            : ruleRow("model", model.providerID, model.id, model.name)
+                        }
+                      </For>
+                    </>
+                  )}
                 </For>
                 <details class="oz-other-defaults">
                   <summary>{t("opencodez.prompts.otherDefaults")}</summary>
@@ -1000,7 +1177,8 @@ export function PromptLibrary(props: Props) {
                   disabled={state.busy || JSON.stringify(state.rules) === state.policyBase}
                   onClick={() => void apply("rules")}
                 >
-                  {t("opencodez.prompts.apply")}
+                  <span class="oz-desktop-copy">{t("opencodez.prompts.apply")}</span>
+                  <span class="oz-mobile-copy">{t("opencodez.prompts.applyShort")}</span>
                 </button>
                 <button onClick={() => setState("pane", "editor")}>{t("opencodez.prompts.cancel")}</button>
               </footer>
@@ -1055,7 +1233,8 @@ export function PromptLibrary(props: Props) {
                   disabled={state.busy || JSON.stringify(state.variants) === state.policyBase}
                   onClick={() => void apply("variants")}
                 >
-                  {t("opencodez.prompts.saveReasoning")}
+                  <span class="oz-desktop-copy">{t("opencodez.prompts.saveReasoning")}</span>
+                  <span class="oz-mobile-copy">{t("opencodez.prompts.save")}</span>
                 </button>
                 <button onClick={() => setState("pane", "editor")}>{t("opencodez.prompts.cancel")}</button>
               </footer>
@@ -1222,7 +1401,7 @@ export function PromptLibrary(props: Props) {
 export function DialogPromptLibrary(props: Props) {
   const dialog = useDialog()
   return (
-    <Dialog size="x-large" class="oz-library-dialog">
+    <Dialog size="x-large" class="oz-library-dialog" containerClass="oz-library-frame">
       <PromptLibrary
         {...props}
         onClose={() => dialog.close()}
