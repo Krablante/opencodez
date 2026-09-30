@@ -115,7 +115,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
           input.model,
           accountKey,
           undefined,
-          OpenCodezSettings.responsesContextWindow(input.config),
+          OpenCodezSettings.responsesContextWindow(input.config, input.model),
         ))
       : undefined
   if (hasRemoteCompaction && !isOpenaiOauth) {

@@ -11,6 +11,7 @@ import { SettingsProviders } from "./settings-providers"
 import { SettingsModels } from "./settings-models"
 import { SettingsServers } from "./settings-servers"
 import { PromptLibrary } from "@/opencodez/prompt-library"
+import { ContextSettings } from "@/opencodez/context-settings"
 
 export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
   const language = useLanguage()
@@ -18,13 +19,18 @@ export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
   const dialog = useDialog()
   const [tab, setTab] = createSignal(props.defaultValue ?? "general")
   let leavePrompts: ((action: () => void) => void) | undefined
+  let leaveContext: ((action: () => void) => void) | undefined
 
   const showProviders = () => {
     void dialog.show(() => <DialogSettings defaultValue="providers" />)
   }
 
   return (
-    <Dialog size="x-large" transition classList={{ "oz-prompts-settings": tab() === "prompts" }}>
+    <Dialog
+      size="x-large"
+      transition
+      classList={{ "oz-prompts-settings": tab() === "prompts", "oz-context-settings": tab() === "context" }}
+    >
       <Tabs
         orientation="vertical"
         variant="settings"
@@ -32,6 +38,7 @@ export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
         onChange={(value) => {
           const change = () => void startTransition(() => setTab(value))
           if (tab() === "prompts" && leavePrompts) return leavePrompts(change)
+          if (tab() === "context" && leaveContext) return leaveContext(change)
           change()
         }}
         class="h-full settings-dialog"
@@ -73,6 +80,10 @@ export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
                       <Icon name="prompt" />
                       {language.t("opencodez.prompts.title")}
                     </Tabs.Trigger>
+                    <Tabs.Trigger value="context">
+                      <Icon name="sliders" />
+                      {language.t("opencodez.context.title")}
+                    </Tabs.Trigger>
                   </div>
                 </div>
               </div>
@@ -105,6 +116,16 @@ export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
                 leavePrompts = guard
               }}
               onSettingsBack={() => leavePrompts?.(() => setTab("general"))}
+            />
+          </Show>
+        </Tabs.Content>
+        <Tabs.Content value="context" class="oz-context-content">
+          <Show when={tab() === "context"}>
+            <ContextSettings
+              onNavigate={(guard) => {
+                leaveContext = guard
+              }}
+              onSettingsBack={() => leaveContext?.(() => setTab("general"))}
             />
           </Show>
         </Tabs.Content>

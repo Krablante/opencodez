@@ -38,13 +38,30 @@ const lastAssistantWithTokens = (messages: Message[]) => {
   }
 }
 
-const build = (messages: Message[] = [], providers: Provider[] = []): Context | undefined => {
+const build = (
+  messages: Message[] = [],
+  providers: Provider[] = [],
+  metadata?: Record<string, unknown>,
+): Context | undefined => {
   const message = lastAssistantWithTokens(messages)
   if (!message) return undefined
 
   const provider = providers.find((item) => item.id === message.providerID)
   const model = provider?.models[message.modelID]
-  const limit = model?.limit.context
+  const current = metadata?.opencodezContextLast
+  const limit =
+    current &&
+    typeof current === "object" &&
+    "providerID" in current &&
+    current.providerID === message.providerID &&
+    "modelID" in current &&
+    current.modelID === message.modelID &&
+    "contextWindow" in current &&
+    typeof current.contextWindow === "number" &&
+    Number.isFinite(current.contextWindow) &&
+    current.contextWindow > 0
+      ? current.contextWindow
+      : model?.limit.context
   const total = tokenTotal(message)
 
   return {
@@ -60,6 +77,10 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Context | 
   }
 }
 
-export function getSessionContext(messages: Message[] = [], providers: Provider[] = []) {
-  return build(messages, providers)
+export function getSessionContext(
+  messages: Message[] = [],
+  providers: Provider[] = [],
+  metadata?: Record<string, unknown>,
+) {
+  return build(messages, providers, metadata)
 }

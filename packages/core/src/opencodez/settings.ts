@@ -1,6 +1,7 @@
 export * as OpenCodezSettings from "./settings"
 
 import { OpenCodezPromptPolicy } from "./prompt-policy"
+import { OpenCodezContextPolicy } from "./context-policy"
 
 export type ConfigLike = Record<string, unknown> & {
   opencodez?: {
@@ -103,15 +104,18 @@ export function responsesWire(config: ConfigLike | undefined) {
   return config?.opencodez?.responses?.wire ?? "codex"
 }
 
-export function responsesContextWindow(config: ConfigLike | undefined) {
-  return config?.opencodez?.responses?.context_window
+export function responsesContextWindow(config: ConfigLike | undefined, model?: ModelLike) {
+  return model
+    ? OpenCodezContextPolicy.resolve(config ?? {}, model, { remote: true }).contextWindow
+    : config?.opencodez?.responses?.context_window
 }
 
-export function responsesCompaction(config: ConfigLike | undefined) {
+export function responsesCompaction(config: ConfigLike | undefined, model?: ModelLike) {
   const configured = config?.opencodez?.responses?.compaction
+  const policy = model ? OpenCodezContextPolicy.resolve(config ?? {}, model, { remote: true }) : undefined
   return {
-    threshold: configured?.threshold ?? defaults.compaction.threshold,
-    token_limit: configured?.token_limit,
+    threshold: policy?.threshold ?? configured?.threshold ?? defaults.compaction.threshold,
+    token_limit: policy ? policy.tokenLimit : configured?.token_limit,
   }
 }
 
@@ -120,8 +124,9 @@ export function responsesCompactionLimit(
   model: { input?: number; context: number },
   responsesContext?: number,
   autoCompactTokenLimit?: number,
+  target?: ModelLike,
 ) {
-  const policy = responsesCompaction(config)
+  const policy = responsesCompaction(config, target)
   const base = responsesCompactionContext(model, responsesContext)
   let limit = Math.max(1, Math.floor(base * policy.threshold))
   if (autoCompactTokenLimit !== undefined) limit = Math.min(limit, autoCompactTokenLimit)

@@ -31,6 +31,7 @@ import { VcsEvent } from "./vcs-event"
 import { WorkspaceEvent } from "./workspace-event"
 import { WorktreeEvent } from "./worktree-event"
 import { OpenCodezPrompts } from "./opencodez-prompts"
+import { OpenCodezContext } from "./opencodez-context"
 
 const sessionV1DurableDefinitions = SessionV1.Event.Definitions.filter((definition) => definition.durable !== undefined)
 const sessionV1LiveDefinitions = SessionV1.Event.Definitions.filter((definition) => definition.durable === undefined)
@@ -46,6 +47,7 @@ const foundationDefinitions = Event.inventory(
 
 const featureDefinitions = Event.inventory(
   OpenCodezPrompts.Changed,
+  OpenCodezContext.Changed,
   ...FileSystem.Event.Definitions,
   ...Reference.Event.Definitions,
   ...Permission.Event.Definitions,

@@ -58,6 +58,8 @@ import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionModelContext } from "./model-context"
 import { OpenCodezPromptLibrary } from "@/opencodez/prompt-library"
+import { OpenCodezContextSettings } from "@/opencodez/context-settings"
+import { OpenCodezContextPolicy } from "@opencode-ai/core/opencodez/context-policy"
 import { OpenCodezPromptPolicy } from "@opencode-ai/core/opencodez/prompt-policy"
 import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import { LLMEvent } from "@opencode-ai/llm"
@@ -1111,9 +1113,10 @@ const layer = Layer.effect(
           Effect.gen(function* () {
             if (!OpenCodezIdentity.enabled) return
             const current = yield* sessions.get(sessionID).pipe(Effect.orDie)
-            if (!current.metadata?.opencodezPromptTurn) return
+            if (!current.metadata?.opencodezPromptTurn && !current.metadata?.opencodezContextTurn) return
             const metadata = { ...current.metadata }
             delete metadata.opencodezPromptTurn
+            delete metadata.opencodezContextTurn
             yield* sessions.setMetadata({ sessionID, metadata })
           }).pipe(Effect.ignore),
         )
@@ -1223,11 +1226,12 @@ const layer = Layer.effect(
               history: msgs,
             }).pipe(Effect.ignore, Effect.forkIn(scope))
 
-          const model = unknownModel ?? (yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID))
+          const originalModel =
+            unknownModel ?? (yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID))
           const task = tasks.pop()
 
           if (task?.type === "subtask") {
-            yield* handleSubtask({ task, model, lastUser, sessionID, session, msgs })
+            yield* handleSubtask({ task, model: originalModel, lastUser, sessionID, session, msgs })
             continue
           }
 
@@ -1246,8 +1250,31 @@ const layer = Layer.effect(
             continue
           }
 
-          const codexResponses = yield* isCodexResponses(model)
+          const codexResponses = yield* isCodexResponses(originalModel)
           const activeTurnID = codexResponses || directRemoteCompaction ? candidateTurnID : lastUser.id
+          const currentContext = yield* sessions.get(sessionID).pipe(Effect.orDie)
+          const promptConfigForContext = yield* config.get()
+          const contextTurn = OpenCodezIdentity.enabled
+            ? yield* Effect.promise(() =>
+                OpenCodezContextSettings.capture({
+                  model: originalModel,
+                  config: promptConfigForContext,
+                  metadata: currentContext.metadata,
+                  turnID: activeTurnID,
+                  remote:
+                    codexResponses ||
+                    (originalModel.providerID === "openai" && !!CodexResponsesCompaction.latest(msgs)),
+                }),
+              )
+            : undefined
+          const model = contextTurn ? OpenCodezContextPolicy.apply(originalModel, contextTurn.values) : originalModel
+          if (contextTurn && !OpenCodezContextSettings.turn(currentContext.metadata, originalModel, activeTurnID)) {
+            const latest = yield* sessions.get(sessionID).pipe(Effect.orDie)
+            yield* sessions.setMetadata({
+              sessionID,
+              metadata: { ...latest.metadata, opencodezContextTurn: contextTurn },
+            })
+          }
 
           if (OpenCodezIdentity.enabled) {
             const current = yield* sessions.get(sessionID).pipe(Effect.orDie)
@@ -1295,6 +1322,17 @@ const layer = Layer.effect(
             continue
           }
           const remoteTurn = yield* compaction.recordRemoteTurn({ sessionID, turnID: activeTurnID, model })
+          if (OpenCodezIdentity.enabled) {
+            const contextWindow = Math.min(
+              model.limit.input || model.limit.context,
+              remoteTurn?.profile?.contextWindow ?? Number.POSITIVE_INFINITY,
+            )
+            const used = { providerID: model.providerID, modelID: model.id, contextWindow }
+            const current = yield* sessions.get(sessionID).pipe(Effect.orDie)
+            if (contextWindow > 0 && JSON.stringify(current.metadata?.opencodezContextLast) !== JSON.stringify(used)) {
+              yield* sessions.setMetadata({ sessionID, metadata: { ...current.metadata, opencodezContextLast: used } })
+            }
+          }
 
           const additionalTokens =
             codexResponses && modelNeedsFollowUp
@@ -1336,7 +1374,7 @@ const layer = Layer.effect(
                     phase: modelNeedsFollowUp ? "mid-turn" : "pre-turn",
                     turnID: activeTurnID,
                   }
-                : { sessionID, agent: lastUser.agent, model: lastUser.model, auto: true },
+                : { sessionID, agent: lastUser.agent, model: lastUser.model, auto: true, turnID: activeTurnID },
             )
             continue
           }
@@ -1497,6 +1535,7 @@ const layer = Layer.effect(
                   model: lastUser.model,
                   auto: true,
                   overflow: !handle.message.finish,
+                  turnID: activeTurnID,
                 })
                 return "continue" as const
               }

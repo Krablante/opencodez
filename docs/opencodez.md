@@ -147,6 +147,14 @@ for GPT-6 when no OpenCodez System is selected by configuration.
 
 ## Model Defaults
 
+**Settings → Model context** manages personal working windows, absolute
+automatic-compaction thresholds, and automatic-compaction choices for models and
+families. The [model context guide](model-context.md) covers mobile editing,
+effective limits, inheritance, portable JSON, and changes without a restart.
+Personal values live in `models/context.json`, separately from prompt data and
+legacy configuration. They also apply to non-ChatGPT providers through the
+existing local-compaction mechanism.
+
 OpenCodez selects these System prompts by default for OpenAI Responses GPT
 models:
 
@@ -512,6 +520,12 @@ a successful compaction.
 
 #### Compaction Policy
 
+Personal model/family settings from the context menu take precedence over the
+configuration defaults below. Their resolved values are captured for the active
+turn, including its compaction and replay. An exact alias rule overrides a
+base-model rule, which overrides a family rule; missing fields inherit. The
+menu shows the effective ceiling and threshold before saving.
+
 `opencodez.responses.context_window` optionally requests a positive ChatGPT
 OAuth working window. OpenCodez applies it only through the authenticated model
 profile and clamps it to that profile's `max_context_window`; a model with no
@@ -770,11 +784,13 @@ working without widening the project identity or starting a background scan.
 
 ```text
 packages/core/src/opencodez/settings.ts
+packages/core/src/opencodez/context-policy.ts
 packages/core/src/opencodez/prompt-policy.ts
 packages/core/src/opencodez/session.ts
 packages/core/src/opencodez/slash.ts
 packages/core/src/filesystem/search.ts
 packages/opencode/src/opencodez/prompt-library.ts
+packages/opencode/src/opencodez/context-settings.ts
 packages/opencode/src/opencodez/prompt-store.ts
 packages/opencode/src/opencodez/default-prompts/
 packages/opencode/src/plugin/openai/codex.ts
@@ -793,6 +809,7 @@ packages/opencode/src/session/llm/request.ts
 packages/opencode/src/server/routes/instance/httpapi/groups/opencodez.ts
 packages/opencode/src/server/routes/instance/httpapi/handlers/opencodez.ts
 packages/schema/src/opencodez-prompts.ts
+packages/schema/src/opencodez-context.ts
 packages/app/src/opencodez/
 packages/tui/src/component/opencodez-dialogs.tsx
 packages/app/src/components/prompt-input.tsx

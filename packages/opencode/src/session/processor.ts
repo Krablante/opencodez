@@ -26,6 +26,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
 import { CodexResponsesAttempt } from "@/opencodez/codex-responses/attempt"
+import { OpenCodezContextPolicy } from "@opencode-ai/core/opencodez/context-policy"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
@@ -665,7 +666,10 @@ const layer = Layer.effect(
         if (!aborted) yield* rollbackAttempt()
         const error = parse(e)
         if (SessionV1.ContextOverflowError.isInstance(error)) {
-          if ((yield* config.get()).compaction?.auto === false && !ctx.assistantMessage.summary) {
+          if (
+            OpenCodezContextPolicy.resolve(yield* config.get(), ctx.model).auto === false &&
+            !ctx.assistantMessage.summary
+          ) {
             ctx.assistantMessage.error = error
             ctx.assistantMessage.finish = "error"
             yield* events.publish(Session.Event.Error, { sessionID: ctx.sessionID, error })

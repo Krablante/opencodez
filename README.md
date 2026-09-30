@@ -25,15 +25,16 @@
 
 OpenCodez is for people who want OpenCode to stay OpenCode, but with flexible prompt control, a ready-to-use Codex-style prompt set, and efficient stateful ChatGPT Responses requests.
 
-| Area           | What OpenCodez adds                                                                                           |
-| -------------- | ------------------------------------------------------------------------------------------------------------- |
-| Prompt control | TUI command and web composer control for the active System prompt.                                            |
-| Prompt library | Upstream built-ins, bundled Codex presets, and user prompt files in one shared selector.                      |
-| Library editor | One responsive menu for personal prompts, model/family assignments, import/export, and reasoning defaults.    |
-| Model defaults | Configurable System and context-window defaults for supported OpenAI Responses GPT models.                    |
-| Session state  | A manual System choice stays with the session and does not reset on `/model`.                                 |
-| Responses wire | ChatGPT OAuth can send incremental Codex-style WebSocket requests instead of resending the full conversation. |
-| Updates        | `opencodez update` uses GitHub Releases.                                                                      |
+| Area             | What OpenCodez adds                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------------------------------- |
+| Prompt control   | TUI command and web composer control for the active System prompt.                                            |
+| Prompt library   | Upstream built-ins, bundled Codex presets, and user prompt files in one shared selector.                      |
+| Library editor   | One responsive menu for personal prompts, model/family assignments, import/export, and reasoning defaults.    |
+| Model defaults   | Configurable System and context-window defaults for supported OpenAI Responses GPT models.                    |
+| Context controls | A separate mobile-ready menu for model/family context windows, automatic compaction, and portable settings.   |
+| Session state    | A manual System choice stays with the session and does not reset on `/model`.                                 |
+| Responses wire   | ChatGPT OAuth can send incremental Codex-style WebSocket requests instead of resending the full conversation. |
+| Updates          | `opencodez update` uses GitHub Releases.                                                                      |
 
 Read the full public feature reference in [docs/opencodez.md](docs/opencodez.md).
 
@@ -44,6 +45,7 @@ OpenCodez keeps the normal OpenCode shape, but adds a few practical controls:
 - `/system` selects the active Core/System prompt.
 - The web composer has the same session-level System selector.
 - Settings → System prompts manages the library without config edits or service restarts. Built-ins stay read-only; create independent personal copies, assign models/families, and exchange portable bundles. See the [prompt library guide](docs/system-prompts.md).
+- Settings → Model context manages working windows and automatic-compaction thresholds for models and families. It shows effective limits and supports import/export without restarting. See the [model context guide](docs/model-context.md).
 - `None` explicitly disables the selectable System prompt for the current session.
 - Model-aware defaults choose System prompts automatically for OpenAI Responses GPT models, and users can configure defaults for other models too.
 - A manual `/system` choice stays active when you switch models.

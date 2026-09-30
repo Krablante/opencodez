@@ -15,6 +15,7 @@ import { useLayout } from "@/context/layout"
 import { useTabs } from "@/context/tabs"
 import { useServerSync } from "@/context/server-sync"
 import { PromptLibrary } from "@/opencodez/prompt-library"
+import { ContextSettings } from "@/opencodez/context-settings"
 
 export const DialogSettings: Component<{
   sessionID?: string
@@ -28,6 +29,7 @@ export const DialogSettings: Component<{
   const serverSync = useServerSync()
   const [tab, setTab] = createSignal(props.defaultValue ?? "general")
   let leavePrompts: ((action: () => void) => void) | undefined
+  let leaveContext: ((action: () => void) => void) | undefined
   const directory = createMemo(() => {
     const route = layout.route()
     if (route.type === "dir-new-sesssion") return route.dir
@@ -48,7 +50,7 @@ export const DialogSettings: Component<{
       size="x-large"
       variant="settings"
       class="settings-v2-dialog"
-      classList={{ "oz-prompts-settings": tab() === "prompts" }}
+      classList={{ "oz-prompts-settings": tab() === "prompts", "oz-context-settings": tab() === "context" }}
     >
       <TabsV2
         orientation="vertical"
@@ -57,6 +59,7 @@ export const DialogSettings: Component<{
         onChange={(value) => {
           const change = () => void startTransition(() => setTab(value))
           if (tab() === "prompts" && leavePrompts) return leavePrompts(change)
+          if (tab() === "context" && leaveContext) return leaveContext(change)
           change()
         }}
         class="settings-v2"
@@ -98,6 +101,10 @@ export const DialogSettings: Component<{
                       <Icon name="prompt" />
                       {language.t("opencodez.prompts.title")}
                     </TabsV2.Trigger>
+                    <TabsV2.Trigger value="context">
+                      <Icon name="sliders" />
+                      {language.t("opencodez.context.title")}
+                    </TabsV2.Trigger>
                   </div>
                 </div>
               </div>
@@ -130,6 +137,16 @@ export const DialogSettings: Component<{
                 leavePrompts = guard
               }}
               onSettingsBack={() => leavePrompts?.(() => setTab("general"))}
+            />
+          </Show>
+        </TabsV2.Content>
+        <TabsV2.Content value="context" class="settings-v2-panel oz-context-content">
+          <Show when={tab() === "context"}>
+            <ContextSettings
+              onNavigate={(guard) => {
+                leaveContext = guard
+              }}
+              onSettingsBack={() => leaveContext?.(() => setTab("general"))}
             />
           </Show>
         </TabsV2.Content>

@@ -15,6 +15,9 @@ import { NotFoundError } from "@/storage/storage"
 import { Effect, Layer, Context, Option } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { usable } from "./overflow"
+import { OpenCodezContextSettings } from "@/opencodez/context-settings"
+import { OpenCodezContextPolicy } from "@opencode-ai/core/opencodez/context-policy"
+import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -432,6 +435,10 @@ const layer = Layer.effect(
             message: input.replay,
             replaceMedia: input.replaceReplayMedia ?? true,
           })
+          const current = yield* session.get(input.sessionID).pipe(Effect.orDie)
+          const metadata = OpenCodezContextSettings.continueTurn(current.metadata, replay.id)
+          if (metadata && metadata !== current.metadata)
+            yield* session.setMetadata({ sessionID: input.sessionID, metadata })
           if (input.compactionPart) {
             const part = yield* session.getPart({
               sessionID: input.sessionID,
@@ -487,6 +494,10 @@ const layer = Layer.effect(
               agent: input.userMessage.agent,
               model: input.userMessage.model,
             })
+            const current = yield* session.get(input.sessionID).pipe(Effect.orDie)
+            const metadata = OpenCodezContextSettings.continueTurn(current.metadata, continueMsg.id)
+            if (metadata && metadata !== current.metadata)
+              yield* session.setMetadata({ sessionID: input.sessionID, metadata })
             const text =
               (input.overflow && input.phase !== "mid-turn"
                 ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
@@ -596,24 +607,41 @@ const layer = Layer.effect(
 
       const cfg = yield* config.get()
       const history = compactionPart ? messages.filter((message) => message.info.id !== input.parentID) : messages
-      const sourceModel = yield* provider
+      const originalSource = yield* provider
         .getModel(userMessage.model.providerID, userMessage.model.modelID)
         .pipe(Effect.orDie)
       const transition = compactionPart?.transition
-      const targetModel = transition
-        ? yield* provider.getModel(transition.model.providerID, transition.model.modelID).pipe(Effect.orDie)
-        : sourceModel
-      const authInfo = yield* auth.get(userMessage.model.providerID).pipe(Effect.orDie)
+      const authInfo = yield* auth.get(originalSource.providerID).pipe(Effect.orDie)
       const previousCompaction = CodexResponsesCompaction.latest(history)
       const codexResponses = LLMRequestPrep.isCodexResponses({
-        providerID: sourceModel.providerID,
-        modelNpm: sourceModel.api.npm,
+        providerID: originalSource.providerID,
+        modelNpm: originalSource.api.npm,
         authType: authInfo?.type,
         config: cfg,
       })
-      // Legacy mode creates local summaries. Existing opaque history remains on
-      // the remote path so changing the setting never discards durable context.
-      const remote = codexResponses || (sourceModel.providerID === "openai" && !!previousCompaction)
+      // Existing opaque history retains its authenticated remote path in legacy mode.
+      const remote = codexResponses || (originalSource.providerID === "openai" && !!previousCompaction)
+      if (OpenCodezIdentity.enabled) yield* Effect.promise(() => OpenCodezContextSettings.read())
+      const savedContext = input.auto
+        ? OpenCodezContextSettings.turn(
+            (yield* session.get(input.sessionID).pipe(Effect.orDie)).metadata,
+            originalSource,
+            turnID,
+          )
+        : undefined
+      const sourceModel =
+        transition || !OpenCodezIdentity.enabled
+          ? originalSource
+          : OpenCodezContextPolicy.apply(
+              originalSource,
+              savedContext?.values ??
+                OpenCodezContextPolicy.resolve(cfg, originalSource, {
+                  remote,
+                }),
+            )
+      const targetModel = transition
+        ? yield* provider.getModel(transition.model.providerID, transition.model.modelID).pipe(Effect.orDie)
+        : sourceModel
       const accountKey =
         authInfo?.type === "oauth" ? CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access) : undefined
       const turnSettings = input.prepared?.codexResponsesTurn?.settings
@@ -630,7 +658,7 @@ const layer = Layer.effect(
                 targetModel,
                 accountKey,
                 undefined,
-                OpenCodezSettings.responsesContextWindow(cfg),
+                OpenCodezSettings.responsesContextWindow(cfg, targetModel),
               )
             : undefined
       const remoteResult = yield* remoteCompaction.process({

@@ -8,6 +8,7 @@ import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware
 import { ApiNotFoundError } from "../errors"
 import { described } from "./metadata"
 import { OpenCodezPrompts } from "@opencode-ai/schema/opencodez-prompts"
+import { OpenCodezContext } from "@opencode-ai/schema/opencodez-context"
 
 const root = "/opencodez/prompts"
 
@@ -58,6 +59,60 @@ export const OpenCodezPromptPaths = {
 export const OpenCodezApi = HttpApi.make("opencodez").add(
   HttpApiGroup.make("opencodez")
     .add(
+      HttpApiEndpoint.get("context", "/opencodez/context", {
+        query: WorkspaceRoutingQuery,
+        success: OpenCodezContext.Catalog,
+        error: OpenCodezContext.Error,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "opencodez.context.get",
+          summary: "Get model context and compaction settings",
+        }),
+      ),
+      HttpApiEndpoint.post("contextUpdate", "/opencodez/context", {
+        query: WorkspaceRoutingQuery,
+        payload: OpenCodezContext.Command,
+        success: OpenCodezContext.Catalog,
+        error: OpenCodezContext.Error,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "opencodez.context.update",
+          summary: "Save model context settings without restarting",
+        }),
+      ),
+      HttpApiEndpoint.post("contextResolve", "/opencodez/context/resolve", {
+        query: WorkspaceRoutingQuery,
+        payload: Schema.Struct({
+          rules: Schema.Array(OpenCodezContext.Rule),
+          remove: Schema.optional(Schema.Array(OpenCodezContext.Target)),
+        }),
+        success: OpenCodezContext.Catalog,
+        error: OpenCodezContext.Error,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "opencodez.context.resolve",
+          summary: "Preview effective model context limits without saving",
+        }),
+      ),
+      HttpApiEndpoint.post("contextPreview", "/opencodez/context/preview", {
+        query: WorkspaceRoutingQuery,
+        payload: Schema.Struct({ bundle: Schema.Unknown }),
+        success: OpenCodezContext.Preview,
+        error: OpenCodezContext.Error,
+      }).annotateMerge(
+        OpenApi.annotations({ identifier: "opencodez.context.preview", summary: "Preview importing context settings" }),
+      ),
+      HttpApiEndpoint.post("contextExport", "/opencodez/context/export", {
+        query: WorkspaceRoutingQuery,
+        payload: Schema.Struct({ targets: Schema.optional(Schema.Array(OpenCodezContext.Target)) }),
+        success: OpenCodezContext.Bundle,
+        error: OpenCodezContext.Error,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "opencodez.context.export",
+          summary: "Export portable model context settings",
+        }),
+      ),
       HttpApiEndpoint.get("promptList", OpenCodezPromptPaths.list, {
         query: WorkspaceRoutingQuery,
         success: described(Schema.Array(OpenCodezPromptEntry), "List OpenCodez prompts"),

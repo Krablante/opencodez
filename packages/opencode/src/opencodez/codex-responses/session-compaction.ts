@@ -129,7 +129,7 @@ export function make(deps: Dependencies) {
                 input.model,
                 CodexResponsesProtocol.accountKey(authInfo.accountId, authInfo.access),
                 undefined,
-                OpenCodezSettings.responsesContextWindow(cfg),
+                OpenCodezSettings.responsesContextWindow(cfg, input.model),
               )
         : undefined
     const limit =
@@ -139,6 +139,7 @@ export function make(deps: Dependencies) {
             input.model.limit,
             profile?.contextWindow,
             profile?.autoCompactTokenLimit,
+            input.model,
           )
         : undefined
     return isOverflow({
@@ -212,7 +213,7 @@ export function make(deps: Dependencies) {
       input.model,
       accountKey,
       undefined,
-      OpenCodezSettings.responsesContextWindow(cfg),
+      OpenCodezSettings.responsesContextWindow(cfg, input.model),
     )
     if (existing?.compHash && profile?.compHash && existing.compHash !== profile.compHash) {
       throw new Error(
@@ -292,7 +293,7 @@ export function make(deps: Dependencies) {
       input.model,
       accountKey,
       undefined,
-      OpenCodezSettings.responsesContextWindow(cfg),
+      OpenCodezSettings.responsesContextWindow(cfg, input.model),
     )
     if (!profile) return undefined
     const info = yield* deps.session.get(input.sessionID).pipe(Effect.orDie)
@@ -348,7 +349,7 @@ export function make(deps: Dependencies) {
       } satisfies RemoteTransition
     }
 
-    if (Option.isSome(previousModel) && input.tokens && previousModel.value.api.id !== input.model.api.id) {
+    if (Option.isSome(previousModel) && input.tokens) {
       const previousProfile =
         previous?.profile?.modelID === previousModel.value.api.id
           ? previous.profile
@@ -356,7 +357,7 @@ export function make(deps: Dependencies) {
               previousModel.value,
               accountKey,
               undefined,
-              OpenCodezSettings.responsesContextWindow(cfg),
+              OpenCodezSettings.responsesContextWindow(cfg, previousModel.value),
             )
       const previousWindow = modelContextWindow(previousModel.value, previousProfile)
       const currentWindow = modelContextWindow(input.model, profile)
@@ -515,9 +516,14 @@ export function make(deps: Dependencies) {
                   isWorkflow: false,
                   config: input.cfg,
                   allowCompHashMismatch: true,
-                  codexResponsesTurn: CodexResponsesCompaction.turnSettings(sessionInfo.metadata).find(
-                    (turn) => turn.turnID === input.turnID && turn.model.apiModelID === attemptModel.api.id,
-                  ),
+                  codexResponsesTurn:
+                    input.transition && attemptModel.id === input.sourceModel.id
+                      ? CodexResponsesCompaction.turnSettings(sessionInfo.metadata).findLast(
+                          (turn) => turn.turnID !== input.turnID && turn.model.apiModelID === attemptModel.api.id,
+                        )
+                      : CodexResponsesCompaction.turnSettings(sessionInfo.metadata).find(
+                          (turn) => turn.turnID === input.turnID && turn.model.apiModelID === attemptModel.api.id,
+                        ),
                 })
               })
           return yield* CodexResponsesCompact.compact({

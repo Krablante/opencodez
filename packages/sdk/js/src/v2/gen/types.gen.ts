@@ -54,6 +54,7 @@ export type Event =
   | EventInstallationUpdated
   | EventInstallationUpdateAvailable
   | EventOpencodezPromptsChanged
+  | EventOpencodezContextChanged
   | EventFileEdited
   | EventReferenceUpdated
   | EventPermissionV2Asked
@@ -1260,6 +1261,13 @@ export type GlobalEvent = {
     | {
         id: string
         type: "opencodez.prompts.changed"
+        properties: {
+          revision: string
+        }
+      }
+    | {
+        id: string
+        type: "opencodez.context.changed"
         properties: {
           revision: string
         }
@@ -2977,6 +2985,7 @@ export type V2Event =
   | InstallationUpdated
   | InstallationUpdateAvailable
   | OpencodezPromptsChanged
+  | OpencodezContextChanged
   | FileEdited
   | ReferenceUpdated
   | PermissionV2Asked
@@ -3918,6 +3927,82 @@ export type ConfigV2ExperimentalPolicy = {
   action: "provider.use"
   effect: PolicyEffect
   resource: string
+}
+
+export type OpenCodezContextRule = {
+  scope: "model" | "family"
+  providerID: string
+  target: string
+  contextWindow?: number
+  tokenLimit?: number
+  auto?: boolean
+}
+
+export type OpenCodezContextValues = {
+  contextWindow?: number
+  tokenLimit?: number
+  auto?: boolean
+}
+
+export type OpenCodezContextEffective = {
+  contextWindow: number
+  tokenLimit: number
+  auto: boolean
+  maxContextWindow: number
+  maxTokenLimit: number
+  remote: boolean
+}
+
+export type OpenCodezContextModel = {
+  id: string
+  apiID: string
+  name: string
+  providerID: string
+  providerName: string
+  family: string
+  inherited: OpenCodezContextValues
+  effective: OpenCodezContextEffective
+}
+
+export type OpenCodezContextCatalog = {
+  revision: string
+  rules: Array<OpenCodezContextRule>
+  models: Array<OpenCodezContextModel>
+}
+
+export type OpenCodezContextError = {
+  _tag: "OpenCodezContext.Error"
+  message: string
+  code: "invalid" | "conflict" | "io"
+}
+
+export type OpenCodezContextTarget = {
+  scope: "model" | "family"
+  providerID: string
+  target: string
+}
+
+export type OpenCodezContextCommand = {
+  revision: string
+  rules: Array<OpenCodezContextRule>
+  remove?: Array<OpenCodezContextTarget>
+}
+
+export type OpenCodezContextPreview = {
+  revision: string
+  items: Array<{
+    rule: OpenCodezContextRule
+    current?: OpenCodezContextRule
+    status: "new" | "same" | "changed"
+    active: boolean
+    name: string
+  }>
+}
+
+export type OpenCodezContextBundle = {
+  format: "opencodez-context"
+  version: 1
+  rules: Array<OpenCodezContextRule>
 }
 
 export type OpenCodezPromptsError = {
@@ -5624,6 +5709,23 @@ export type OpencodezPromptsChanged = {
   }
 }
 
+export type OpencodezContextChanged = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "opencodez.context.changed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    revision: string
+  }
+}
+
 export type FileEdited = {
   id: string
   metadata?: {
@@ -6934,6 +7036,14 @@ export type EventInstallationUpdateAvailable = {
 export type EventOpencodezPromptsChanged = {
   id: string
   type: "opencodez.prompts.changed"
+  properties: {
+    revision: string
+  }
+}
+
+export type EventOpencodezContextChanged = {
+  id: string
+  type: "opencodez.context.changed"
   properties: {
     revision: string
   }
@@ -8934,6 +9044,153 @@ export type McpDisconnectResponses = {
 }
 
 export type McpDisconnectResponse = McpDisconnectResponses[keyof McpDisconnectResponses]
+
+export type OpencodezContextGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/opencodez/context"
+}
+
+export type OpencodezContextGetErrors = {
+  /**
+   * OpenCodezContext.Error | InvalidRequestError
+   */
+  400: OpenCodezContextError | InvalidRequestError
+}
+
+export type OpencodezContextGetError = OpencodezContextGetErrors[keyof OpencodezContextGetErrors]
+
+export type OpencodezContextGetResponses = {
+  /**
+   * OpenCodezContext.Catalog
+   */
+  200: OpenCodezContextCatalog
+}
+
+export type OpencodezContextGetResponse = OpencodezContextGetResponses[keyof OpencodezContextGetResponses]
+
+export type OpencodezContextUpdateData = {
+  body?: OpenCodezContextCommand
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/opencodez/context"
+}
+
+export type OpencodezContextUpdateErrors = {
+  /**
+   * OpenCodezContext.Error | InvalidRequestError
+   */
+  400: OpenCodezContextError | InvalidRequestError
+}
+
+export type OpencodezContextUpdateError = OpencodezContextUpdateErrors[keyof OpencodezContextUpdateErrors]
+
+export type OpencodezContextUpdateResponses = {
+  /**
+   * OpenCodezContext.Catalog
+   */
+  200: OpenCodezContextCatalog
+}
+
+export type OpencodezContextUpdateResponse = OpencodezContextUpdateResponses[keyof OpencodezContextUpdateResponses]
+
+export type OpencodezContextResolveData = {
+  body?: {
+    rules: Array<OpenCodezContextRule>
+    remove?: Array<OpenCodezContextTarget>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/opencodez/context/resolve"
+}
+
+export type OpencodezContextResolveErrors = {
+  /**
+   * OpenCodezContext.Error | InvalidRequestError
+   */
+  400: OpenCodezContextError | InvalidRequestError
+}
+
+export type OpencodezContextResolveError = OpencodezContextResolveErrors[keyof OpencodezContextResolveErrors]
+
+export type OpencodezContextResolveResponses = {
+  /**
+   * OpenCodezContext.Catalog
+   */
+  200: OpenCodezContextCatalog
+}
+
+export type OpencodezContextResolveResponse = OpencodezContextResolveResponses[keyof OpencodezContextResolveResponses]
+
+export type OpencodezContextPreviewData = {
+  body?: {
+    bundle: unknown
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/opencodez/context/preview"
+}
+
+export type OpencodezContextPreviewErrors = {
+  /**
+   * OpenCodezContext.Error | InvalidRequestError
+   */
+  400: OpenCodezContextError | InvalidRequestError
+}
+
+export type OpencodezContextPreviewError = OpencodezContextPreviewErrors[keyof OpencodezContextPreviewErrors]
+
+export type OpencodezContextPreviewResponses = {
+  /**
+   * OpenCodezContext.Preview
+   */
+  200: OpenCodezContextPreview
+}
+
+export type OpencodezContextPreviewResponse = OpencodezContextPreviewResponses[keyof OpencodezContextPreviewResponses]
+
+export type OpencodezContextExportData = {
+  body?: {
+    targets?: Array<OpenCodezContextTarget>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/opencodez/context/export"
+}
+
+export type OpencodezContextExportErrors = {
+  /**
+   * OpenCodezContext.Error | InvalidRequestError
+   */
+  400: OpenCodezContextError | InvalidRequestError
+}
+
+export type OpencodezContextExportError = OpencodezContextExportErrors[keyof OpencodezContextExportErrors]
+
+export type OpencodezContextExportResponses = {
+  /**
+   * OpenCodezContext.Bundle
+   */
+  200: OpenCodezContextBundle
+}
+
+export type OpencodezContextExportResponse = OpencodezContextExportResponses[keyof OpencodezContextExportResponses]
 
 export type OpencodezPromptListData = {
   body?: never

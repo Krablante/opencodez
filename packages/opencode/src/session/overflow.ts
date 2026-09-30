@@ -4,6 +4,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import type { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
 import type { MessageV2 } from "./message-v2"
+import { OpenCodezContextPolicy } from "@opencode-ai/core/opencodez/context-policy"
 
 const COMPACTION_BUFFER = 20_000
 
@@ -27,13 +28,18 @@ export function isOverflow(input: {
   limit?: number
   additionalTokens?: number
 }) {
-  if (input.cfg.compaction?.auto === false) return false
+  const policy = OpenCodezContextPolicy.resolve(input.cfg, input.model)
+  if (policy.auto === false) return false
   if (input.model.limit.context === 0) return false
 
   const count =
     (input.tokens.total ||
       input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write) +
     (input.additionalTokens ?? 0)
-  const threshold = Math.min(usable(input), input.limit ?? Number.POSITIVE_INFINITY)
+  const threshold = Math.min(
+    usable(input),
+    input.limit ?? Number.POSITIVE_INFINITY,
+    policy.tokenLimit ?? Number.POSITIVE_INFINITY,
+  )
   return count >= threshold
 }

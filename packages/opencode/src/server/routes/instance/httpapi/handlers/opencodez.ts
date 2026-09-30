@@ -13,6 +13,13 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { GlobalBus } from "@/bus/global"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 import { SystemPrompt } from "@/session/system"
+import { OpenCodezContext } from "@opencode-ai/schema/opencodez-context"
+import { OpenCodezContextPolicy } from "@opencode-ai/core/opencodez/context-policy"
+import { OpenCodezContextSettings } from "@/opencodez/context-settings"
+import { Auth } from "@/auth"
+import { RuntimeFlags } from "@/effect/runtime-flags"
+import { CodexResponsesCapability } from "@/opencodez/codex-responses/capability"
+import { CodexResponsesProtocol } from "@/opencodez/codex-responses/protocol"
 
 export const opencodezHandlers = HttpApiBuilder.group(InstanceHttpApi, "opencodez", (handlers) =>
   Effect.gen(function* () {
@@ -20,6 +27,102 @@ export const opencodezHandlers = HttpApiBuilder.group(InstanceHttpApi, "opencode
     const config = yield* Config.Service
     const provider = yield* Provider.Service
     const events = yield* EventV2.Service
+    const auth = yield* Auth.Service
+    const flags = yield* RuntimeFlags.Service
+
+    const contextAttempt = <A>(run: () => Promise<A>) =>
+      Effect.tryPromise({
+        try: run,
+        catch: (error) =>
+          error instanceof OpenCodezContext.Error
+            ? error
+            : new OpenCodezContext.Error({ code: "io", message: "Unable to read or update model context settings" }),
+      })
+    const context = Effect.fn("OpenCodezHttpApi.context")(function* (changes?: {
+      rules: ReadonlyArray<OpenCodezContext.Rule>
+      remove?: ReadonlyArray<OpenCodezContext.Target>
+    }) {
+      const stored = yield* contextAttempt(() => OpenCodezContextSettings.read())
+      const rules = changes
+        ? yield* contextAttempt(async () => OpenCodezContextSettings.merge(stored.rules, changes.rules, changes.remove))
+        : stored.rules
+      const cfg = yield* config.get()
+      const providers = yield* provider.list()
+      const groups = yield* Effect.forEach(Object.values(providers), (item) =>
+        Effect.gen(function* () {
+          const credentials = yield* auth
+            .get(item.id)
+            .pipe(
+              Effect.mapError(
+                () => new OpenCodezContext.Error({ code: "io", message: "Unable to read provider authentication" }),
+              ),
+            )
+          const accountKey =
+            credentials?.type === "oauth"
+              ? CodexResponsesProtocol.accountKey(credentials.accountId, credentials.access)
+              : undefined
+          const targets = changes ? [...changes.rules, ...(changes.remove ?? [])] : undefined
+          const models = Object.values(item.models).filter(
+            (model) =>
+              !targets ||
+              targets.some(
+                (target) =>
+                  target.providerID === item.id &&
+                  (target.scope === "family"
+                    ? target.target === model.family
+                    : target.target === model.id || target.target === model.api.id),
+              ),
+          )
+          return models.map((model) => {
+            const remote = CodexResponsesCapability.enabled({
+              providerID: item.id,
+              modelNpm: model.api.npm,
+              authType: credentials?.type,
+              wire: OpenCodezSettings.responsesWire(cfg),
+            })
+            return {
+              id: model.id,
+              apiID: model.api.id,
+              name: model.name,
+              providerID: item.id,
+              providerName: item.name,
+              family: model.family ?? "",
+              inherited: OpenCodezContextPolicy.values(
+                OpenCodezContextPolicy.resolve(cfg, model, {
+                  remote,
+                  rules: rules.filter(
+                    (rule) => !(rule.scope === "model" && rule.providerID === item.id && rule.target === model.id),
+                  ),
+                }),
+              ),
+              effective: OpenCodezContextSettings.effective({
+                model,
+                config: cfg,
+                remote,
+                accountKey,
+                rules,
+                outputTokenMax: flags.outputTokenMax,
+              }),
+            }
+          })
+        }),
+      )
+      return { revision: String(stored.revision), rules, models: groups.flat() }
+    })
+    const contextUpdate = Effect.fn("OpenCodezHttpApi.contextUpdate")(function* (ctx: {
+      payload: OpenCodezContext.Command
+    }) {
+      const preview = yield* context(ctx.payload)
+      yield* contextAttempt(async () => OpenCodezContextSettings.validateModels(preview, ctx.payload.rules))
+      const result = yield* contextAttempt(() => OpenCodezContextSettings.change(ctx.payload))
+      if (result.changed) {
+        yield* events.publish(OpenCodezContext.Changed, { revision: result.revision })
+        GlobalBus.emit("event", {
+          payload: { type: OpenCodezContext.Changed.type, properties: { revision: result.revision } },
+        })
+      }
+      return yield* context()
+    })
 
     const attempt = <A>(run: () => Promise<A>) =>
       Effect.tryPromise({
@@ -148,6 +251,29 @@ export const opencodezHandlers = HttpApiBuilder.group(InstanceHttpApi, "opencode
     })
 
     return handlers
+      .handle("context", () => context())
+      .handle("contextUpdate", contextUpdate)
+      .handle("contextResolve", (ctx) => context(ctx.payload))
+      .handle("contextPreview", (ctx) =>
+        Effect.gen(function* () {
+          const bundle = yield* contextAttempt(async () => OpenCodezContextSettings.decodeBundle(ctx.payload.bundle))
+          const preview = yield* context({ rules: bundle.rules })
+          yield* contextAttempt(async () => OpenCodezContextSettings.validateModels(preview, bundle.rules))
+          const catalog = yield* context()
+          return yield* contextAttempt(async () => OpenCodezContextSettings.preview(ctx.payload.bundle, catalog))
+        }),
+      )
+      .handle("contextExport", (ctx) =>
+        Effect.gen(function* () {
+          const catalog = yield* context()
+          const keys = ctx.payload.targets ? new Set(ctx.payload.targets.map(OpenCodezContextPolicy.key)) : undefined
+          return {
+            format: "opencodez-context" as const,
+            version: 1 as const,
+            rules: catalog.rules.filter((rule) => !keys || keys.has(OpenCodezContextPolicy.key(rule))),
+          }
+        }),
+      )
       .handle("promptList", list)
       .handle("promptState", state)
       .handle("promptSelect", select)

@@ -113,6 +113,19 @@ import type {
   McpStatusResponses,
   ModelRef,
   MoveSessionDestination,
+  OpenCodezContextCommand,
+  OpencodezContextExportErrors,
+  OpencodezContextExportResponses,
+  OpencodezContextGetErrors,
+  OpencodezContextGetResponses,
+  OpencodezContextPreviewErrors,
+  OpencodezContextPreviewResponses,
+  OpencodezContextResolveErrors,
+  OpencodezContextResolveResponses,
+  OpenCodezContextRule,
+  OpenCodezContextTarget,
+  OpencodezContextUpdateErrors,
+  OpencodezContextUpdateResponses,
   OpencodezLibraryExportErrors,
   OpencodezLibraryExportResponses,
   OpencodezLibraryGetErrors,
@@ -2545,6 +2558,194 @@ export class Mcp extends HeyApiClient {
   }
 }
 
+export class Context extends HeyApiClient {
+  /**
+   * Get model context and compaction settings
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<OpencodezContextGetResponses, OpencodezContextGetErrors, ThrowOnError>({
+      url: "/opencodez/context",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Save model context settings without restarting
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      openCodezContextCommand?: OpenCodezContextCommand
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "openCodezContextCommand", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      OpencodezContextUpdateResponses,
+      OpencodezContextUpdateErrors,
+      ThrowOnError
+    >({
+      url: "/opencodez/context",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Preview effective model context limits without saving
+   */
+  public resolve<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      rules?: Array<OpenCodezContextRule>
+      remove?: Array<OpenCodezContextTarget>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "rules" },
+            { in: "body", key: "remove" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      OpencodezContextResolveResponses,
+      OpencodezContextResolveErrors,
+      ThrowOnError
+    >({
+      url: "/opencodez/context/resolve",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Preview importing context settings
+   */
+  public preview<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      bundle?: unknown
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "bundle" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      OpencodezContextPreviewResponses,
+      OpencodezContextPreviewErrors,
+      ThrowOnError
+    >({
+      url: "/opencodez/context/preview",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Export portable model context settings
+   */
+  public export<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      targets?: Array<OpenCodezContextTarget>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "targets" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      OpencodezContextExportResponses,
+      OpencodezContextExportErrors,
+      ThrowOnError
+    >({
+      url: "/opencodez/context/export",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Prompt extends HeyApiClient {
   /**
    * List OpenCodez prompts
@@ -2857,6 +3058,11 @@ export class Library extends HeyApiClient {
 }
 
 export class Opencodez extends HeyApiClient {
+  private _context?: Context
+  get context(): Context {
+    return (this._context ??= new Context({ client: this.client }))
+  }
+
   private _prompt?: Prompt
   get prompt(): Prompt {
     return (this._prompt ??= new Prompt({ client: this.client }))
