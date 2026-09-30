@@ -92,7 +92,8 @@ export function PromptLibrary(props: Props) {
         (library.state.data?.rules ?? []).map((rule) => [`${rule.scope}/${rule.providerID}/${rule.target}`, rule]),
       ).values(),
     ].filter((rule) => {
-      if (rule.prompt !== state.item?.id) return false
+      if (rule.scope === "all" && rule.prompt === "@builtin") return false
+      if (rule.prompt !== state.item?.id && rule.prompt !== "@builtin") return false
       if (rule.scope === "model")
         return library.state.data?.models.some(
           (model) =>
