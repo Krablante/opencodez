@@ -329,6 +329,7 @@ export async function mutate(
           entries.some(
             (entry) =>
               entry.id === id &&
+              !entry.deleted &&
               contentFingerprint(entry) === contentFingerprint({ name, description: incoming.description, text }),
           )
         )
@@ -348,12 +349,16 @@ export async function mutate(
       for (const supplied of command.rules ?? []) {
         const rule = normalizeRule(supplied)
         const prompt = remapped.get(rule.prompt) ?? rule.prompt
-        if (
-          prompt !== "@builtin" &&
-          !entries.some((entry) => entry.id === prompt && !entry.deleted) &&
-          !(await get(prompt))
-        )
-          OpenCodezPromptStore.fail("invalid", "Imported assignment refers to a missing prompt")
+        if (prompt !== "@builtin") {
+          const managed = entries.find((entry) => entry.id === prompt)
+          if (managed?.deleted) OpenCodezPromptStore.fail("invalid", "Deleted prompts cannot receive new assignments")
+          if (!managed) {
+            if (!(await get(prompt)))
+              OpenCodezPromptStore.fail("invalid", "Imported assignment refers to a missing prompt")
+            if ((await item(prompt)).deleted)
+              OpenCodezPromptStore.fail("invalid", "Deleted prompts cannot receive new assignments")
+          }
+        }
         const index = rules.findIndex(
           (entry) => entry.scope === rule.scope && entry.providerID === rule.providerID && entry.target === rule.target,
         )
