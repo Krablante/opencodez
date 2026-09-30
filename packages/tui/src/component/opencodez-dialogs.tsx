@@ -1,11 +1,28 @@
 import { OpenCodezSession } from "@opencode-ai/core/opencodez/session"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 import type { Config, OpenCodezPromptEntry } from "@opencode-ai/sdk/v2"
-import { createMemo } from "solid-js"
+import { createMemo, onCleanup, onMount } from "solid-js"
+import { OpenCodezPromptPolicy } from "@opencode-ai/core/opencodez/prompt-policy"
 import { useSDK } from "../context/sdk"
 import { DialogSelect } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
+
+export function syncOpenCodezLibrary() {
+  const sdk = useSDK()
+  const load = async () => {
+    const result = await sdk.client.opencodez.library.get()
+    if (!result.data) return
+    OpenCodezPromptPolicy.install({ ...result.data, rules: result.data.rules.filter((rule) => rule.source === "user") })
+    OpenCodezSession.refresh()
+  }
+  onMount(() => void load().catch(() => {}))
+  const stop = sdk.event.on("event", (event) => {
+    if (event.payload.type === "opencodez.prompts.changed" || event.payload.type === "server.connected")
+      void load().catch(() => {})
+  })
+  onCleanup(stop)
+}
 
 export function OpenCodezPromptSelector(props: {
   entries: OpenCodezPromptEntry[]
@@ -28,11 +45,12 @@ export function OpenCodezPromptSelector(props: {
   })
   const options = createMemo(() => {
     const prompts = props.entries.map((item) => ({
-      title: item.name,
+      title: item.title ?? item.name,
       value: item.name,
       description: item.source,
     }))
     return [
+      { title: "Automatic", value: "auto", description: "Use model defaults" },
       {
         title: "None",
         value: OpenCodezSession.noneID,

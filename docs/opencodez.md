@@ -57,8 +57,14 @@ installed, deployed, canary, or operator artifact.
 
 ## System Prompt Library
 
-OpenCodez has one managed prompt concept: System Prompt. User prompt files live
-in:
+The [System prompts guide](system-prompts.md) covers the responsive library,
+read-only built-ins, independent copies, model/family assignments, reasoning
+defaults, portable bundles, deletion and restoration, and updates without a
+service restart. Open it through Settings → System prompts or the composer's
+Manage prompts action.
+
+OpenCodez has one managed prompt concept: System Prompt. Managed user data lives
+in `~/.config/opencodez/prompts/library.json`; existing user Markdown sources live in:
 
 ```text
 ~/.config/opencodez/prompts/core/<name>.md
@@ -163,10 +169,12 @@ gpt-6.1-sol -> codex_gpt_6_1_sol
 
 Users can override defaults in `~/.config/opencodez/opencode.jsonc`:
 
-A configured System string or mapping takes precedence over the built-in
-mapping as a whole. Add entries for new models to an existing user mapping if
-its `default` should not apply to them. A saved manual session choice also
-remains authoritative. Updating the binary never rewrites edited user prompts.
+A configured System string remains an all-model choice. Explicit user model and
+family mappings take precedence, while a mapping's `default` is a fallback and
+no longer masks new bundled model assignments. New library rules remain separate
+from that config and can explicitly return a target to its built-in choice.
+A saved manual session choice remains authoritative. Updating the binary never
+rewrites personal prompts or assignments.
 
 ```jsonc
 {
@@ -762,10 +770,12 @@ working without widening the project identity or starting a background scan.
 
 ```text
 packages/core/src/opencodez/settings.ts
+packages/core/src/opencodez/prompt-policy.ts
 packages/core/src/opencodez/session.ts
 packages/core/src/opencodez/slash.ts
 packages/core/src/filesystem/search.ts
 packages/opencode/src/opencodez/prompt-library.ts
+packages/opencode/src/opencodez/prompt-store.ts
 packages/opencode/src/opencodez/default-prompts/
 packages/opencode/src/plugin/openai/codex.ts
 packages/opencode/src/opencodez/codex-responses/attempt.ts
@@ -782,6 +792,8 @@ packages/opencode/src/plugin/openai/ws.ts
 packages/opencode/src/session/llm/request.ts
 packages/opencode/src/server/routes/instance/httpapi/groups/opencodez.ts
 packages/opencode/src/server/routes/instance/httpapi/handlers/opencodez.ts
+packages/schema/src/opencodez-prompts.ts
+packages/app/src/opencodez/
 packages/tui/src/component/opencodez-dialogs.tsx
 packages/app/src/components/prompt-input.tsx
 packages/app/src/utils/draft-store.ts

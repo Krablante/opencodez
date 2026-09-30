@@ -250,8 +250,8 @@ export function Prompt(props: PromptProps) {
     const selection = openCodezSelection()
     const terminalWidth = dimensions().width
     if (terminalWidth < 72) return undefined
-    const label = `S: ${selection.system}`
-    const compactLabel = label.length > 35 ? `S:${selection.system}` : label
+    const label = `S: ${selection.title}`
+    const compactLabel = label.length > 35 ? `S:${selection.title}` : label
     const width = Math.max(16, Math.min(24, Math.floor(terminalWidth / 5)))
     return Locale.truncateMiddle(compactLabel, width)
   })

@@ -7,11 +7,14 @@ import { InstanceContextMiddleware } from "../middleware/instance-context"
 import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
 import { ApiNotFoundError } from "../errors"
 import { described } from "./metadata"
+import { OpenCodezPrompts } from "@opencode-ai/schema/opencodez-prompts"
 
 const root = "/opencodez/prompts"
 
 export const OpenCodezPromptEntry = Schema.Struct({
   name: Schema.String,
+  id: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
   source: Schema.Literals(["builtin", "library"]),
 }).annotate({ identifier: "OpenCodezPromptEntry" })
 export const OpenCodezPromptModel = Schema.Struct({
@@ -36,6 +39,10 @@ export const OpenCodezPromptSelectPayload = Schema.Struct({
 })
 export const OpenCodezPromptState = Schema.Struct({
   system: Schema.String,
+  id: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+  manual: Schema.optional(Schema.Boolean),
+  deleted: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "OpenCodezPromptState" })
 export const OpenCodezPromptStateResult = Schema.Struct({
   state: OpenCodezPromptState,
@@ -54,7 +61,7 @@ export const OpenCodezApi = HttpApi.make("opencodez").add(
       HttpApiEndpoint.get("promptList", OpenCodezPromptPaths.list, {
         query: WorkspaceRoutingQuery,
         success: described(Schema.Array(OpenCodezPromptEntry), "List OpenCodez prompts"),
-        error: HttpApiError.BadRequest,
+        error: [HttpApiError.BadRequest, OpenCodezPrompts.Error],
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "opencodez.prompt.list",
@@ -62,11 +69,53 @@ export const OpenCodezApi = HttpApi.make("opencodez").add(
           description: "List OpenCodez System prompt entries for the web composer.",
         }),
       ),
+      HttpApiEndpoint.get("library", "/opencodez/library", {
+        query: WorkspaceRoutingQuery,
+        success: OpenCodezPrompts.Catalog,
+        error: OpenCodezPrompts.Error,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "opencodez.library.get",
+          summary: "Get System prompt library and model defaults",
+        }),
+      ),
+      HttpApiEndpoint.get("libraryItem", "/opencodez/library/item", {
+        query: Schema.Struct({ ...WorkspaceRoutingQuery.fields, id: Schema.String }),
+        success: OpenCodezPrompts.Item,
+        error: OpenCodezPrompts.Error,
+      }).annotateMerge(OpenApi.annotations({ identifier: "opencodez.library.item", summary: "Read a System prompt" })),
+      HttpApiEndpoint.post("libraryUpdate", "/opencodez/library", {
+        query: WorkspaceRoutingQuery,
+        payload: OpenCodezPrompts.Command,
+        success: OpenCodezPrompts.Catalog,
+        error: OpenCodezPrompts.Error,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "opencodez.library.update",
+          summary: "Manage prompts and model defaults without restarting",
+        }),
+      ),
+      HttpApiEndpoint.post("libraryPreview", "/opencodez/library/preview", {
+        query: WorkspaceRoutingQuery,
+        payload: Schema.Struct({ bundle: Schema.Unknown }),
+        success: OpenCodezPrompts.Preview,
+        error: OpenCodezPrompts.Error,
+      }).annotateMerge(
+        OpenApi.annotations({ identifier: "opencodez.library.preview", summary: "Preview importing a prompt bundle" }),
+      ),
+      HttpApiEndpoint.post("libraryExport", "/opencodez/library/export", {
+        query: WorkspaceRoutingQuery,
+        payload: Schema.Struct({ ids: Schema.Array(Schema.String), includeRules: Schema.Boolean }),
+        success: OpenCodezPrompts.Bundle,
+        error: OpenCodezPrompts.Error,
+      }).annotateMerge(
+        OpenApi.annotations({ identifier: "opencodez.library.export", summary: "Export a portable prompt bundle" }),
+      ),
       HttpApiEndpoint.post("promptState", OpenCodezPromptPaths.state, {
         query: WorkspaceRoutingQuery,
         payload: OpenCodezPromptStatePayload,
         success: described(OpenCodezPromptStateResult, "OpenCodez prompt state"),
-        error: [HttpApiError.BadRequest, ApiNotFoundError],
+        error: [HttpApiError.BadRequest, ApiNotFoundError, OpenCodezPrompts.Error],
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "opencodez.prompt.state",
@@ -78,7 +127,7 @@ export const OpenCodezApi = HttpApi.make("opencodez").add(
         query: WorkspaceRoutingQuery,
         payload: OpenCodezPromptSelectPayload,
         success: described(OpenCodezPromptStateResult, "Updated OpenCodez prompt state"),
-        error: [HttpApiError.BadRequest, ApiNotFoundError],
+        error: [HttpApiError.BadRequest, ApiNotFoundError, OpenCodezPrompts.Error],
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "opencodez.prompt.select",

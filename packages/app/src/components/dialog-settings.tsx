@@ -10,24 +10,30 @@ import { SettingsKeybinds } from "./settings-keybinds"
 import { SettingsProviders } from "./settings-providers"
 import { SettingsModels } from "./settings-models"
 import { SettingsServers } from "./settings-servers"
+import { PromptLibrary } from "@/opencodez/prompt-library"
 
 export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
   const language = useLanguage()
   const platform = usePlatform()
   const dialog = useDialog()
   const [tab, setTab] = createSignal(props.defaultValue ?? "general")
+  let leavePrompts: ((action: () => void) => void) | undefined
 
   const showProviders = () => {
     void dialog.show(() => <DialogSettings defaultValue="providers" />)
   }
 
   return (
-    <Dialog size="x-large" transition>
+    <Dialog size="x-large" transition classList={{ "oz-prompts-settings": tab() === "prompts" }}>
       <Tabs
         orientation="vertical"
         variant="settings"
         value={tab()}
-        onChange={(value) => void startTransition(() => setTab(value))}
+        onChange={(value) => {
+          const change = () => void startTransition(() => setTab(value))
+          if (tab() === "prompts" && leavePrompts) return leavePrompts(change)
+          change()
+        }}
         class="h-full settings-dialog"
       >
         <Tabs.List>
@@ -63,6 +69,10 @@ export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
                       <Icon name="models" />
                       {language.t("settings.models.title")}
                     </Tabs.Trigger>
+                    <Tabs.Trigger value="prompts">
+                      <Icon name="prompt" />
+                      {language.t("opencodez.prompts.title")}
+                    </Tabs.Trigger>
                   </div>
                 </div>
               </div>
@@ -87,6 +97,14 @@ export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
         </Tabs.Content>
         <Tabs.Content value="models" class="no-scrollbar">
           <SettingsModels />
+        </Tabs.Content>
+        <Tabs.Content value="prompts" class="oz-settings-content">
+          <PromptLibrary
+            onNavigate={(guard) => {
+              leavePrompts = guard
+            }}
+            onSettingsBack={() => leavePrompts?.(() => setTab("general"))}
+          />
         </Tabs.Content>
       </Tabs>
     </Dialog>

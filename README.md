@@ -29,6 +29,7 @@ OpenCodez is for people who want OpenCode to stay OpenCode, but with flexible pr
 | -------------- | ------------------------------------------------------------------------------------------------------------- |
 | Prompt control | TUI command and web composer control for the active System prompt.                                            |
 | Prompt library | Upstream built-ins, bundled Codex presets, and user prompt files in one shared selector.                      |
+| Library editor | One responsive menu for personal prompts, model/family assignments, import/export, and reasoning defaults.    |
 | Model defaults | Configurable System and context-window defaults for supported OpenAI Responses GPT models.                    |
 | Session state  | A manual System choice stays with the session and does not reset on `/model`.                                 |
 | Responses wire | ChatGPT OAuth can send incremental Codex-style WebSocket requests instead of resending the full conversation. |
@@ -42,6 +43,7 @@ OpenCodez keeps the normal OpenCode shape, but adds a few practical controls:
 
 - `/system` selects the active Core/System prompt.
 - The web composer has the same session-level System selector.
+- Settings → System prompts manages the library without config edits or service restarts. Built-ins stay read-only; create independent personal copies, assign models/families, and exchange portable bundles. See the [prompt library guide](docs/system-prompts.md).
 - `None` explicitly disables the selectable System prompt for the current session.
 - Model-aware defaults choose System prompts automatically for OpenAI Responses GPT models, and users can configure defaults for other models too.
 - A manual `/system` choice stays active when you switch models.
@@ -178,6 +180,11 @@ files do not need that prefix. On upgrade, OpenCodez removes only unchanged file
 created by the retired copy-once delivery mechanism, identified by their exact
 content hash. Edited files remain user overrides.
 
+Prompts created in the new library use stable IDs and are stored with personal
+assignments and reasoning defaults in `~/.config/opencodez/prompts/library.json`.
+Existing Markdown files remain supported. Library operations apply on the next
+logical turn without restarting the server; the active turn keeps its snapshot.
+
 Bundled Core/System prompts:
 
 ```text
@@ -221,9 +228,9 @@ Astra, Sol, Luna, and GPT-6.1 Sol presets. Older presets without a current
 upstream asset remain available for saved selections. See the
 [prompt provenance and adaptation contract](docs/opencodez.md#system-prompt-library)
 for the exact sources.
-An existing user mapping overrides built-in defaults, so add the new model
-entries there if its global `default` should not apply to them. For GPT-6.1 Sol,
-add `"gpt-6.1-sol": "codex_gpt_6_1_sol"` to an existing user mapping.
+Explicit user model and family entries take precedence. A mapping's `default`
+is a fallback and does not block new bundled model assignments. Use the library
+for new changes; the old config forms remain compatible.
 
 ```jsonc
 {

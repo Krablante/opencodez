@@ -14,6 +14,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useLayout } from "@/context/layout"
 import { useTabs } from "@/context/tabs"
 import { useServerSync } from "@/context/server-sync"
+import { PromptLibrary } from "@/opencodez/prompt-library"
 
 export const DialogSettings: Component<{
   sessionID?: string
@@ -26,6 +27,7 @@ export const DialogSettings: Component<{
   const tabs = useTabs()
   const serverSync = useServerSync()
   const [tab, setTab] = createSignal(props.defaultValue ?? "general")
+  let leavePrompts: ((action: () => void) => void) | undefined
   const directory = createMemo(() => {
     const route = layout.route()
     if (route.type === "dir-new-sesssion") return route.dir
@@ -42,12 +44,21 @@ export const DialogSettings: Component<{
   }
 
   return (
-    <Dialog size="x-large" variant="settings" class="settings-v2-dialog">
+    <Dialog
+      size="x-large"
+      variant="settings"
+      class="settings-v2-dialog"
+      classList={{ "oz-prompts-settings": tab() === "prompts" }}
+    >
       <TabsV2
         orientation="vertical"
         variant="settings"
         value={tab()}
-        onChange={(value) => void startTransition(() => setTab(value))}
+        onChange={(value) => {
+          const change = () => void startTransition(() => setTab(value))
+          if (tab() === "prompts" && leavePrompts) return leavePrompts(change)
+          change()
+        }}
         class="settings-v2"
       >
         <TabsV2.List>
@@ -83,6 +94,10 @@ export const DialogSettings: Component<{
                       <Icon name="models" />
                       {language.t("settings.models.title")}
                     </TabsV2.Trigger>
+                    <TabsV2.Trigger value="prompts">
+                      <Icon name="prompt" />
+                      {language.t("opencodez.prompts.title")}
+                    </TabsV2.Trigger>
                   </div>
                 </div>
               </div>
@@ -107,6 +122,14 @@ export const DialogSettings: Component<{
         </TabsV2.Content>
         <TabsV2.Content value="models" class="settings-v2-panel">
           <SettingsModelsV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="prompts" class="settings-v2-panel oz-settings-content">
+          <PromptLibrary
+            onNavigate={(guard) => {
+              leavePrompts = guard
+            }}
+            onSettingsBack={() => leavePrompts?.(() => setTab("general"))}
+          />
         </TabsV2.Content>
       </TabsV2>
     </Dialog>

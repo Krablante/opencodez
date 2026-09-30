@@ -57,6 +57,9 @@ import { eq } from "drizzle-orm"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionModelContext } from "./model-context"
+import { OpenCodezPromptLibrary } from "@/opencodez/prompt-library"
+import { OpenCodezPromptPolicy } from "@opencode-ai/core/opencodez/prompt-policy"
+import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import { LLMEvent } from "@opencode-ai/llm"
 import { Token } from "@/util/token"
 import { LLMRequestPrep } from "./llm/request"
@@ -663,13 +666,19 @@ const layer = Layer.effect(
 
       const model = input.model ?? ag.model ?? (yield* currentModel(input.sessionID))
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
-      const full =
-        !input.variant && ag.variant && same
-          ? yield* provider
-              .getModel(model.providerID, model.modelID)
-              .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
-          : undefined
-      const variant = input.variant ?? (ag.variant && full?.variants?.[ag.variant] ? ag.variant : undefined)
+      if (OpenCodezIdentity.enabled) yield* Effect.promise(() => OpenCodezPromptLibrary.ensureDefaults())
+      const full = !input.variant
+        ? yield* provider
+            .getModel(model.providerID, model.modelID)
+            .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
+        : undefined
+      const defaultVariant = OpenCodezIdentity.enabled && full ? OpenCodezPromptPolicy.variant(full) : undefined
+      const inheritedVariant = "variant" in model && typeof model.variant === "string" ? model.variant : undefined
+      const variant =
+        input.variant ??
+        inheritedVariant ??
+        (defaultVariant && full?.variants?.[defaultVariant] ? defaultVariant : undefined) ??
+        (same && ag.variant && full?.variants?.[ag.variant] ? ag.variant : undefined)
 
       const info: SessionV1.User = {
         id: input.messageID ?? MessageID.ascending(),
@@ -1098,6 +1107,16 @@ const layer = Layer.effect(
 
     const runLoop: (sessionID: SessionID) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.run")(
       function* (sessionID: SessionID) {
+        yield* Effect.addFinalizer(() =>
+          Effect.gen(function* () {
+            if (!OpenCodezIdentity.enabled) return
+            const current = yield* sessions.get(sessionID).pipe(Effect.orDie)
+            if (!current.metadata?.opencodezPromptTurn) return
+            const metadata = { ...current.metadata }
+            delete metadata.opencodezPromptTurn
+            yield* sessions.setMetadata({ sessionID, metadata })
+          }).pipe(Effect.ignore),
+        )
         const ctx = yield* InstanceState.context
         let structured: unknown
         let step = 0
@@ -1229,6 +1248,25 @@ const layer = Layer.effect(
 
           const codexResponses = yield* isCodexResponses(model)
           const activeTurnID = codexResponses || directRemoteCompaction ? candidateTurnID : lastUser.id
+
+          if (OpenCodezIdentity.enabled) {
+            const current = yield* sessions.get(sessionID).pipe(Effect.orDie)
+            const promptConfig = yield* config.get()
+            const frozen = yield* Effect.promise(() =>
+              OpenCodezPromptLibrary.captureTurn({
+                turnID: activeTurnID,
+                metadata: current.metadata,
+                config: promptConfig,
+                model,
+                sessionID,
+              }),
+            )
+            if (!OpenCodezPromptLibrary.turnSnapshot(current.metadata, activeTurnID)) {
+              const metadata = { ...current.metadata, opencodezPromptTurn: frozen }
+              yield* sessions.setMetadata({ sessionID, metadata })
+              session.metadata = metadata
+            } else session.metadata = current.metadata
+          }
 
           const remoteTransition = yield* compaction.remoteTransition({
             sessionID,
@@ -1503,6 +1541,7 @@ const layer = Layer.effect(
         yield* compaction.prune({ sessionID }).pipe(Effect.ignore, Effect.forkIn(scope))
         return yield* lastAssistant(sessionID)
       },
+      Effect.scoped,
     )
 
     const loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (

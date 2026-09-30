@@ -29,6 +29,7 @@ const USER_AGENT = `opencode/${InstallationVersion}`
 type PrepareInput = {
   readonly user: SessionV1.User
   readonly turnID?: string
+  readonly corePromptTurnID?: string
   readonly sessionID: string
   readonly parentSessionID?: string
   readonly sessionMetadata?: Record<string, unknown>
@@ -133,6 +134,12 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   const opencodezPrompts = OpenCodezIdentity.enabled
     ? yield* Effect.tryPromise({
         try: async () => {
+          await OpenCodezPromptLibrary.ensureDefaults()
+          const snapshot = OpenCodezPromptLibrary.turnSnapshot(
+            input.sessionMetadata,
+            input.corePromptTurnID ?? input.turnID ?? input.user.id,
+          )
+          if (snapshot) return { systemDisabled: snapshot.disabled, system: snapshot.text }
           const opencodez = OpenCodezSession.effective({
             config: input.config,
             model: input.model,

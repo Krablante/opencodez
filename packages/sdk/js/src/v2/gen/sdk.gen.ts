@@ -113,9 +113,20 @@ import type {
   McpStatusResponses,
   ModelRef,
   MoveSessionDestination,
+  OpencodezLibraryExportErrors,
+  OpencodezLibraryExportResponses,
+  OpencodezLibraryGetErrors,
+  OpencodezLibraryGetResponses,
+  OpencodezLibraryItemErrors,
+  OpencodezLibraryItemResponses,
+  OpencodezLibraryPreviewErrors,
+  OpencodezLibraryPreviewResponses,
+  OpencodezLibraryUpdateErrors,
+  OpencodezLibraryUpdateResponses,
   OpencodezPromptListErrors,
   OpencodezPromptListResponses,
   OpenCodezPromptModel,
+  OpenCodezPromptsCommand,
   OpencodezPromptSelectErrors,
   OpencodezPromptSelectResponses,
   OpencodezPromptStateErrors,
@@ -2662,10 +2673,198 @@ export class Prompt extends HeyApiClient {
   }
 }
 
+export class Library extends HeyApiClient {
+  /**
+   * Get System prompt library and model defaults
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<OpencodezLibraryGetResponses, OpencodezLibraryGetErrors, ThrowOnError>({
+      url: "/opencodez/library",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Manage prompts and model defaults without restarting
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      openCodezPromptsCommand?: OpenCodezPromptsCommand
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "openCodezPromptsCommand", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      OpencodezLibraryUpdateResponses,
+      OpencodezLibraryUpdateErrors,
+      ThrowOnError
+    >({
+      url: "/opencodez/library",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Read a System prompt
+   */
+  public item<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      OpencodezLibraryItemResponses,
+      OpencodezLibraryItemErrors,
+      ThrowOnError
+    >({
+      url: "/opencodez/library/item",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Preview importing a prompt bundle
+   */
+  public preview<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      bundle?: unknown
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "bundle" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      OpencodezLibraryPreviewResponses,
+      OpencodezLibraryPreviewErrors,
+      ThrowOnError
+    >({
+      url: "/opencodez/library/preview",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Export a portable prompt bundle
+   */
+  public export<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      ids?: Array<string>
+      includeRules?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "ids" },
+            { in: "body", key: "includeRules" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      OpencodezLibraryExportResponses,
+      OpencodezLibraryExportErrors,
+      ThrowOnError
+    >({
+      url: "/opencodez/library/export",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Opencodez extends HeyApiClient {
   private _prompt?: Prompt
   get prompt(): Prompt {
     return (this._prompt ??= new Prompt({ client: this.client }))
+  }
+
+  private _library?: Library
+  get library(): Library {
+    return (this._library ??= new Library({ client: this.client }))
   }
 }
 

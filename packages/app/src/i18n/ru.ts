@@ -1,4 +1,7 @@
+import { ru } from "../opencodez/copy"
+
 export const dict = {
+  ...ru,
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "Файл",
   "desktop.menu.edit": "Правка",

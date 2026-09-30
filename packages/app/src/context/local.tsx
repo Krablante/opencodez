@@ -10,6 +10,7 @@ import { resolveDefaultModel } from "@/hooks/provider-catalog"
 import { Persist, persisted } from "@/utils/persist"
 import { hasCustomAgent, resolveAgent } from "./local-agent"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
+import { createPromptLibrary } from "@/opencodez/library"
 import { useSDK } from "./sdk"
 import { useSync } from "./sync"
 import { useServerSDK } from "./server-sdk"
@@ -66,6 +67,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const providers = useProviders(() => sdk().directory)
     const models = useModels()
     const settings = useSettings()
+    const promptLibrary = createPromptLibrary()
 
     const id = createMemo(() => params.id || undefined)
     const list = createMemo(() => sync().data.agent.filter((item) => item.mode !== "subagent" && !item.hidden))
@@ -243,7 +245,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const configured = () => {
       const item = agent.current()
       const model = current()
-      if (!item || !model) return
+      if (!model) return
+      const choice = promptLibrary.state.data?.variants.find(
+        (rule) => rule.providerID === model.provider.id && rule.modelID === model.id,
+      )?.variant
+      if (choice && choice in (model.variants ?? {})) return choice
+      if (!item) return
       return getConfiguredAgentVariant({
         agent: { model: item.model, variant: item.variant },
         model: { providerID: model.provider.id, modelID: model.id, variants: model.variants },
@@ -325,6 +332,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         configured,
         selected,
         current() {
+          if (this.selected() === null) return "default"
           const resolved = resolveModelVariant({
             variants: this.list(),
             selected: this.selected(),
@@ -404,7 +412,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           setSaved("session", session, {
             agent: msg.agent,
             model: msg.model,
-            variant: msg.model?.variant ?? null,
+            variant: msg.model?.variant === "default" ? null : (msg.model?.variant ?? null),
           })
         },
       },

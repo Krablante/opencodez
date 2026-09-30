@@ -1,6 +1,7 @@
 export * as OpenCodezSession from "./session"
 
 import { OpenCodezSettings } from "./settings"
+import { OpenCodezPromptPolicy } from "./prompt-policy"
 
 export type Selection = {
   system?: string | null
@@ -30,6 +31,10 @@ export function disable(): Selection {
 
 export function version() {
   return versionID
+}
+
+export function refresh() {
+  notify()
 }
 
 export function subscribe(listener: () => void) {
@@ -83,9 +88,11 @@ export function indicator(input: {
   metadata?: Record<string, unknown>
 }) {
   const result = effective(input)
+  const system = result.system ?? (result.systemManual ? noneID : upstreamSystemPromptID(input.model ?? input.modelID))
   return {
     ...result,
-    system: result.system ?? (result.systemManual ? noneID : upstreamSystemPromptID(input.model ?? input.modelID)),
+    system,
+    title: OpenCodezPromptPolicy.title(system),
   }
 }
 

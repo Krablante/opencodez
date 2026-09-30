@@ -498,6 +498,7 @@ export function make(deps: Dependencies) {
                 return yield* LLMRequestPrep.prepare({
                   user: requestUser,
                   turnID: input.phase === "mid-turn" ? input.turnID : undefined,
+                  corePromptTurnID: input.auto ? input.turnID : undefined,
                   sessionID: input.sessionID,
                   parentSessionID: sessionInfo.parentID,
                   sessionMetadata: CodexResponsesCompaction.withMetadata(sessionInfo.metadata, input.history),

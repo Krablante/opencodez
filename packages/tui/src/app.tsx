@@ -81,7 +81,7 @@ import {
 
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
-import { OpenCodezPromptSelector } from "./component/opencodez-dialogs"
+import { OpenCodezPromptSelector, syncOpenCodezLibrary } from "./component/opencodez-dialogs"
 import { OpenCodezIdentity } from "@opencode-ai/core/opencodez/identity"
 import { createTuiAttention } from "./attention"
 import * as TuiAudio from "./audio"
@@ -378,6 +378,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const keymap = useOpencodeKeymap()
   const event = useEvent()
   const sdk = useSDK()
+  if (OpenCodezIdentity.enabled) syncOpenCodezLibrary()
   const toast = useToast()
   const themeState = useTheme()
   const { theme, mode, setMode, locked, lock, unlock } = themeState

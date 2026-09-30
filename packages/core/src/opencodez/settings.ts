@@ -1,5 +1,7 @@
 export * as OpenCodezSettings from "./settings"
 
+import { OpenCodezPromptPolicy } from "./prompt-policy"
+
 export type ConfigLike = Record<string, unknown> & {
   opencodez?: {
     responses?: {
@@ -53,9 +55,46 @@ export const defaults = {
 }
 
 export function defaultSystem(config: ConfigLike | undefined, model: ModelLike | undefined) {
-  const configured = config?.opencodez?.responses?.system
+  const existing = config?.opencodez?.responses?.system
+  const configured = typeof existing === "string" && OpenCodezPromptPolicy.all() === "@builtin" ? undefined : existing
+  if (typeof configured === "string" && OpenCodezPromptPolicy.all() === undefined) return configured
+  const override = OpenCodezPromptPolicy.system(model)
+  if (override === "@builtin") {
+    const name = builtinSystem(model)
+    return name ? `builtin:${name}` : undefined
+  }
+  if (override) return override
   if (typeof configured === "string") return configured
-  if (configured) return resolveModelMapping(configured, model)
+  const fallback = OpenCodezPromptPolicy.fallback()
+  if (configured) {
+    const explicit = resolveModelMapping(
+      Object.fromEntries(Object.entries(configured).filter(([key]) => key !== "default")),
+      model,
+    )
+    if (explicit) return explicit
+    const assigned = builtinAssignment(model)
+    if (assigned) return assigned
+    if (fallback === "@builtin") {
+      const name = builtinSystem(model)
+      return name ? `builtin:${name}` : undefined
+    }
+    return fallback ?? configured.default ?? builtinSystem(model)
+  }
+  const assigned = builtinAssignment(model)
+  if (assigned) return assigned
+  if (fallback === "@builtin") {
+    const name = builtinSystem(model)
+    return name ? `builtin:${name}` : undefined
+  }
+  return fallback ?? builtinSystem(model)
+}
+
+function builtinAssignment(model: ModelLike | undefined) {
+  if (!isOpenAIResponsesGPT(model)) return undefined
+  return resolveModelMapping(defaults.system, model, false)
+}
+
+function builtinSystem(model: ModelLike | undefined) {
   if (!isOpenAIResponsesGPT(model)) return undefined
   return resolveModelMapping(defaults.system, model) ?? defaults.system.default
 }
@@ -98,9 +137,9 @@ export function responsesCompactionPayloadLimit(model: { input?: number; context
   return Math.floor(responsesCompactionContext(model, responsesContext) * defaults.compaction.threshold)
 }
 
-function resolveModelMapping(mapping: Record<string, string>, model: ModelLike | undefined) {
+function resolveModelMapping(mapping: Record<string, string>, model: ModelLike | undefined, fallback = true) {
   const info = modelInfo(model)
-  if (!info.id && !info.apiID) return mapping.default
+  if (!info.id && !info.apiID) return fallback ? mapping.default : undefined
   const candidates = new Set(
     [
       info.id,
@@ -123,7 +162,7 @@ function resolveModelMapping(mapping: Record<string, string>, model: ModelLike |
   for (const key of candidates) {
     if (mapping[key]) return mapping[key]
   }
-  return mapping.default
+  return fallback ? mapping.default : undefined
 }
 
 function isOpenAIResponsesGPT(model: ModelLike | undefined) {

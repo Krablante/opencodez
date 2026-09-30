@@ -6,6 +6,9 @@ import { Portal } from "solid-js/web"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
 import { showToast } from "@/utils/toast"
+import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { DialogPromptLibrary } from "@/opencodez/prompt-library"
+import { useServerSDK } from "@/context/server-sdk"
 
 type Options = {
   sessionID: Accessor<string | undefined>
@@ -34,6 +37,8 @@ export function createOpenCodezPromptControl(options: Options): {
 } {
   const sdk = useSDK()
   const language = useLanguage()
+  const dialog = useDialog()
+  const server = useServerSDK()
   const [state, setState] = createStore<State>({
     open: false,
     search: "",
@@ -98,7 +103,7 @@ export function createOpenCodezPromptControl(options: Options): {
   )
 
   const load = async () => {
-    if (state.loaded || state.loading) return
+    if (state.loading) return
     setState({ loading: true, error: undefined })
     const entries = await sdk()
       .client.opencodez.prompt.list()
@@ -113,6 +118,17 @@ export function createOpenCodezPromptControl(options: Options): {
     }
     setState({ entries: entries.data, loaded: true })
   }
+
+  createEffect(() => {
+    const sdk = server()
+    const stop = sdk.event.listen((event) => {
+      if (event.details.type !== "opencodez.prompts.changed") return
+      setState("loaded", false)
+      void refresh()
+      if (state.open) void load()
+    })
+    onCleanup(stop)
+  })
 
   const position = () => {
     const rect = trigger?.getBoundingClientRect()
@@ -188,9 +204,13 @@ export function createOpenCodezPromptControl(options: Options): {
 
   const entries = createMemo(() => {
     const query = state.search.trim().toLowerCase()
-    return [{ name: "none", source: "builtin" as const }, ...state.entries].filter((entry) => {
-      const label = entry.name === "none" ? language.t("sound.option.none") : entry.name
-      return !query || label.toLowerCase().includes(query)
+    return [
+      { name: "auto", source: "builtin" as const, title: language.t("opencodez.prompts.auto") },
+      { name: "none", source: "builtin" as const, title: language.t("opencodez.prompts.none") },
+      ...state.entries,
+    ].filter((entry) => {
+      const label = entry.title ?? entry.name
+      return !query || `${label} ${entry.name}`.toLowerCase().includes(query)
     })
   })
 
@@ -207,7 +227,9 @@ export function createOpenCodezPromptControl(options: Options): {
         onClick={() => setOpen(!state.open)}
       >
         <Icon name="prompt" size="small" />
-        <span class="hidden truncate sm:inline">S: {state.prompt?.system ?? language.t("common.default")}</span>
+        <span class="hidden truncate sm:inline">
+          S: {state.prompt?.title ?? state.prompt?.system ?? language.t("common.default")}
+        </span>
         <span class="hidden sm:inline-flex">
           <Icon name="chevron-down" size="small" />
         </span>
@@ -247,7 +269,7 @@ export function createOpenCodezPromptControl(options: Options): {
                   >
                     <For each={entries()}>
                       {(entry) => {
-                        const label = entry.name === "none" ? language.t("sound.option.none") : entry.name
+                        const label = entry.title ?? entry.name
                         return (
                           <button
                             type="button"
@@ -256,7 +278,12 @@ export function createOpenCodezPromptControl(options: Options): {
                           >
                             <Icon name="prompt" size="small" />
                             <span class="min-w-0 flex-1 truncate">{label}</span>
-                            <Show when={entry.name === state.prompt?.system}>
+                            <Show
+                              when={
+                                entry.name === (state.prompt?.id ?? state.prompt?.system) ||
+                                (entry.name === "auto" && state.prompt?.manual === false)
+                              }
+                            >
                               <Icon name="check" size="small" />
                             </Show>
                           </button>
@@ -266,6 +293,26 @@ export function createOpenCodezPromptControl(options: Options): {
                   </Show>
                 </Show>
               </Show>
+            </div>
+            <div class="p-1 border-t border-border-weak-base">
+              <button
+                type="button"
+                class="w-full min-h-10 px-2 flex items-center gap-2 text-start text-13-regular text-text-strong rounded-md hover:bg-surface-base-hover"
+                onClick={() => {
+                  setOpen(false, false)
+                  void dialog.show(() => (
+                    <DialogPromptLibrary
+                      initialID={
+                        state.prompt?.system === "none" ? undefined : (state.prompt?.id ?? state.prompt?.system)
+                      }
+                      onUse={select}
+                    />
+                  ))
+                }}
+              >
+                <Icon name="sliders" size="small" />
+                {language.t("opencodez.prompts.manage")}
+              </button>
             </div>
           </div>
         </Portal>

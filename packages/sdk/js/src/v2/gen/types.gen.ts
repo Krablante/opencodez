@@ -53,6 +53,7 @@ export type Event =
   | EventSessionError
   | EventInstallationUpdated
   | EventInstallationUpdateAvailable
+  | EventOpencodezPromptsChanged
   | EventFileEdited
   | EventReferenceUpdated
   | EventPermissionV2Asked
@@ -1258,6 +1259,13 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "opencodez.prompts.changed"
+        properties: {
+          revision: string
+        }
+      }
+    | {
+        id: string
         type: "file.edited"
         properties: {
           file: string
@@ -2458,6 +2466,8 @@ export type McpServerNotFoundError = {
 
 export type OpenCodezPromptEntry = {
   name: string
+  id?: string
+  title?: string
   source: "builtin" | "library"
 }
 
@@ -2473,6 +2483,10 @@ export type OpenCodezPromptModel = {
 
 export type OpenCodezPromptState = {
   system: string
+  id?: string
+  title?: string
+  manual?: boolean
+  deleted?: boolean
 }
 
 export type OpenCodezPromptStateResult = {
@@ -2962,6 +2976,7 @@ export type V2Event =
   | SessionError
   | InstallationUpdated
   | InstallationUpdateAvailable
+  | OpencodezPromptsChanged
   | FileEdited
   | ReferenceUpdated
   | PermissionV2Asked
@@ -3903,6 +3918,135 @@ export type ConfigV2ExperimentalPolicy = {
   action: "provider.use"
   effect: PolicyEffect
   resource: string
+}
+
+export type OpenCodezPromptsError = {
+  _tag: "OpenCodezPrompts.Error"
+  message: string
+  code: "invalid" | "conflict" | "missing" | "readonly" | "io"
+}
+
+export type OpenCodezPromptsEntry = {
+  id: string
+  name: string
+  description: string
+  source: "builtin" | "library"
+  deleted: boolean
+  version: string
+  origin?: {
+    id: string
+    version: string
+  }
+  sourceUpdated: boolean
+}
+
+export type OpenCodezPromptsRule = {
+  scope: "model" | "family" | "all" | "fallback"
+  providerID: string
+  target: string
+  prompt: string
+  source?: "user" | "builtin" | "legacy"
+}
+
+export type OpenCodezPromptsVariant = {
+  providerID: string
+  modelID: string
+  variant: string
+}
+
+export type OpenCodezPromptsModel = {
+  id: string
+  apiID: string
+  name: string
+  providerID: string
+  providerName: string
+  family: string
+  variants: Array<string>
+  effectivePrompt?: string
+}
+
+export type OpenCodezPromptsCatalog = {
+  revision: string
+  entries: Array<OpenCodezPromptsEntry>
+  rules: Array<OpenCodezPromptsRule>
+  variants: Array<OpenCodezPromptsVariant>
+  models: Array<OpenCodezPromptsModel>
+}
+
+export type OpenCodezPromptsItem = {
+  id: string
+  name: string
+  description: string
+  source: "builtin" | "library"
+  deleted: boolean
+  version: string
+  origin?: {
+    id: string
+    version: string
+  }
+  sourceUpdated: boolean
+  text: string
+}
+
+export type OpenCodezPromptsCommand = {
+  action: "save" | "delete" | "restore" | "rules" | "import" | "variants"
+  revision: string
+  id?: string
+  name?: string
+  description?: string
+  text?: string
+  version?: string
+  origin?: {
+    id: string
+    version: string
+  }
+  rules?: Array<OpenCodezPromptsRule>
+  variants?: Array<OpenCodezPromptsVariant>
+  items?: Array<{
+    id: string
+    name: string
+    description: string
+    text: string
+    mode: "keep" | "replace" | "copy"
+    origin?: {
+      id: string
+      version: string
+    }
+  }>
+}
+
+export type OpenCodezPromptsPreview = {
+  items: Array<{
+    id: string
+    name: string
+    description: string
+    text: string
+    origin?: {
+      id: string
+      version: string
+    }
+    status: "new" | "same" | "changed"
+    builtin?: boolean
+    replaceable: boolean
+    mode: "keep" | "replace" | "copy"
+  }>
+  rules: Array<OpenCodezPromptsRule>
+}
+
+export type OpenCodezPromptsBundle = {
+  format: "opencodez-prompts"
+  version: 1
+  items: Array<{
+    id: string
+    name: string
+    description: string
+    text: string
+    origin?: {
+      id: string
+      version: string
+    }
+  }>
+  rules: Array<OpenCodezPromptsRule>
 }
 
 export type ProjectDirectories = Array<{
@@ -5463,6 +5607,23 @@ export type InstallationUpdateAvailable = {
   }
 }
 
+export type OpencodezPromptsChanged = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "opencodez.prompts.changed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    revision: string
+  }
+}
+
 export type FileEdited = {
   id: string
   metadata?: {
@@ -6767,6 +6928,14 @@ export type EventInstallationUpdateAvailable = {
   type: "installation.update-available"
   properties: {
     version: string
+  }
+}
+
+export type EventOpencodezPromptsChanged = {
+  id: string
+  type: "opencodez.prompts.changed"
+  properties: {
+    revision: string
   }
 }
 
@@ -8778,9 +8947,9 @@ export type OpencodezPromptListData = {
 
 export type OpencodezPromptListErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * BadRequest | OpenCodezPrompts.Error | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: EffectHttpApiErrorBadRequest | OpenCodezPromptsError | InvalidRequestError
 }
 
 export type OpencodezPromptListError = OpencodezPromptListErrors[keyof OpencodezPromptListErrors]
@@ -8793,6 +8962,152 @@ export type OpencodezPromptListResponses = {
 }
 
 export type OpencodezPromptListResponse = OpencodezPromptListResponses[keyof OpencodezPromptListResponses]
+
+export type OpencodezLibraryGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/opencodez/library"
+}
+
+export type OpencodezLibraryGetErrors = {
+  /**
+   * OpenCodezPrompts.Error | InvalidRequestError
+   */
+  400: OpenCodezPromptsError | InvalidRequestError
+}
+
+export type OpencodezLibraryGetError = OpencodezLibraryGetErrors[keyof OpencodezLibraryGetErrors]
+
+export type OpencodezLibraryGetResponses = {
+  /**
+   * OpenCodezPrompts.Catalog
+   */
+  200: OpenCodezPromptsCatalog
+}
+
+export type OpencodezLibraryGetResponse = OpencodezLibraryGetResponses[keyof OpencodezLibraryGetResponses]
+
+export type OpencodezLibraryUpdateData = {
+  body?: OpenCodezPromptsCommand
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/opencodez/library"
+}
+
+export type OpencodezLibraryUpdateErrors = {
+  /**
+   * OpenCodezPrompts.Error | InvalidRequestError
+   */
+  400: OpenCodezPromptsError | InvalidRequestError
+}
+
+export type OpencodezLibraryUpdateError = OpencodezLibraryUpdateErrors[keyof OpencodezLibraryUpdateErrors]
+
+export type OpencodezLibraryUpdateResponses = {
+  /**
+   * OpenCodezPrompts.Catalog
+   */
+  200: OpenCodezPromptsCatalog
+}
+
+export type OpencodezLibraryUpdateResponse = OpencodezLibraryUpdateResponses[keyof OpencodezLibraryUpdateResponses]
+
+export type OpencodezLibraryItemData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    id: string
+  }
+  url: "/opencodez/library/item"
+}
+
+export type OpencodezLibraryItemErrors = {
+  /**
+   * OpenCodezPrompts.Error | InvalidRequestError
+   */
+  400: OpenCodezPromptsError | InvalidRequestError
+}
+
+export type OpencodezLibraryItemError = OpencodezLibraryItemErrors[keyof OpencodezLibraryItemErrors]
+
+export type OpencodezLibraryItemResponses = {
+  /**
+   * OpenCodezPrompts.Item
+   */
+  200: OpenCodezPromptsItem
+}
+
+export type OpencodezLibraryItemResponse = OpencodezLibraryItemResponses[keyof OpencodezLibraryItemResponses]
+
+export type OpencodezLibraryPreviewData = {
+  body?: {
+    bundle: unknown
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/opencodez/library/preview"
+}
+
+export type OpencodezLibraryPreviewErrors = {
+  /**
+   * OpenCodezPrompts.Error | InvalidRequestError
+   */
+  400: OpenCodezPromptsError | InvalidRequestError
+}
+
+export type OpencodezLibraryPreviewError = OpencodezLibraryPreviewErrors[keyof OpencodezLibraryPreviewErrors]
+
+export type OpencodezLibraryPreviewResponses = {
+  /**
+   * OpenCodezPrompts.Preview
+   */
+  200: OpenCodezPromptsPreview
+}
+
+export type OpencodezLibraryPreviewResponse = OpencodezLibraryPreviewResponses[keyof OpencodezLibraryPreviewResponses]
+
+export type OpencodezLibraryExportData = {
+  body?: {
+    ids: Array<string>
+    includeRules: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/opencodez/library/export"
+}
+
+export type OpencodezLibraryExportErrors = {
+  /**
+   * OpenCodezPrompts.Error | InvalidRequestError
+   */
+  400: OpenCodezPromptsError | InvalidRequestError
+}
+
+export type OpencodezLibraryExportError = OpencodezLibraryExportErrors[keyof OpencodezLibraryExportErrors]
+
+export type OpencodezLibraryExportResponses = {
+  /**
+   * OpenCodezPrompts.Bundle
+   */
+  200: OpenCodezPromptsBundle
+}
+
+export type OpencodezLibraryExportResponse = OpencodezLibraryExportResponses[keyof OpencodezLibraryExportResponses]
 
 export type OpencodezPromptStateData = {
   body?: {
@@ -8812,9 +9127,9 @@ export type OpencodezPromptStateData = {
 
 export type OpencodezPromptStateErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * BadRequest | OpenCodezPrompts.Error | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: EffectHttpApiErrorBadRequest | OpenCodezPromptsError | InvalidRequestError
   /**
    * NotFoundError
    */
@@ -8851,9 +9166,9 @@ export type OpencodezPromptSelectData = {
 
 export type OpencodezPromptSelectErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * BadRequest | OpenCodezPrompts.Error | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: EffectHttpApiErrorBadRequest | OpenCodezPromptsError | InvalidRequestError
   /**
    * NotFoundError
    */

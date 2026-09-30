@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### 1.18.33+opencodez.2
+
+- Add one responsive System prompt library to Settings and the chat selector,
+  with read-only built-ins, independent copies, personal edits, and restoration.
+- Manage model and provider-family assignments without editing global config or
+  restarting services. Exact personal exceptions and manual session choices stay
+  authoritative; bundled defaults can reach new models without a config quest.
+- Add portable JSON/Markdown exchange with import preview, stable IDs, duplicate
+  prevention, local-edit preservation, and atomic managed-bundle imports.
+- Add server-side reasoning defaults for supported model variants while keeping
+  explicit chat choices authoritative.
+- Freeze the selected core prompt for each logical turn, including tool loops,
+  retries and compaction. Later turns receive saved edits without losing history.
+- Preserve existing Markdown sources, old selection names, OpenCodeBot
+  compatibility, and the complete production platform archive matrix.
+
 ### 1.18.33+opencodez.1
 
 - Merge upstream OpenCode v1.18.33, including MCP browser and OAuth URL safety,

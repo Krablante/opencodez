@@ -24,6 +24,7 @@ type Active = {
   dispose: () => void
   owner: Owner
   onClose?: () => void
+  beforeClose?: (resume: () => void) => boolean
   setClosing: (closing: boolean) => void
 }
 
@@ -44,6 +45,7 @@ function init() {
     const items = stack()
     const current = id ? items.find((item) => item.id === id) : items.at(-1)
     if (!current || lock.value) return
+    if (current.beforeClose && !current.beforeClose(() => close(current.id))) return
     lock.value = true
     current.onClose?.()
     current.setClosing(true)
@@ -137,6 +139,8 @@ function init() {
   }
 
   const show = (element: DialogElement, owner: Owner, onClose?: () => void) => {
+    const current = stack().at(-1)
+    if (current?.beforeClose && !current.beforeClose(() => show(element, owner, onClose))) return
     for (const item of stack()) item.dispose()
     setStack([])
     if (timer.current !== undefined) {
@@ -192,6 +196,15 @@ export function useDialog() {
     },
     close() {
       ctx.close()
+    },
+    guardClose(check: (resume: () => void) => boolean) {
+      const active = ctx.stack().at(-1)
+      if (!active) return () => {}
+      const previous = active.beforeClose
+      active.beforeClose = check
+      return () => {
+        if (active.beforeClose === check) active.beforeClose = previous
+      }
     },
   }
 }

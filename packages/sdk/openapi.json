@@ -3638,13 +3638,16 @@
             }
           },
           "400": {
-            "description": "BadRequest | InvalidRequestError",
+            "description": "BadRequest | OpenCodezPrompts.Error | InvalidRequestError",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/OpenCodezPromptsError"
                     },
                     {
                       "$ref": "#/components/schemas/InvalidRequestError"
@@ -3661,6 +3664,357 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.opencodez.prompt.list({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/opencodez/library": {
+      "get": {
+        "tags": ["opencodez"],
+        "operationId": "opencodez.library.get",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenCodezPrompts.Catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenCodezPromptsCatalog"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "OpenCodezPrompts.Error | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenCodezPromptsError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get System prompt library and model defaults",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.opencodez.library.get({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "tags": ["opencodez"],
+        "operationId": "opencodez.library.update",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenCodezPrompts.Catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenCodezPromptsCatalog"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "OpenCodezPrompts.Error | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenCodezPromptsError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Manage prompts and model defaults without restarting",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenCodezPromptsCommand"
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.opencodez.library.update({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/opencodez/library/item": {
+      "get": {
+        "tags": ["opencodez"],
+        "operationId": "opencodez.library.item",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenCodezPrompts.Item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenCodezPromptsItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "OpenCodezPrompts.Error | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenCodezPromptsError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read a System prompt",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.opencodez.library.item({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/opencodez/library/preview": {
+      "post": {
+        "tags": ["opencodez"],
+        "operationId": "opencodez.library.preview",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenCodezPrompts.Preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenCodezPromptsPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "OpenCodezPrompts.Error | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenCodezPromptsError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Preview importing a prompt bundle",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "bundle": {}
+                },
+                "required": ["bundle"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.opencodez.library.preview({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/opencodez/library/export": {
+      "post": {
+        "tags": ["opencodez"],
+        "operationId": "opencodez.library.export",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenCodezPrompts.Bundle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenCodezPromptsBundle"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "OpenCodezPrompts.Error | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenCodezPromptsError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Export a portable prompt bundle",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "includeRules": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["ids", "includeRules"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.opencodez.library.export({\n  ...\n})"
           }
         ]
       }
@@ -3699,13 +4053,16 @@
             }
           },
           "400": {
-            "description": "BadRequest | InvalidRequestError",
+            "description": "BadRequest | OpenCodezPrompts.Error | InvalidRequestError",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/OpenCodezPromptsError"
                     },
                     {
                       "$ref": "#/components/schemas/InvalidRequestError"
@@ -3792,13 +4149,16 @@
             }
           },
           "400": {
-            "description": "BadRequest | InvalidRequestError",
+            "description": "BadRequest | OpenCodezPrompts.Error | InvalidRequestError",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/OpenCodezPromptsError"
                     },
                     {
                       "$ref": "#/components/schemas/InvalidRequestError"
@@ -10427,6 +10787,9 @@
                   },
                   "location": {
                     "$ref": "#/components/schemas/LocationRef"
+                  },
+                  "metadata": {
+                    "type": "object"
                   }
                 },
                 "additionalProperties": false
@@ -15660,6 +16023,9 @@
             "$ref": "#/components/schemas/EventInstallationUpdate-available"
           },
           {
+            "$ref": "#/components/schemas/EventOpencodezPromptsChanged"
+          },
+          {
             "$ref": "#/components/schemas/EventFileEdited"
           },
           {
@@ -17389,12 +17755,51 @@
           "auto": {
             "type": "boolean"
           },
+          "phase": {
+            "type": "string",
+            "enum": ["pre-turn", "mid-turn"]
+          },
+          "turn_id": {
+            "type": "string",
+            "pattern": "^msg"
+          },
+          "replay_id": {
+            "type": "string",
+            "pattern": "^msg"
+          },
           "overflow": {
             "type": "boolean"
           },
           "tail_start_id": {
             "type": "string",
             "pattern": "^msg"
+          },
+          "transition": {
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "object",
+                "properties": {
+                  "providerID": {
+                    "type": "string"
+                  },
+                  "modelID": {
+                    "type": "string"
+                  }
+                },
+                "required": ["providerID", "modelID"],
+                "additionalProperties": false
+              },
+              "comp_hash": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["comp_hash_changed", "model_downshift"]
+              }
+            },
+            "required": ["model"],
+            "additionalProperties": false
           },
           "remote": {
             "type": "object",
@@ -17405,6 +17810,12 @@
               },
               "items": {
                 "type": "array"
+              },
+              "model_id": {
+                "type": "string"
+              },
+              "comp_hash": {
+                "type": "string"
               }
             },
             "required": ["providerID", "items"],
@@ -19456,6 +19867,31 @@
                       }
                     },
                     "required": ["version"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["opencodez.prompts.changed"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "revision": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["revision"],
                     "additionalProperties": false
                   }
                 },
@@ -21557,6 +21993,10 @@
                     "type": "string",
                     "enum": ["legacy", "codex"]
                   },
+                  "context_window": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
                   "compaction": {
                     "type": "object",
                     "properties": {
@@ -23042,6 +23482,12 @@
           "name": {
             "type": "string"
           },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
           "source": {
             "type": "string",
             "enum": ["builtin", "library"]
@@ -23082,6 +23528,18 @@
         "properties": {
           "system": {
             "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "manual": {
+            "type": "boolean"
+          },
+          "deleted": {
+            "type": "boolean"
           }
         },
         "required": ["system"],
@@ -24532,6 +24990,9 @@
           },
           {
             "$ref": "#/components/schemas/InstallationUpdate-available"
+          },
+          {
+            "$ref": "#/components/schemas/OpencodezPromptsChanged"
           },
           {
             "$ref": "#/components/schemas/FileEdited"
@@ -27456,6 +27917,430 @@
         "required": ["action", "effect", "resource"],
         "additionalProperties": false
       },
+      "OpenCodezPromptsError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["OpenCodezPrompts.Error"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": ["invalid", "conflict", "missing", "readonly", "io"]
+          }
+        },
+        "required": ["_tag", "message", "code"],
+        "additionalProperties": false
+      },
+      "OpenCodezPromptsEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["builtin", "library"]
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "version"],
+            "additionalProperties": false
+          },
+          "sourceUpdated": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "name", "description", "source", "deleted", "version", "sourceUpdated"],
+        "additionalProperties": false
+      },
+      "OpenCodezPromptsRule": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": ["model", "family", "all", "fallback"]
+          },
+          "providerID": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["user", "builtin", "legacy"]
+          }
+        },
+        "required": ["scope", "providerID", "target", "prompt"],
+        "additionalProperties": false
+      },
+      "OpenCodezPromptsVariant": {
+        "type": "object",
+        "properties": {
+          "providerID": {
+            "type": "string"
+          },
+          "modelID": {
+            "type": "string"
+          },
+          "variant": {
+            "type": "string"
+          }
+        },
+        "required": ["providerID", "modelID", "variant"],
+        "additionalProperties": false
+      },
+      "OpenCodezPromptsModel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "apiID": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "providerID": {
+            "type": "string"
+          },
+          "providerName": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "effectivePrompt": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "apiID", "name", "providerID", "providerName", "family", "variants"],
+        "additionalProperties": false
+      },
+      "OpenCodezPromptsCatalog": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenCodezPromptsEntry"
+            }
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenCodezPromptsRule"
+            }
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenCodezPromptsVariant"
+            }
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenCodezPromptsModel"
+            }
+          }
+        },
+        "required": ["revision", "entries", "rules", "variants", "models"],
+        "additionalProperties": false
+      },
+      "OpenCodezPromptsItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["builtin", "library"]
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "version"],
+            "additionalProperties": false
+          },
+          "sourceUpdated": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "name", "description", "source", "deleted", "version", "sourceUpdated", "text"],
+        "additionalProperties": false
+      },
+      "OpenCodezPromptsCommand": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["save", "delete", "restore", "rules", "import", "variants"]
+          },
+          "revision": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "version"],
+            "additionalProperties": false
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenCodezPromptsRule"
+            }
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenCodezPromptsVariant"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["keep", "replace", "copy"]
+                },
+                "origin": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "version"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["id", "name", "description", "text", "mode"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["action", "revision"],
+        "additionalProperties": false
+      },
+      "OpenCodezPromptsPreview": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "origin": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "version"],
+                  "additionalProperties": false
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["new", "same", "changed"]
+                },
+                "builtin": {
+                  "type": "boolean"
+                },
+                "replaceable": {
+                  "type": "boolean"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["keep", "replace", "copy"]
+                }
+              },
+              "required": ["id", "name", "description", "text", "status", "replaceable", "mode"],
+              "additionalProperties": false
+            }
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenCodezPromptsRule"
+            }
+          }
+        },
+        "required": ["items", "rules"],
+        "additionalProperties": false
+      },
+      "OpenCodezPromptsBundle": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": ["opencodez-prompts"]
+          },
+          "version": {
+            "type": "number",
+            "enum": [1]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "origin": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "version"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["id", "name", "description", "text"],
+              "additionalProperties": false
+            }
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenCodezPromptsRule"
+            }
+          }
+        },
+        "required": ["format", "version", "items", "rules"],
+        "additionalProperties": false
+      },
       "ProjectDirectories": {
         "type": "array",
         "items": {
@@ -27643,6 +28528,9 @@
           },
           "cost": {
             "type": "number"
+          },
+          "metadata": {
+            "type": "object"
           },
           "tokens": {
             "type": "object",
@@ -32145,6 +33033,53 @@
         "required": ["id", "type", "data"],
         "additionalProperties": false
       },
+      "OpencodezPromptsChanged": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["opencodez.prompts.changed"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": ["revision"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
       "FileEdited": {
         "type": "object",
         "properties": {
@@ -35976,6 +36911,31 @@
               }
             },
             "required": ["version"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventOpencodezPromptsChanged": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["opencodez.prompts.changed"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": ["revision"],
             "additionalProperties": false
           }
         },
