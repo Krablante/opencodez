@@ -1,4 +1,4 @@
-import type { JsonSchema, LLMRequest, ProviderMetadata } from "@opencode-ai/llm"
+import type { JsonSchema, LLMRequest, ProviderMetadata, ToolContent } from "@opencode-ai/llm"
 import { LLM, Message, SystemPart, ToolCallPart, ToolDefinition, ToolResultPart } from "@opencode-ai/llm"
 import {
   AmazonBedrock,
@@ -66,15 +66,40 @@ const mediaPart = (part: Record<string, unknown>) => {
 
 const toolResult = (part: Record<string, unknown>) => {
   const output = isRecord(part.output) ? part.output : { type: "json", value: part.output }
-  const type = output.type === "text" ? "text" : output.type === "error-text" ? "error" : "json"
+  const type =
+    output.type === "content"
+      ? "content"
+      : output.type === "text"
+        ? "text"
+        : output.type === "error-text"
+          ? "error"
+          : "json"
   return ToolResultPart.make({
     id: typeof part.toolCallId === "string" ? part.toolCallId : "",
     name: typeof part.toolName === "string" ? part.toolName : "",
-    result: "value" in output ? output.value : output,
+    result:
+      type === "content" && Array.isArray(output.value)
+        ? output.value.map(toolContent)
+        : "value" in output
+          ? output.value
+          : output,
     resultType: type,
     providerExecuted: typeof part.providerExecuted === "boolean" ? part.providerExecuted : undefined,
     providerMetadata: partProviderMetadata(part),
   })
+}
+
+function toolContent(part: unknown): ToolContent {
+  if (!isRecord(part)) throw new Error("Native LLM tool content must be an object")
+  if (part.type === "text" && typeof part.text === "string") return { type: "text", text: part.text }
+  if (part.type === "media" && typeof part.mediaType === "string" && typeof part.data === "string") {
+    return {
+      type: "file",
+      mime: part.mediaType,
+      uri: part.data.startsWith("data:") ? part.data : `data:${part.mediaType};base64,${part.data}`,
+    }
+  }
+  throw new Error(`Native LLM request adapter does not support ${String(part.type)} tool content`)
 }
 
 const contentPart = (part: unknown) => {

@@ -3,7 +3,8 @@ import type { Provider } from "@/provider/provider"
 import { LLMNative } from "@/session/llm/native-request"
 import { OpenAIResponses } from "@opencode-ai/llm/protocols/openai-responses"
 import { ProviderTransform } from "@/provider/transform"
-import type { ModelMessage, Tool } from "ai"
+import type { LLMRequestPrep } from "@/session/llm/request"
+import { isContextOverflow } from "@opencode-ai/llm"
 import { OpenCodezSettings } from "@opencode-ai/core/opencodez/settings"
 import { CodexResponsesTransport } from "./transport"
 import { CodexResponsesAttempt } from "./attempt"
@@ -30,21 +31,21 @@ const IMAGE_INPUT_TOKENS = 1_844
 const ORIGINAL_IMAGE_MAX_TOKENS = 10_000
 const RETAINED_MESSAGE_TOKEN_BUDGET = 64_000
 
-function toCompactInput(input: {
-  model: Provider.Model
-  system: string[]
-  messages: ModelMessage[]
-  tools: Record<string, Tool>
-  options: Record<string, unknown>
-}) {
+function toCompactInput(input: { model: Provider.Model; prepared: LLMRequestPrep.Prepared }) {
   const request = LLMNative.request({
     model: input.model,
-    system: input.system,
-    messages: input.messages,
-    tools: input.tools,
+    // OAuth sampling already carries this System in options.instructions.
+    system: typeof input.prepared.params.options.instructions === "string" ? [] : input.prepared.system,
+    messages: ProviderTransform.message(input.prepared.messages, input.model, input.prepared.messageTransformOptions),
+    tools: input.prepared.tools,
+    toolChoice: input.prepared.toolChoice ?? "auto",
+    temperature: input.prepared.params.temperature,
+    topP: input.prepared.params.topP,
+    topK: input.prepared.params.topK,
+    maxOutputTokens: input.prepared.params.maxOutputTokens,
     // Compact input must remain self-contained under ZDR. A streamed V2
     // compaction cannot rehydrate non-persisted reasoning items by rs_* id.
-    providerOptions: ProviderTransform.providerOptions(input.model, { ...input.options, store: false }),
+    providerOptions: ProviderTransform.providerOptions(input.model, { ...input.prepared.params.options, store: false }),
     headers: {},
   })
   return OpenAIResponses.protocol.body.from(request)
@@ -53,10 +54,7 @@ function toCompactInput(input: {
 export function compact(input: {
   model: Provider.Model
   provider: Provider.Info
-  system: string[]
-  messages: ModelMessage[]
-  tools: Record<string, Tool>
-  options: Record<string, unknown>
+  prepared: LLMRequestPrep.Prepared
   items: unknown[]
   sessionID: string
   accountKey: string
@@ -77,23 +75,16 @@ export function compact(input: {
     const request = compactBody(body, [...input.items.filter((item) => !isSystemMessage(item)), ...body.input])
     // Preparation owns the effective profile, including context overrides and
     // frozen turn settings. Re-resolving here would restore the default window.
-    const bounded = trimOutputs(
-      request,
-      OpenCodezSettings.responsesCompactionPayloadLimit(input.model.limit, input.turnProfile?.contextWindow),
-      input.preserveActiveToolMedia,
+    const target = OpenCodezSettings.responsesCompactionPayloadLimit(
+      input.model.limit,
+      input.turnProfile?.contextWindow,
     )
     yield* Effect.logInfo("prepared remote compaction", {
       model: input.model.api.id,
       phase: input.compaction.phase,
-      trimmed_outputs: bounded.rewritten,
-      estimated_tokens: bounded.estimate,
-      limit: bounded.limit,
+      estimated_tokens: estimateInput(request),
+      target,
     })
-    if (bounded.estimate > bounded.limit) {
-      throw new Error(
-        `Compaction was not sent to OpenAI: the estimated input (${bounded.estimate} tokens) exceeds the safe request budget (${bounded.limit} tokens) for ${input.model.api.id}, even after shortening tool results. Local session history is unchanged.`,
-      )
-    }
 
     const baseURL =
       typeof input.provider.options.baseURL === "string"
@@ -101,11 +92,18 @@ export function compact(input: {
         : "https://api.openai.com/v1"
     const fetcher: typeof fetch =
       typeof input.provider.options.fetch === "function" ? input.provider.options.fetch : fetch
-    const payload = yield* Effect.tryPromise({
+    const send = Effect.tryPromise({
       try: (signal) =>
         fetcher(`${baseURL}/responses`, {
           method: "POST",
           headers: {
+            // A sampling snapshot may contain an already consumed one-shot
+            // handoff. Compact installs active.items directly into its input.
+            ...Object.fromEntries(
+              Object.entries(input.prepared.headers).filter(
+                ([key]) => key.toLowerCase() !== CodexResponsesCompaction.HEADER,
+              ),
+            ),
             "content-type": "application/json",
             "x-session-affinity": input.sessionID,
             ...(input.turnID ? { [CodexResponsesTransport.TURN_ID_HEADER]: input.turnID } : {}),
@@ -130,6 +128,8 @@ export function compact(input: {
               `OpenAI remote compaction failed (${response.status})${detail ? `: ${detail}` : ""}`,
               response.status === 429 || response.status >= 500,
               retryDelay(response),
+              undefined,
+              contextOverflow(detail),
             )
           }
           return parseCompactionResponse(response, request.input)
@@ -155,12 +155,34 @@ export function compact(input: {
             ),
           ),
         ),
-        while: (error) => error.retryable,
+        while: (error) => error.retryable && !error.contextOverflow,
       }),
+    )
+    // Encrypted state is not ordinary prompt text. A coarse local estimate
+    // cannot veto a request or justify discarding tool work before OpenAI sees it.
+    // Retry a confirmed overflow once with bounded tool outputs, on a fresh full
+    // request selected by the normal continuation compatibility check.
+    const payload = yield* send.pipe(
+      Effect.map((value) => ({ ...value, trimmedOutputs: 0 })),
+      Effect.catchIf(
+        (error) => error.contextOverflow,
+        (error) =>
+          Effect.gen(function* () {
+            const bounded = trimOutputs(request, target, input.preserveActiveToolMedia)
+            if (bounded.rewritten === 0) return yield* Effect.fail(error)
+            yield* Effect.logInfo("retrying remote compaction after provider context overflow", {
+              model: input.model.api.id,
+              trimmed_outputs: bounded.rewritten,
+              estimated_tokens: bounded.estimate,
+              target,
+            })
+            return { ...(yield* send), trimmedOutputs: bounded.rewritten }
+          }),
+      ),
     )
     return {
       items: payload.items,
-      trimmedOutputs: bounded.rewritten,
+      trimmedOutputs: payload.trimmedOutputs,
       usage: payload.usage,
     } satisfies Result
   }).pipe(Effect.catchCause((cause) => Effect.fail(Cause.squash(cause))))
@@ -196,7 +218,7 @@ function trimOutputs(
   const indexes = body.input.flatMap((item, index) => (isToolOutput(item) ? [index] : []))
   const latest = indexes.at(-1)
   const activeTurn = preserveActiveToolMedia
-    ? body.input.findLastIndex((item) => isRecord(item) && item.type === "message" && item.role === "user")
+    ? body.input.findLastIndex((item) => isRecord(item) && item.role === "user")
     : -1
   const candidates = indexes
     .flatMap((index) => {
@@ -218,7 +240,8 @@ function trimOutputs(
       return b.saved - a.saved || a.index - b.index
     })
   for (const candidate of candidates) {
-    if (estimate <= contextWindow) break
+    // The provider already confirmed overflow, even if this heuristic is low.
+    if (rewritten > 0 && estimate <= contextWindow) break
     body.input[candidate.index] = candidate.replacement
     rewritten++
     estimate = Math.max(0, estimate - candidate.saved)
@@ -296,7 +319,7 @@ function number(value: unknown) {
 }
 
 function isSystemMessage(value: unknown) {
-  return isRecord(value) && value.type === "message" && value.role === "system"
+  return isRecord(value) && value.role === "system"
 }
 
 async function parseCompactionResponse(response: Response, input: unknown[]) {
@@ -325,6 +348,9 @@ async function parseCompactionResponse(response: Response, input: unknown[]) {
       throw new RemoteCompactionError(
         `OpenAI remote compaction failed: ${detail}`,
         CodexResponsesAttempt.retryableEvent(event),
+        undefined,
+        undefined,
+        contextOverflow(error),
       )
     }
     if (event.type === "response.output_item.done" && CodexResponsesCompaction.isOpaqueItem(event.item))
@@ -403,15 +429,16 @@ function retainUserMessages(input: unknown[]): Record<string, unknown>[] {
   let remaining = RETAINED_MESSAGE_TOKEN_BUDGET
   const retained: Record<string, unknown>[] = []
   for (const item of input.toReversed()) {
-    if (!isRecord(item) || item.type !== "message" || item.role !== "user") continue
+    if (!isRecord(item) || item.role !== "user") continue
     if (remaining <= 0) break
-    const estimate = Math.max(1, estimateInput(item))
+    const message = { ...item, type: "message" }
+    const estimate = Math.max(1, estimateInput(message))
     if (estimate <= remaining) {
-      retained.push(item)
+      retained.push(message)
       remaining -= estimate
       continue
     }
-    const truncated = truncateMessage(item, remaining)
+    const truncated = truncateMessage(message, remaining)
     if (truncated) retained.push(truncated)
     remaining = 0
   }
@@ -474,9 +501,15 @@ class RemoteCompactionError extends Error {
     readonly retryable: boolean,
     readonly retryDelayMs?: number,
     options?: ErrorOptions,
+    readonly contextOverflow = false,
   ) {
     super(message, options)
   }
+}
+
+function contextOverflow(value: unknown) {
+  const text = typeof value === "string" ? value : (JSON.stringify(value) ?? "")
+  return isContextOverflow(text) || text.includes('"context_window_exceeded"')
 }
 
 function retryDelay(response: Response) {

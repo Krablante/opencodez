@@ -529,10 +529,7 @@ export function make(deps: Dependencies) {
           return yield* CodexResponsesCompact.compact({
             model: attemptModel,
             provider: providerInfo,
-            system: prepared.system,
-            messages: prepared.messages,
-            tools: prepared.tools,
-            options: prepared.params.options,
+            prepared,
             items: active.items,
             sessionID: input.sessionID,
             accountKey,

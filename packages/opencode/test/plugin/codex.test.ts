@@ -259,6 +259,8 @@ describe("plugin.codex", () => {
       codexApiEndpoint: server.url,
       experimentalWebSockets: true,
     })
+    const config = { model: "openai/gpt-5.4", opencodez: { responses: { wire: "legacy" } } }
+    await hooks.config?.(config)
     const loaded = await hooks.auth!.loader!(
       async () =>
         ({
