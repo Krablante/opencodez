@@ -38,6 +38,7 @@ type PrepareInput = {
   readonly permission?: PermissionV1.Ruleset
   readonly system: string[]
   readonly messages: ModelMessage[]
+  readonly toolChoice?: "auto" | "required" | "none"
   readonly small?: boolean
   readonly tools: Record<string, Tool>
   readonly provider: Provider.Info
@@ -60,6 +61,7 @@ export type Prepared = {
   readonly system: string[]
   readonly messages: ModelMessage[]
   readonly tools: Record<string, Tool>
+  readonly toolChoice?: "auto" | "required" | "none"
   readonly params: {
     readonly temperature?: number
     readonly topP?: number
@@ -310,6 +312,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
       : {}),
     system,
     messages,
+    toolChoice: input.toolChoice,
     tools: Object.fromEntries(Object.entries(tools).toSorted(([a], [b]) => a.localeCompare(b))),
     params,
     messageTransformOptions: options,

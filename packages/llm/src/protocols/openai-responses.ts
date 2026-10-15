@@ -12,7 +12,6 @@ import {
   type LLMRequest,
   type ProviderMetadata,
   type ReasoningPart,
-  type TextPart,
   type ToolCallPart,
   type ToolDefinition,
   type ToolContent,
@@ -78,7 +77,11 @@ const OpenAIResponsesFunctionCallOutput = Schema.Union([
 const OpenAIResponsesInputItem = Schema.Union([
   Schema.Struct({ role: Schema.tag("system"), content: Schema.String }),
   Schema.Struct({ role: Schema.tag("user"), content: Schema.Array(OpenAIResponsesInputContent) }),
-  Schema.Struct({ role: Schema.tag("assistant"), content: Schema.Array(OpenAIResponsesOutputText) }),
+  Schema.Struct({
+    role: Schema.tag("assistant"),
+    content: Schema.Array(OpenAIResponsesOutputText),
+    phase: Schema.optionalKey(Schema.Literals(["commentary", "final_answer"])),
+  }),
   OpenAIResponsesReasoningItem,
   OpenAIResponsesItemReference,
   Schema.Struct({
@@ -99,7 +102,7 @@ type OpenAIResponsesInputItem = Schema.Schema.Type<typeof OpenAIResponsesInputIt
 // multiple streamed summary parts into the same item before flushing.
 type OpenAIResponsesReasoningInput = {
   type: "reasoning"
-  id: string
+  id?: string
   summary: Array<{ type: "summary_text"; text: string }>
   encrypted_content?: string | null
 }
@@ -282,17 +285,18 @@ const lowerToolCall = (part: ToolCallPart): OpenAIResponsesInputItem => ({
 
 const lowerReasoning = (part: ReasoningPart): OpenAIResponsesReasoningInput | undefined => {
   const openai = part.providerMetadata?.openai
-  if (!ProviderShared.isRecord(openai) || typeof openai.itemId !== "string" || openai.itemId.length === 0)
-    return undefined
+  if (!ProviderShared.isRecord(openai)) return undefined
+  const id = typeof openai.itemId === "string" && openai.itemId.length > 0 ? openai.itemId : undefined
   const encryptedContent =
     typeof openai.reasoningEncryptedContent === "string"
       ? openai.reasoningEncryptedContent
       : openai.reasoningEncryptedContent === null
         ? null
         : undefined
+  if (!id && typeof encryptedContent !== "string") return undefined
   return {
     type: "reasoning",
-    id: openai.itemId,
+    ...(id ? { id } : {}),
     summary: part.text.length > 0 ? [{ type: "summary_text", text: part.text }] : [],
     encrypted_content: encryptedContent,
   }
@@ -368,24 +372,30 @@ const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (requ
     }
 
     if (message.role === "assistant") {
-      const content: TextPart[] = []
       const reasoningItems: Record<string, OpenAIResponsesReasoningReplay> = {}
       const reasoningReferences = new Set<string>()
       const hostedToolReferences = new Set<string>()
-      const flushText = () => {
-        if (content.length === 0) return
-        input.push({ role: "assistant", content: content.map((part) => ({ type: "output_text", text: part.text })) })
-        content.splice(0, content.length)
-      }
       for (const part of message.content) {
         if (part.type === "text") {
-          content.push(part)
+          const openai = part.providerMetadata?.openai
+          input.push({
+            role: "assistant",
+            content: [{ type: "output_text", text: part.text }],
+            ...(ProviderShared.isRecord(openai) && (openai.phase === "commentary" || openai.phase === "final_answer")
+              ? { phase: openai.phase }
+              : {}),
+          })
           continue
         }
         if (part.type === "reasoning") {
-          flushText()
           const reasoning = lowerReasoning(part)
           if (!reasoning) continue
+          // Stateless SDK preparation strips item IDs. Each encrypted part is
+          // then a self-contained replay item, including split summaries.
+          if (!reasoning.id) {
+            input.push(reasoning)
+            continue
+          }
           if (store !== false) {
             if (!reasoningReferences.has(reasoning.id)) input.push({ type: "item_reference", id: reasoning.id })
             reasoningReferences.add(reasoning.id)
@@ -408,13 +418,11 @@ const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (requ
           continue
         }
         if (part.type === "tool-call") {
-          flushText()
           if (part.providerExecuted === true) continue
           input.push(lowerToolCall(part))
           continue
         }
         if (part.type === "tool-result" && part.providerExecuted === true) {
-          flushText()
           const itemID = hostedToolItemID(part)
           if (store !== false && itemID && !hostedToolReferences.has(itemID))
             input.push({ type: "item_reference", id: itemID })
@@ -428,7 +436,6 @@ const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (requ
           "tool-result",
         ])
       }
-      flushText()
       continue
     }
 

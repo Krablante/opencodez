@@ -431,51 +431,44 @@ same media estimate at both boundaries instead of being counted as base64 text
 before provider lowering.
 
 The active runner freezes the prepared effective System, transformed options,
-model profile, and model-visible tool schemas used for sampling, then reuses that
-snapshot for mid-turn compact while lowering the current history with all newly completed
-tool work. Manual compaction and restart recovery reconstruct the same context
-through the shared preparation boundary because no in-memory sampling snapshot
-exists. If user steering arrives around compaction, it remains pending: it is
-excluded from both compact input and the first mandatory post-compact
-continuation, then admitted normally. This boundary remains tied to the original
-active turn even if preflight underestimates the request and the provider itself
-reports overflow; frozen request controls are then combined with history that
-still excludes the pending steer. Before transport, OpenCodez estimates the
-complete compact payload using a model-visible cost for inline images instead of
-counting their base64 encoding as text. Text accounting uses UTF-8 bytes and
-truncates only at Unicode code-point boundaries. Automatically resized images
-use Codex's 1,844-token estimate; `detail: "original"` uses the provider's
-conservative 10,000-patch maximum. Only when the payload would exceed the
-Codex-safe request window does OpenCodez replace older tool outputs across the
-request with a bounded marker. Compaction uses the effective profile returned by
-the shared request preparation, including a configured working window. A
-persisted active-turn profile also survives reconstruction after restart; manual
-compaction without an active turn resolves the selected model with current
-configuration. The payload builder never independently re-resolves the catalog,
-so pre-turn, manual, and mid-turn compaction cannot silently revert to the
-default working window. The authenticated Codex model catalog supplies the
-current context and automatic compaction limit. Without a context override, its
-fallback profiles use a `272000` context and a `244800` trigger. Only
-verbatim tool outputs receive a second conservative estimate because Codex caps
-them on insertion while OpenCode preserves them durably. Ordinary text is not
-globally doubled and can use the full safe window. Every tool result in the
-active parallel-output batch keeps its image input even if its text must be
-bounded, so the latest visual state cannot be lost merely because a short sibling
-result was serialized later. If bounding all eligible tool outputs still cannot
-fit the safe request window, OpenCodez fails before network I/O. The session error
-explicitly says that nothing was sent to OpenAI and identifies the model,
-estimated input size, and safe request budget. This is a local preflight failure,
-not a provider rejection. User messages, tool calls, and pending input are never
-summarized or dropped locally,
-and the durable local history remains unchanged. Each compaction stream retries
-transient failure at most twice per transport inside one 20-minute cancellable
-operation. A valid server `Retry-After` value replaces the local exponential
-delay for that retry, and Stop does not leave a request running in the background.
+model profile, and model-visible tool schemas used for sampling. Mid-turn compact
+reuses those controls with the current history, including newly completed tool
+work. Manual compaction and restart recovery reconstruct the same context through
+the shared preparation boundary. The compact request carries the Codex capability
+and turn profile through the authenticated adapter, so it uses the same Responses
+Lite shaping, WebSocket continuation, and HTTP fallback as sampling. System
+instructions appear once, assistant phases are preserved, and tool images remain
+native image inputs. An already consumed sampling handoff is never replayed.
 
-The `prepared remote compaction` log records the selected model, phase,
-estimated tokens, request budget, and number of shortened tool outputs once per
-prepared request. It contains no conversation content and makes local size
-checks distinguishable from transport or provider failures.
+If user steering arrives around compaction, it remains pending until after the
+first mandatory post-compact continuation. A successful compact replaces the
+model-visible window with bounded retained user messages and the new opaque
+state. Reconnect and restart rebuild that window plus its new tail, without
+restoring the original archive.
+
+Local byte-based estimates are diagnostic, not a reason to reject a compact
+request or discard tool results before sending it. In particular, the serialized
+length of encrypted reasoning does not measure its model token cost. OpenCodez
+first sends the complete active compact input. If OpenAI reports context overflow,
+it bounds eligible tool outputs and retries once. That reduction uses a 90% input
+window target, separate from an earlier automatic-compaction threshold. It never
+locally rejects the retry merely because the estimate still exceeds that target.
+A second overflow remains a provider error. Every tool result in the active
+parallel-output batch keeps its images during reduction; user messages, tool
+calls, and opaque state are preserved. The saved compacted working window is
+replaced only after a completed compaction response.
+
+The effective profile comes from shared request preparation, including configured
+working windows and persisted active-turn settings. The payload builder does not
+independently resolve the catalog. Without a context override, fallback profiles
+use a `272000` context and a `244800` trigger. Transient failures still use at most
+two retries per transport within one 20-minute cancellable operation. A valid
+server `Retry-After` replaces the local delay, and Stop cancels the operation.
+
+The `prepared remote compaction` log records the model, phase, diagnostic input
+estimate, and reduction target. A separate retry log identifies confirmed provider
+overflow and the number of bounded outputs. Neither log contains conversation
+content.
 
 Remote output follows pinned Codex V2 semantics: additional stream output items
 are ignored, exactly one completed opaque compaction item is installed as-is,
@@ -560,11 +553,11 @@ to `200000` lowers it further to `200000`.
 
 The catalog's automatic-compaction limit is already a trigger, not another
 context window: it caps the result without being multiplied by the threshold
-again. The request budget is separate: remote compaction can use 90% of the
-effective input window regardless of an earlier configured trigger. Lowering
-`token_limit` therefore starts compaction sooner without forcing the existing
-history into that smaller request budget. Neither calculation raises a model's
-advertised input limit.
+again. The tool-output reduction target is separate: after a provider-reported
+overflow, it uses 90% of the effective input window regardless of an earlier
+configured trigger. Lowering `token_limit` starts compaction sooner without
+shrinking the window available to its request. The provider decides whether the
+request fits; a local byte estimate does not impose another input ceiling.
 
 The trigger compares the last provider usage plus estimates for context not yet
 accounted for, including newly completed tool results and retained reasoning
@@ -616,9 +609,10 @@ OpenCodez config boundary:
   has a shorter turn-scoped lifetime, while the transport connection has a
   longer independent lifetime.
 - `compact.ts` builds the canonical V2 trigger request with the existing
-  Responses lowering and prepared effective model profile, bounds only oversized
-  tool output, requires exactly one completed `compaction`/`compaction_summary`
-  item with encrypted content, and installs bounded retained user context.
+  Responses lowering and prepared effective model profile, bounds tool output
+  only after provider overflow, requires exactly one completed
+  `compaction`/`compaction_summary` item with encrypted content, and installs
+  bounded retained user context.
 - `compaction.ts` finds persisted compaction items without writing a second
   state store, keeps the bounded turn-settings journal and frozen catalog
   profile, and checks model/backend-snapshot compatibility. A random one-shot
