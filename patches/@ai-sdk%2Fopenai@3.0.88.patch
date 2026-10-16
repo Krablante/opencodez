@@ -1,5 +1,88 @@
+diff --git a/node_modules/@opencode-ai/core/node_modules/@ai-sdk/openai/.bun-tag-bdbf21b7771638b6 b/.bun-tag-bdbf21b7771638b6
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+index 779b17d7d44b5ee58de033756d1156571b73eb70..5259bd16d94bfdd6770a8059c97b6c422fa5f899 100644
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -309,7 +309,7 @@ declare const openaiResponsesChunkSchema: _ai_sdk_provider_utils.LazySchema<{
+     item: {
+         type: "message";
+         id: string;
+-        phase?: "commentary" | "final_answer" | null | undefined;
++        phase?: "commentary" | "partial_answer" | "final_answer" | null | undefined;
+     } | {
+         type: "reasoning";
+         id: string;
+@@ -426,7 +426,7 @@ declare const openaiResponsesChunkSchema: _ai_sdk_provider_utils.LazySchema<{
+     item: {
+         type: "message";
+         id: string;
+-        phase?: "commentary" | "final_answer" | null | undefined;
++        phase?: "commentary" | "partial_answer" | "final_answer" | null | undefined;
+     } | {
+         type: "reasoning";
+         id: string;
+@@ -1222,6 +1222,8 @@ type ResponsesOutputTextAnnotationProviderMetadata = Extract<OpenaiResponsesChun
+     type: 'response.output_text.annotation.added';
+ }>['annotation'];
+ type ResponsesProviderMetadata = {
++    endTurn?: boolean;
++    incompleteReason?: string;
+     responseId: string | null | undefined;
+     logprobs?: Array<OpenAIResponsesLogprobs>;
+     serviceTier?: string;
+@@ -1239,7 +1241,7 @@ type OpenaiResponsesProviderMetadata = {
+ };
+ type ResponsesTextProviderMetadata = {
+     itemId: string;
+-    phase?: 'commentary' | 'final_answer' | null;
++    phase?: 'commentary' | 'partial_answer' | 'final_answer' | null;
+     annotations?: Array<ResponsesOutputTextAnnotationProviderMetadata>;
+ };
+ type OpenaiResponsesTextProviderMetadata = {
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 779b17d7d44b5ee58de033756d1156571b73eb70..5259bd16d94bfdd6770a8059c97b6c422fa5f899 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -309,7 +309,7 @@ declare const openaiResponsesChunkSchema: _ai_sdk_provider_utils.LazySchema<{
+     item: {
+         type: "message";
+         id: string;
+-        phase?: "commentary" | "final_answer" | null | undefined;
++        phase?: "commentary" | "partial_answer" | "final_answer" | null | undefined;
+     } | {
+         type: "reasoning";
+         id: string;
+@@ -426,7 +426,7 @@ declare const openaiResponsesChunkSchema: _ai_sdk_provider_utils.LazySchema<{
+     item: {
+         type: "message";
+         id: string;
+-        phase?: "commentary" | "final_answer" | null | undefined;
++        phase?: "commentary" | "partial_answer" | "final_answer" | null | undefined;
+     } | {
+         type: "reasoning";
+         id: string;
+@@ -1222,6 +1222,8 @@ type ResponsesOutputTextAnnotationProviderMetadata = Extract<OpenaiResponsesChun
+     type: 'response.output_text.annotation.added';
+ }>['annotation'];
+ type ResponsesProviderMetadata = {
++    endTurn?: boolean;
++    incompleteReason?: string;
+     responseId: string | null | undefined;
+     logprobs?: Array<OpenAIResponsesLogprobs>;
+     serviceTier?: string;
+@@ -1239,7 +1241,7 @@ type OpenaiResponsesProviderMetadata = {
+ };
+ type ResponsesTextProviderMetadata = {
+     itemId: string;
+-    phase?: 'commentary' | 'final_answer' | null;
++    phase?: 'commentary' | 'partial_answer' | 'final_answer' | null;
+     annotations?: Array<ResponsesOutputTextAnnotationProviderMetadata>;
+ };
+ type OpenaiResponsesTextProviderMetadata = {
 diff --git a/dist/index.js b/dist/index.js
-index 5fc82d7ca0f5fba1da3b24c15bb714f51b5aa178..e1a3e2c97774af3a5688c7052bd9a07d692fcc8f 100644
+index 5fc82d7ca0f5fba1da3b24c15bb714f51b5aa178..9f5422107d8b846dd3ef120dc3f29d770c52e05f 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -1035,22 +1035,6 @@ var OpenAIChatLanguageModel = class {
@@ -25,7 +108,51 @@ index 5fc82d7ca0f5fba1da3b24c15bb714f51b5aa178..e1a3e2c97774af3a5688c7052bd9a07d
      const {
        tools: openaiTools2,
        toolChoice: openaiToolChoice,
-@@ -5454,22 +5438,6 @@ var OpenAIResponsesLanguageModel = class {
+@@ -3762,6 +3746,7 @@ var openaiResponsesChunkSchema = (0, import_provider_utils27.lazySchema)(
+       import_v422.z.object({
+         type: import_v422.z.enum(["response.completed", "response.incomplete"]),
+         response: import_v422.z.object({
++          end_turn: import_v422.z.boolean().nullish(),
+           incomplete_details: import_v422.z.object({ reason: import_v422.z.string() }).nullish(),
+           usage: import_v422.z.object({
+             input_tokens: import_v422.z.number(),
+@@ -3776,7 +3761,7 @@ var openaiResponsesChunkSchema = (0, import_provider_utils27.lazySchema)(
+               reasoning_tokens: import_v422.z.number().nullish(),
+               orchestration_output_tokens: import_v422.z.number().nullish()
+             }).nullish()
+-          }),
++          }).nullish(),
+           reasoning: import_v422.z.object({
+             context: import_v422.z.string().nullish()
+           }).nullish(),
+@@ -3828,7 +3813,7 @@ var openaiResponsesChunkSchema = (0, import_provider_utils27.lazySchema)(
+           import_v422.z.object({
+             type: import_v422.z.literal("message"),
+             id: import_v422.z.string(),
+-            phase: import_v422.z.enum(["commentary", "final_answer"]).nullish()
++            phase: import_v422.z.enum(["commentary", "partial_answer", "final_answer"]).nullish()
+           }),
+           import_v422.z.object({
+             type: import_v422.z.literal("reasoning"),
+@@ -3970,7 +3955,7 @@ var openaiResponsesChunkSchema = (0, import_provider_utils27.lazySchema)(
+           import_v422.z.object({
+             type: import_v422.z.literal("message"),
+             id: import_v422.z.string(),
+-            phase: import_v422.z.enum(["commentary", "final_answer"]).nullish()
++            phase: import_v422.z.enum(["commentary", "partial_answer", "final_answer"]).nullish()
+           }),
+           import_v422.z.object({
+             type: import_v422.z.literal("reasoning"),
+@@ -4306,7 +4291,7 @@ var openaiResponsesResponseSchema = (0, import_provider_utils27.lazySchema)(
+             type: import_v422.z.literal("message"),
+             role: import_v422.z.literal("assistant"),
+             id: import_v422.z.string(),
+-            phase: import_v422.z.enum(["commentary", "final_answer"]).nullish(),
++            phase: import_v422.z.enum(["commentary", "partial_answer", "final_answer"]).nullish(),
+             content: import_v422.z.array(
+               import_v422.z.object({
+                 type: import_v422.z.literal("output_text"),
+@@ -5454,22 +5439,6 @@ var OpenAIResponsesLanguageModel = class {
          });
        }
      }
@@ -48,8 +175,37 @@ index 5fc82d7ca0f5fba1da3b24c15bb714f51b5aa178..e1a3e2c97774af3a5688c7052bd9a07d
      const shellToolEnvType = (_k = (_j = (_i = tools == null ? void 0 : tools.find(
        (tool) => tool.type === "provider" && tool.id === "openai.shell"
      )) == null ? void 0 : _i.args) == null ? void 0 : _j.environment) == null ? void 0 : _k.type;
+@@ -6018,6 +5987,8 @@ var OpenAIResponsesLanguageModel = class {
+     const activeReasoning = {};
+     let serviceTier;
+     let reasoningContext;
++    let endTurn;
++    let incompleteReason;
+     const hostedToolSearchCallIds = [];
+     let encounteredStreamError = false;
+     const result = {
+@@ -6765,7 +6736,9 @@ var OpenAIResponsesLanguageModel = class {
+                 }),
+                 raw: (_x = (_w = value.response.incomplete_details) == null ? void 0 : _w.reason) != null ? _x : void 0
+               };
+-              usage = value.response.usage;
++              usage = value.response.usage ?? void 0;
++              endTurn = value.response.end_turn ?? void 0;
++              incompleteReason = value.type === "response.incomplete" ? value.response.incomplete_details?.reason ?? "unknown" : void 0;
+               if (typeof value.response.service_tier === "string") {
+                 serviceTier = value.response.service_tier;
+               }
+@@ -6869,6 +6842,8 @@ var OpenAIResponsesLanguageModel = class {
+             const providerMetadata = {
+               [providerOptionsName]: {
+                 responseId,
++                ...endTurn !== void 0 ? { endTurn } : {},
++                ...incompleteReason !== void 0 ? { incompleteReason } : {},
+                 ...logprobs.length > 0 ? { logprobs } : {},
+                 ...serviceTier !== void 0 ? { serviceTier } : {},
+                 ...reasoningContext !== void 0 ? { reasoningContext } : {}
 diff --git a/dist/index.mjs b/dist/index.mjs
-index 589c4f76955bee692b8af36ea1d9a15121695d4a..6838ea0a362c8fe774527bb1126b8031ebfd3fab 100644
+index 589c4f76955bee692b8af36ea1d9a15121695d4a..9069bf0b0abb1b4b4cfe7816cbcb63d8958f75c0 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
 @@ -1031,22 +1031,6 @@ var OpenAIChatLanguageModel = class {
@@ -75,7 +231,51 @@ index 589c4f76955bee692b8af36ea1d9a15121695d4a..6838ea0a362c8fe774527bb1126b8031
      const {
        tools: openaiTools2,
        toolChoice: openaiToolChoice,
-@@ -5557,22 +5541,6 @@ var OpenAIResponsesLanguageModel = class {
+@@ -3860,6 +3844,7 @@ var openaiResponsesChunkSchema = lazySchema20(
+       z22.object({
+         type: z22.enum(["response.completed", "response.incomplete"]),
+         response: z22.object({
++          end_turn: z22.boolean().nullish(),
+           incomplete_details: z22.object({ reason: z22.string() }).nullish(),
+           usage: z22.object({
+             input_tokens: z22.number(),
+@@ -3874,7 +3859,7 @@ var openaiResponsesChunkSchema = lazySchema20(
+               reasoning_tokens: z22.number().nullish(),
+               orchestration_output_tokens: z22.number().nullish()
+             }).nullish()
+-          }),
++          }).nullish(),
+           reasoning: z22.object({
+             context: z22.string().nullish()
+           }).nullish(),
+@@ -3926,7 +3911,7 @@ var openaiResponsesChunkSchema = lazySchema20(
+           z22.object({
+             type: z22.literal("message"),
+             id: z22.string(),
+-            phase: z22.enum(["commentary", "final_answer"]).nullish()
++            phase: z22.enum(["commentary", "partial_answer", "final_answer"]).nullish()
+           }),
+           z22.object({
+             type: z22.literal("reasoning"),
+@@ -4068,7 +4053,7 @@ var openaiResponsesChunkSchema = lazySchema20(
+           z22.object({
+             type: z22.literal("message"),
+             id: z22.string(),
+-            phase: z22.enum(["commentary", "final_answer"]).nullish()
++            phase: z22.enum(["commentary", "partial_answer", "final_answer"]).nullish()
+           }),
+           z22.object({
+             type: z22.literal("reasoning"),
+@@ -4404,7 +4389,7 @@ var openaiResponsesResponseSchema = lazySchema20(
+             type: z22.literal("message"),
+             role: z22.literal("assistant"),
+             id: z22.string(),
+-            phase: z22.enum(["commentary", "final_answer"]).nullish(),
++            phase: z22.enum(["commentary", "partial_answer", "final_answer"]).nullish(),
+             content: z22.array(
+               z22.object({
+                 type: z22.literal("output_text"),
+@@ -5557,22 +5542,6 @@ var OpenAIResponsesLanguageModel = class {
          });
        }
      }
@@ -98,8 +298,117 @@ index 589c4f76955bee692b8af36ea1d9a15121695d4a..6838ea0a362c8fe774527bb1126b8031
      const shellToolEnvType = (_k = (_j = (_i = tools == null ? void 0 : tools.find(
        (tool) => tool.type === "provider" && tool.id === "openai.shell"
      )) == null ? void 0 : _i.args) == null ? void 0 : _j.environment) == null ? void 0 : _k.type;
+@@ -6121,6 +6090,8 @@ var OpenAIResponsesLanguageModel = class {
+     const activeReasoning = {};
+     let serviceTier;
+     let reasoningContext;
++    let endTurn;
++    let incompleteReason;
+     const hostedToolSearchCallIds = [];
+     let encounteredStreamError = false;
+     const result = {
+@@ -6868,7 +6839,9 @@ var OpenAIResponsesLanguageModel = class {
+                 }),
+                 raw: (_x = (_w = value.response.incomplete_details) == null ? void 0 : _w.reason) != null ? _x : void 0
+               };
+-              usage = value.response.usage;
++              usage = value.response.usage ?? void 0;
++              endTurn = value.response.end_turn ?? void 0;
++              incompleteReason = value.type === "response.incomplete" ? value.response.incomplete_details?.reason ?? "unknown" : void 0;
+               if (typeof value.response.service_tier === "string") {
+                 serviceTier = value.response.service_tier;
+               }
+@@ -6972,6 +6945,8 @@ var OpenAIResponsesLanguageModel = class {
+             const providerMetadata = {
+               [providerOptionsName]: {
+                 responseId,
++                ...endTurn !== void 0 ? { endTurn } : {},
++                ...incompleteReason !== void 0 ? { incompleteReason } : {},
+                 ...logprobs.length > 0 ? { logprobs } : {},
+                 ...serviceTier !== void 0 ? { serviceTier } : {},
+                 ...reasoningContext !== void 0 ? { reasoningContext } : {}
+diff --git a/dist/internal/index.d.mts b/dist/internal/index.d.mts
+index 07fcd092f1ffdbecc13557a05e851ab6756a19da..a7d33185a0284ead31d9ab28eeed39f501dab2b7 100644
+--- a/dist/internal/index.d.mts
++++ b/dist/internal/index.d.mts
+@@ -363,7 +363,7 @@ declare const openaiResponsesChunkSchema: _ai_sdk_provider_utils.LazySchema<{
+     item: {
+         type: "message";
+         id: string;
+-        phase?: "commentary" | "final_answer" | null | undefined;
++        phase?: "commentary" | "partial_answer" | "final_answer" | null | undefined;
+     } | {
+         type: "reasoning";
+         id: string;
+@@ -480,7 +480,7 @@ declare const openaiResponsesChunkSchema: _ai_sdk_provider_utils.LazySchema<{
+     item: {
+         type: "message";
+         id: string;
+-        phase?: "commentary" | "final_answer" | null | undefined;
++        phase?: "commentary" | "partial_answer" | "final_answer" | null | undefined;
+     } | {
+         type: "reasoning";
+         id: string;
+@@ -744,6 +744,8 @@ type ResponsesOutputTextAnnotationProviderMetadata = Extract<OpenaiResponsesChun
+     type: 'response.output_text.annotation.added';
+ }>['annotation'];
+ type ResponsesProviderMetadata = {
++    endTurn?: boolean;
++    incompleteReason?: string;
+     responseId: string | null | undefined;
+     logprobs?: Array<OpenAIResponsesLogprobs>;
+     serviceTier?: string;
+@@ -761,7 +763,7 @@ type OpenaiResponsesProviderMetadata = {
+ };
+ type ResponsesTextProviderMetadata = {
+     itemId: string;
+-    phase?: 'commentary' | 'final_answer' | null;
++    phase?: 'commentary' | 'partial_answer' | 'final_answer' | null;
+     annotations?: Array<ResponsesOutputTextAnnotationProviderMetadata>;
+ };
+ type OpenaiResponsesTextProviderMetadata = {
+diff --git a/dist/internal/index.d.ts b/dist/internal/index.d.ts
+index 07fcd092f1ffdbecc13557a05e851ab6756a19da..a7d33185a0284ead31d9ab28eeed39f501dab2b7 100644
+--- a/dist/internal/index.d.ts
++++ b/dist/internal/index.d.ts
+@@ -363,7 +363,7 @@ declare const openaiResponsesChunkSchema: _ai_sdk_provider_utils.LazySchema<{
+     item: {
+         type: "message";
+         id: string;
+-        phase?: "commentary" | "final_answer" | null | undefined;
++        phase?: "commentary" | "partial_answer" | "final_answer" | null | undefined;
+     } | {
+         type: "reasoning";
+         id: string;
+@@ -480,7 +480,7 @@ declare const openaiResponsesChunkSchema: _ai_sdk_provider_utils.LazySchema<{
+     item: {
+         type: "message";
+         id: string;
+-        phase?: "commentary" | "final_answer" | null | undefined;
++        phase?: "commentary" | "partial_answer" | "final_answer" | null | undefined;
+     } | {
+         type: "reasoning";
+         id: string;
+@@ -744,6 +744,8 @@ type ResponsesOutputTextAnnotationProviderMetadata = Extract<OpenaiResponsesChun
+     type: 'response.output_text.annotation.added';
+ }>['annotation'];
+ type ResponsesProviderMetadata = {
++    endTurn?: boolean;
++    incompleteReason?: string;
+     responseId: string | null | undefined;
+     logprobs?: Array<OpenAIResponsesLogprobs>;
+     serviceTier?: string;
+@@ -761,7 +763,7 @@ type OpenaiResponsesProviderMetadata = {
+ };
+ type ResponsesTextProviderMetadata = {
+     itemId: string;
+-    phase?: 'commentary' | 'final_answer' | null;
++    phase?: 'commentary' | 'partial_answer' | 'final_answer' | null;
+     annotations?: Array<ResponsesOutputTextAnnotationProviderMetadata>;
+ };
+ type OpenaiResponsesTextProviderMetadata = {
 diff --git a/dist/internal/index.js b/dist/internal/index.js
-index ad78b5df9359509091f4b8a1751dc34c03c74e32..ed92f56d8fe9c1442f741ef8d42d592ce9b28643 100644
+index ad78b5df9359509091f4b8a1751dc34c03c74e32..c476de3f16a64bd0d269a91d54cb539841f1aafd 100644
 --- a/dist/internal/index.js
 +++ b/dist/internal/index.js
 @@ -1070,22 +1070,6 @@ var OpenAIChatLanguageModel = class {
@@ -125,7 +434,51 @@ index ad78b5df9359509091f4b8a1751dc34c03c74e32..ed92f56d8fe9c1442f741ef8d42d592c
      const {
        tools: openaiTools,
        toolChoice: openaiToolChoice,
-@@ -5724,22 +5708,6 @@ var OpenAIResponsesLanguageModel = class {
+@@ -3711,6 +3695,7 @@ var openaiResponsesChunkSchema = (0, import_provider_utils25.lazySchema)(
+       import_v418.z.object({
+         type: import_v418.z.enum(["response.completed", "response.incomplete"]),
+         response: import_v418.z.object({
++          end_turn: import_v418.z.boolean().nullish(),
+           incomplete_details: import_v418.z.object({ reason: import_v418.z.string() }).nullish(),
+           usage: import_v418.z.object({
+             input_tokens: import_v418.z.number(),
+@@ -3725,7 +3710,7 @@ var openaiResponsesChunkSchema = (0, import_provider_utils25.lazySchema)(
+               reasoning_tokens: import_v418.z.number().nullish(),
+               orchestration_output_tokens: import_v418.z.number().nullish()
+             }).nullish()
+-          }),
++          }).nullish(),
+           reasoning: import_v418.z.object({
+             context: import_v418.z.string().nullish()
+           }).nullish(),
+@@ -3777,7 +3762,7 @@ var openaiResponsesChunkSchema = (0, import_provider_utils25.lazySchema)(
+           import_v418.z.object({
+             type: import_v418.z.literal("message"),
+             id: import_v418.z.string(),
+-            phase: import_v418.z.enum(["commentary", "final_answer"]).nullish()
++            phase: import_v418.z.enum(["commentary", "partial_answer", "final_answer"]).nullish()
+           }),
+           import_v418.z.object({
+             type: import_v418.z.literal("reasoning"),
+@@ -3919,7 +3904,7 @@ var openaiResponsesChunkSchema = (0, import_provider_utils25.lazySchema)(
+           import_v418.z.object({
+             type: import_v418.z.literal("message"),
+             id: import_v418.z.string(),
+-            phase: import_v418.z.enum(["commentary", "final_answer"]).nullish()
++            phase: import_v418.z.enum(["commentary", "partial_answer", "final_answer"]).nullish()
+           }),
+           import_v418.z.object({
+             type: import_v418.z.literal("reasoning"),
+@@ -4255,7 +4240,7 @@ var openaiResponsesResponseSchema = (0, import_provider_utils25.lazySchema)(
+             type: import_v418.z.literal("message"),
+             role: import_v418.z.literal("assistant"),
+             id: import_v418.z.string(),
+-            phase: import_v418.z.enum(["commentary", "final_answer"]).nullish(),
++            phase: import_v418.z.enum(["commentary", "partial_answer", "final_answer"]).nullish(),
+             content: import_v418.z.array(
+               import_v418.z.object({
+                 type: import_v418.z.literal("output_text"),
+@@ -5724,22 +5709,6 @@ var OpenAIResponsesLanguageModel = class {
          });
        }
      }
@@ -148,8 +501,37 @@ index ad78b5df9359509091f4b8a1751dc34c03c74e32..ed92f56d8fe9c1442f741ef8d42d592c
      const shellToolEnvType = (_k = (_j = (_i = tools == null ? void 0 : tools.find(
        (tool) => tool.type === "provider" && tool.id === "openai.shell"
      )) == null ? void 0 : _i.args) == null ? void 0 : _j.environment) == null ? void 0 : _k.type;
+@@ -6288,6 +6257,8 @@ var OpenAIResponsesLanguageModel = class {
+     const activeReasoning = {};
+     let serviceTier;
+     let reasoningContext;
++    let endTurn;
++    let incompleteReason;
+     const hostedToolSearchCallIds = [];
+     let encounteredStreamError = false;
+     const result = {
+@@ -7035,7 +7006,9 @@ var OpenAIResponsesLanguageModel = class {
+                 }),
+                 raw: (_x = (_w = value.response.incomplete_details) == null ? void 0 : _w.reason) != null ? _x : void 0
+               };
+-              usage = value.response.usage;
++              usage = value.response.usage ?? void 0;
++              endTurn = value.response.end_turn ?? void 0;
++              incompleteReason = value.type === "response.incomplete" ? value.response.incomplete_details?.reason ?? "unknown" : void 0;
+               if (typeof value.response.service_tier === "string") {
+                 serviceTier = value.response.service_tier;
+               }
+@@ -7139,6 +7112,8 @@ var OpenAIResponsesLanguageModel = class {
+             const providerMetadata = {
+               [providerOptionsName]: {
+                 responseId,
++                ...endTurn !== void 0 ? { endTurn } : {},
++                ...incompleteReason !== void 0 ? { incompleteReason } : {},
+                 ...logprobs.length > 0 ? { logprobs } : {},
+                 ...serviceTier !== void 0 ? { serviceTier } : {},
+                 ...reasoningContext !== void 0 ? { reasoningContext } : {}
 diff --git a/dist/internal/index.mjs b/dist/internal/index.mjs
-index db7d6741c9ea615d577ea07722b469c144066268..f6b41b2832d2c8392072e0ecc1612e9e18b1b48e 100644
+index db7d6741c9ea615d577ea07722b469c144066268..26ed8ca1b191986805c5ee7dc5fbf5049ea5ffbb 100644
 --- a/dist/internal/index.mjs
 +++ b/dist/internal/index.mjs
 @@ -1023,22 +1023,6 @@ var OpenAIChatLanguageModel = class {
@@ -175,7 +557,51 @@ index db7d6741c9ea615d577ea07722b469c144066268..f6b41b2832d2c8392072e0ecc1612e9e
      const {
        tools: openaiTools,
        toolChoice: openaiToolChoice,
-@@ -5802,22 +5786,6 @@ var OpenAIResponsesLanguageModel = class {
+@@ -3756,6 +3740,7 @@ var openaiResponsesChunkSchema = lazySchema16(
+       z18.object({
+         type: z18.enum(["response.completed", "response.incomplete"]),
+         response: z18.object({
++          end_turn: z18.boolean().nullish(),
+           incomplete_details: z18.object({ reason: z18.string() }).nullish(),
+           usage: z18.object({
+             input_tokens: z18.number(),
+@@ -3770,7 +3755,7 @@ var openaiResponsesChunkSchema = lazySchema16(
+               reasoning_tokens: z18.number().nullish(),
+               orchestration_output_tokens: z18.number().nullish()
+             }).nullish()
+-          }),
++          }).nullish(),
+           reasoning: z18.object({
+             context: z18.string().nullish()
+           }).nullish(),
+@@ -3822,7 +3807,7 @@ var openaiResponsesChunkSchema = lazySchema16(
+           z18.object({
+             type: z18.literal("message"),
+             id: z18.string(),
+-            phase: z18.enum(["commentary", "final_answer"]).nullish()
++            phase: z18.enum(["commentary", "partial_answer", "final_answer"]).nullish()
+           }),
+           z18.object({
+             type: z18.literal("reasoning"),
+@@ -3964,7 +3949,7 @@ var openaiResponsesChunkSchema = lazySchema16(
+           z18.object({
+             type: z18.literal("message"),
+             id: z18.string(),
+-            phase: z18.enum(["commentary", "final_answer"]).nullish()
++            phase: z18.enum(["commentary", "partial_answer", "final_answer"]).nullish()
+           }),
+           z18.object({
+             type: z18.literal("reasoning"),
+@@ -4300,7 +4285,7 @@ var openaiResponsesResponseSchema = lazySchema16(
+             type: z18.literal("message"),
+             role: z18.literal("assistant"),
+             id: z18.string(),
+-            phase: z18.enum(["commentary", "final_answer"]).nullish(),
++            phase: z18.enum(["commentary", "partial_answer", "final_answer"]).nullish(),
+             content: z18.array(
+               z18.object({
+                 type: z18.literal("output_text"),
+@@ -5802,22 +5787,6 @@ var OpenAIResponsesLanguageModel = class {
          });
        }
      }
@@ -198,6 +624,35 @@ index db7d6741c9ea615d577ea07722b469c144066268..f6b41b2832d2c8392072e0ecc1612e9e
      const shellToolEnvType = (_k = (_j = (_i = tools == null ? void 0 : tools.find(
        (tool) => tool.type === "provider" && tool.id === "openai.shell"
      )) == null ? void 0 : _i.args) == null ? void 0 : _j.environment) == null ? void 0 : _k.type;
+@@ -6366,6 +6335,8 @@ var OpenAIResponsesLanguageModel = class {
+     const activeReasoning = {};
+     let serviceTier;
+     let reasoningContext;
++    let endTurn;
++    let incompleteReason;
+     const hostedToolSearchCallIds = [];
+     let encounteredStreamError = false;
+     const result = {
+@@ -7113,7 +7084,9 @@ var OpenAIResponsesLanguageModel = class {
+                 }),
+                 raw: (_x = (_w = value.response.incomplete_details) == null ? void 0 : _w.reason) != null ? _x : void 0
+               };
+-              usage = value.response.usage;
++              usage = value.response.usage ?? void 0;
++              endTurn = value.response.end_turn ?? void 0;
++              incompleteReason = value.type === "response.incomplete" ? value.response.incomplete_details?.reason ?? "unknown" : void 0;
+               if (typeof value.response.service_tier === "string") {
+                 serviceTier = value.response.service_tier;
+               }
+@@ -7217,6 +7190,8 @@ var OpenAIResponsesLanguageModel = class {
+             const providerMetadata = {
+               [providerOptionsName]: {
+                 responseId,
++                ...endTurn !== void 0 ? { endTurn } : {},
++                ...incompleteReason !== void 0 ? { incompleteReason } : {},
+                 ...logprobs.length > 0 ? { logprobs } : {},
+                 ...serviceTier !== void 0 ? { serviceTier } : {},
+                 ...reasoningContext !== void 0 ? { reasoningContext } : {}
 diff --git a/src/chat/openai-chat-language-model.ts b/src/chat/openai-chat-language-model.ts
 index 009a58deea236c2be03adc5cd03f98ed9050fd7b..a606675d82fc72a0bab8d52ac99866100e7ffb1d 100644
 --- a/src/chat/openai-chat-language-model.ts
@@ -237,8 +692,77 @@ index 009a58deea236c2be03adc5cd03f98ed9050fd7b..a606675d82fc72a0bab8d52ac9986610
      const {
        tools: openaiTools,
        toolChoice: openaiToolChoice,
+diff --git a/src/responses/convert-to-openai-responses-input.ts b/src/responses/convert-to-openai-responses-input.ts
+index 5941962b8de3ce66d2d02ea2fd0c3326fc2954cc..e9a9f284c9b7463ff9960bd09fc01cdb15fa3ea9 100644
+--- a/src/responses/convert-to-openai-responses-input.ts
++++ b/src/responses/convert-to-openai-responses-input.ts
+@@ -254,6 +254,7 @@ export async function convertToOpenAIResponsesInput({
+               const id = providerOpts?.itemId as string | undefined;
+               const phase = providerOpts?.phase as
+                 | 'commentary'
++                | 'partial_answer'
+                 | 'final_answer'
+                 | null
+                 | undefined;
+diff --git a/src/responses/openai-responses-api.ts b/src/responses/openai-responses-api.ts
+index 9ab482d7417c2e547398846b2e44e305d095ef25..32a0c03d468fb9fda9f42a14f53aa50f6b9866d6 100644
+--- a/src/responses/openai-responses-api.ts
++++ b/src/responses/openai-responses-api.ts
+@@ -122,7 +122,7 @@ export type OpenAIResponsesAssistantMessage = {
+   role: 'assistant';
+   content: Array<{ type: 'output_text'; text: string }>;
+   id?: string;
+-  phase?: 'commentary' | 'final_answer' | null;
++  phase?: 'commentary' | 'partial_answer' | 'final_answer' | null;
+ };
+ 
+ export type OpenAIResponsesFunctionCall = {
+@@ -569,6 +569,7 @@ export const openaiResponsesChunkSchema = lazySchema(() =>
+       z.object({
+         type: z.enum(['response.completed', 'response.incomplete']),
+         response: z.object({
++          end_turn: z.boolean().nullish(),
+           incomplete_details: z.object({ reason: z.string() }).nullish(),
+           usage: z.object({
+             input_tokens: z.number(),
+@@ -587,7 +588,7 @@ export const openaiResponsesChunkSchema = lazySchema(() =>
+                 orchestration_output_tokens: z.number().nullish(),
+               })
+               .nullish(),
+-          }),
++          }).nullish(),
+           reasoning: z
+             .object({
+               context: z.string().nullish(),
+@@ -651,7 +652,7 @@ export const openaiResponsesChunkSchema = lazySchema(() =>
+           z.object({
+             type: z.literal('message'),
+             id: z.string(),
+-            phase: z.enum(['commentary', 'final_answer']).nullish(),
++            phase: z.enum(['commentary', 'partial_answer', 'final_answer']).nullish(),
+           }),
+           z.object({
+             type: z.literal('reasoning'),
+@@ -795,7 +796,7 @@ export const openaiResponsesChunkSchema = lazySchema(() =>
+           z.object({
+             type: z.literal('message'),
+             id: z.string(),
+-            phase: z.enum(['commentary', 'final_answer']).nullish(),
++            phase: z.enum(['commentary', 'partial_answer', 'final_answer']).nullish(),
+           }),
+           z.object({
+             type: z.literal('reasoning'),
+@@ -1171,7 +1172,7 @@ export const openaiResponsesResponseSchema = lazySchema(() =>
+               type: z.literal('message'),
+               role: z.literal('assistant'),
+               id: z.string(),
+-              phase: z.enum(['commentary', 'final_answer']).nullish(),
++              phase: z.enum(['commentary', 'partial_answer', 'final_answer']).nullish(),
+               content: z.array(
+                 z.object({
+                   type: z.literal('output_text'),
 diff --git a/src/responses/openai-responses-language-model.ts b/src/responses/openai-responses-language-model.ts
-index 926e7ec713480353b969901f19c5d1d8cc883dab..ed457ce8f07a60ed48c47a3cbf11b2a7c6cf6415 100644
+index 926e7ec713480353b969901f19c5d1d8cc883dab..ad22c459b4a42f28807261173b30dbfaf7085d66 100644
 --- a/src/responses/openai-responses-language-model.ts
 +++ b/src/responses/openai-responses-language-model.ts
 @@ -433,36 +433,6 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
@@ -278,3 +802,65 @@ index 926e7ec713480353b969901f19c5d1d8cc883dab..ed457ce8f07a60ed48c47a3cbf11b2a7
      const shellToolEnvType = (
        tools?.find(
          tool => tool.type === 'provider' && tool.id === 'openai.shell',
+@@ -1143,7 +1113,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
+     > = [];
+ 
+     // track the phase of the current message being streamed
+-    let activeMessagePhase: 'commentary' | 'final_answer' | undefined;
++    let activeMessagePhase: 'commentary' | 'partial_answer' | 'final_answer' | undefined;
+ 
+     // flag that checks if there have been client-side tool calls (not executed by openai)
+     let hasFunctionCall = false;
+@@ -1159,6 +1129,8 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
+ 
+     let serviceTier: string | undefined;
+     let reasoningContext: ResponsesProviderMetadata['reasoningContext'];
++    let endTurn: boolean | undefined;
++    let incompleteReason: string | undefined;
+     const hostedToolSearchCallIds: string[] = [];
+     let encounteredStreamError = false;
+ 
+@@ -2073,7 +2045,11 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
+                 }),
+                 raw: value.response.incomplete_details?.reason ?? undefined,
+               };
+-              usage = value.response.usage;
++              usage = value.response.usage ?? undefined;
++              endTurn = value.response.end_turn ?? undefined;
++              incompleteReason = value.type === 'response.incomplete'
++                ? value.response.incomplete_details?.reason ?? 'unknown'
++                : undefined;
+               if (typeof value.response.service_tier === 'string') {
+                 serviceTier = value.response.service_tier;
+               }
+@@ -2191,6 +2167,8 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
+             const providerMetadata: SharedV3ProviderMetadata = {
+               [providerOptionsName]: {
+                 responseId: responseId,
++                ...(endTurn !== undefined ? { endTurn } : {}),
++                ...(incompleteReason !== undefined ? { incompleteReason } : {}),
+                 ...(logprobs.length > 0 ? { logprobs } : {}),
+                 ...(serviceTier !== undefined ? { serviceTier } : {}),
+                 ...(reasoningContext !== undefined ? { reasoningContext } : {}),
+diff --git a/src/responses/openai-responses-provider-metadata.ts b/src/responses/openai-responses-provider-metadata.ts
+index 3c6a3ce4eb023c234c2379b7bb4be3b0b80c528e..92072006af53db6b71e155074d8c31828330f3be 100644
+--- a/src/responses/openai-responses-provider-metadata.ts
++++ b/src/responses/openai-responses-provider-metadata.ts
+@@ -12,6 +12,8 @@ type ResponsesOutputTextAnnotationProviderMetadata = Extract<
+ >['annotation'];
+ 
+ export type ResponsesProviderMetadata = {
++  endTurn?: boolean;
++  incompleteReason?: string;
+   responseId: string | null | undefined;
+   logprobs?: Array<OpenAIResponsesLogprobs>;
+   serviceTier?: string;
+@@ -33,7 +35,7 @@ export type OpenaiResponsesProviderMetadata = {
+ 
+ export type ResponsesTextProviderMetadata = {
+   itemId: string;
+-  phase?: 'commentary' | 'final_answer' | null;
++  phase?: 'commentary' | 'partial_answer' | 'final_answer' | null;
+   annotations?: Array<ResponsesOutputTextAnnotationProviderMetadata>;
+ };
+ 

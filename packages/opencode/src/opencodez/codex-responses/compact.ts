@@ -139,7 +139,8 @@ export function compact(input: {
           ? cause
           : new RemoteCompactionError(
               "OpenAI remote compaction request failed",
-              !(cause instanceof DOMException && cause.name === "AbortError"),
+              !CodexResponsesAttempt.incompleteError(cause) &&
+                !(cause instanceof DOMException && cause.name === "AbortError"),
               undefined,
               { cause },
             ),
@@ -331,6 +332,10 @@ async function parseCompactionResponse(response: Response, input: unknown[]) {
   let buffer = ""
 
   const consume = (event: Record<string, unknown>) => {
+    // Compaction only installs state after a successful completed response.
+    // Even a controlled interruption must leave the old working state intact.
+    const incomplete = CodexResponsesAttempt.incompleteEvent(event)
+    if (incomplete) throw incomplete
     if (
       ["error", "response.failed", "response.incomplete"].includes(typeof event.type === "string" ? event.type : "")
     ) {
@@ -469,6 +474,7 @@ export function estimateText(value: string) {
 }
 
 export function canRetryWithCurrentModel(cause: unknown) {
+  if (CodexResponsesAttempt.incompleteError(cause)) return false
   const seen = new Set<unknown>()
   let current = cause
   while (current && !seen.has(current)) {

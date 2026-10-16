@@ -1157,7 +1157,13 @@ const layer = Layer.effect(
             )
           }
 
-          const { user: lastUser, assistant: lastAssistant, finished: lastFinished, tasks } = MessageV2.latest(msgs)
+          const {
+            user: lastUser,
+            assistant: lastAssistant,
+            finished: lastFinished,
+            context,
+            tasks,
+          } = MessageV2.latest(msgs)
 
           if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
 
@@ -1300,7 +1306,7 @@ const layer = Layer.effect(
             turnID: activeTurnID,
             messages: msgs,
             model,
-            tokens: lastFinished?.tokens,
+            tokens: context?.tokens,
           })
           if (remoteTransition) {
             yield* Effect.logInfo("transitioning remote compaction backend snapshot", {
@@ -1352,10 +1358,10 @@ const layer = Layer.effect(
                 }, 0) ?? 0)
               : 0
           if (
-            lastFinished &&
-            lastFinished.summary !== true &&
+            context &&
+            context.summary !== true &&
             (yield* compaction.isOverflow({
-              tokens: lastFinished.tokens,
+              tokens: context.tokens,
               model,
               additionalTokens,
               turn: remoteTurn,

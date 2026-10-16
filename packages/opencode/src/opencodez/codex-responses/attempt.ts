@@ -6,6 +6,59 @@ export type RequestKind = "sampling" | "compaction"
 export const REQUEST_KIND_HEADER = "x-opencodez-responses-request-kind"
 export const SESSION_POOL_LIMIT = 256
 
+// Transport metadata is shared by SDK and native Responses. Session policy is
+// applied only after the request has been identified as Codex OAuth.
+export function outcome(metadata: unknown) {
+  const openai = isRecord(metadata) && isRecord(metadata.openai) ? metadata.openai : undefined
+  const reason = typeof openai?.incompleteReason === "string" ? openai.incompleteReason : undefined
+  return {
+    error: reason !== undefined && reason !== "interrupted" ? new IncompleteResponseError(reason) : undefined,
+    continue: reason === "interrupted" || openai?.endTurn === false,
+  }
+}
+
+export class IncompleteResponseError extends Error {
+  constructor(
+    readonly reason: string,
+    readonly usage?: Record<string, unknown>,
+  ) {
+    super(
+      reason === "max_output_tokens"
+        ? "OpenAI response reached its output token limit. The partial response was preserved."
+        : reason === "content_filter"
+          ? "OpenAI response was stopped by the content filter. The partial response was preserved."
+          : "OpenAI returned an incomplete response. The partial response was preserved.",
+    )
+    this.name = "IncompleteResponseError"
+  }
+}
+
+export function incompleteError(cause: unknown): IncompleteResponseError | undefined {
+  const seen = new Set<unknown>()
+  for (let error = cause; error instanceof Error && !seen.has(error); error = error.cause) {
+    if (error instanceof IncompleteResponseError) return error
+    seen.add(error)
+  }
+}
+
+export function incompleteEvent(event: Record<string, unknown>) {
+  if (event.type !== "response.incomplete") return undefined
+  const response = isRecord(event.response) ? event.response : undefined
+  const details = isRecord(response?.incomplete_details) ? response.incomplete_details : undefined
+  return new IncompleteResponseError(
+    typeof details?.reason === "string" ? details.reason : "unknown",
+    isRecord(response?.usage) ? response.usage : undefined,
+  )
+}
+
+export function completedEvent(event: Record<string, unknown>) {
+  return (
+    event.type === "response.completed" ||
+    event.type === "response.done" ||
+    incompleteEvent(event)?.reason === "interrupted"
+  )
+}
+
 export type Rollback = {
   readonly partIDs: readonly PartID[]
   readonly durableOutput: boolean

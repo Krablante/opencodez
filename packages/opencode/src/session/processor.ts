@@ -472,12 +472,14 @@ const layer = Layer.effect(
               usage: value.usage ?? new Usage({}),
               metadata: value.providerMetadata,
             })
-            ctx.assistantMessage.finish = value.reason
+            const outcome = attempt.active() ? CodexResponsesAttempt.outcome(value.providerMetadata) : undefined
+            const reason = outcome?.error ? "error" : outcome?.continue ? "unknown" : value.reason
+            ctx.assistantMessage.finish = reason
             ctx.assistantMessage.cost += usage.cost
             ctx.assistantMessage.tokens = usage.tokens
             yield* session.updatePart({
               id: PartID.ascending(),
-              reason: value.reason,
+              reason,
               snapshot: completedSnapshot,
               messageID: ctx.assistantMessage.id,
               sessionID: ctx.assistantMessage.sessionID,
@@ -486,6 +488,13 @@ const layer = Layer.effect(
               cost: usage.cost,
             })
             yield* session.updateMessage(ctx.assistantMessage)
+            if (outcome?.error) {
+              // A terminal provider response has real output and usage. Commit
+              // it before raising the error so retry cleanup cannot erase it.
+              attempt.commit()
+              ctx.needsCompaction = false
+              return yield* Effect.fail(outcome.error)
+            }
             if (ctx.snapshot) {
               const patch = yield* snapshot.patch(ctx.snapshot)
               if (patch.files.length) {
@@ -507,7 +516,7 @@ const layer = Layer.effect(
               })
               .pipe(Effect.ignore, Effect.forkIn(scope))
             const needsFollowUp =
-              ctx.sawToolCall || value.reason === "tool-calls" || (attempt.active() && value.reason === "unknown")
+              ctx.sawToolCall || reason === "tool-calls" || (attempt.active() && reason === "unknown")
             if (
               (!attempt.active() || needsFollowUp) &&
               !ctx.assistantMessage.summary &&
@@ -663,7 +672,7 @@ const layer = Layer.effect(
           error: errorMessage(e),
           stack: e instanceof Error ? e.stack : undefined,
         })
-        if (!aborted) yield* rollbackAttempt()
+        if (!aborted && !CodexResponsesAttempt.incompleteError(e)) yield* rollbackAttempt()
         const error = parse(e)
         if (SessionV1.ContextOverflowError.isInstance(error)) {
           if (

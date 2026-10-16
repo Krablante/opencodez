@@ -16,6 +16,7 @@ import { CodexResponsesTransport } from "@/opencodez/codex-responses/transport"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { isRecord } from "@/util/record"
+import { CodexResponsesAttempt } from "@/opencodez/codex-responses/attempt"
 
 const model: Provider.Model = {
   id: ModelV2.ID.make("gpt-6.1-sol"),
@@ -125,12 +126,30 @@ async function sdkBody(input: LLMRequestPrep.Prepared) {
   return body
 }
 
-async function fixture(options: { overflows?: number; streamOverflow?: boolean; httpOnly?: boolean } = {}) {
+async function fixture(
+  options: {
+    overflows?: number
+    streamOverflow?: boolean
+    httpOnly?: boolean
+    incomplete?: string
+    interrupted?: boolean
+  } = {},
+) {
   const captures: Capture[] = []
   const id = crypto.randomUUID()
   let count = 0
   const events = (capture: Capture) => {
     const compact = capture.input.some((item) => isRecord(item) && item.type === "compaction_trigger")
+    if (compact && options.incomplete)
+      return [
+        {
+          type: "response.incomplete",
+          response: {
+            incomplete_details: { reason: options.incomplete },
+            usage: { input_tokens: 200, output_tokens: 10, total_tokens: 210 },
+          },
+        },
+      ]
     const failed = compact && ++count <= (options.overflows ?? 0)
     if (failed)
       return [
@@ -143,9 +162,10 @@ async function fixture(options: { overflows?: number; streamOverflow?: boolean; 
     return [
       { type: "response.output_item.done", item },
       {
-        type: "response.completed",
+        type: options.interrupted ? "response.incomplete" : "response.completed",
         response: {
           id: `resp_${crypto.randomUUID()}`,
+          ...(options.interrupted ? { incomplete_details: { reason: "interrupted" } } : {}),
           output: [item],
           usage: { input_tokens: 200, output_tokens: 10, total_tokens: 210 },
         },
@@ -288,6 +308,33 @@ test("compact reuses the sampling wire and replaces the working window before co
     { role: "user", content: [{ type: "input_text", text: "Next delta" }] },
   ])
 })
+
+test("controlled interruption preserves WebSocket continuation with an empty delta", async () => {
+  await using server = await fixture({ interrupted: true })
+  await server.send(await sdkBody(prepared([user])))
+  await server.send(await sdkBody(prepared([user, assistant])))
+  expect(server.captures.at(-1)?.via).toBe("ws")
+  expect(server.captures.at(-1)?.body.previous_response_id).toBeString()
+  expect(server.captures.at(-1)?.input).toEqual([])
+})
+
+for (const reason of ["max_output_tokens", "content_filter", "unknown", "interrupted"]) {
+  test(`incomplete compact (${reason}) preserves usage and never retries or changes models`, async () => {
+    await using server = await fixture({ incomplete: reason })
+    const error = await server.compact(prepared([user])).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    expect(CodexResponsesAttempt.incompleteError(error)?.reason).toBe(reason)
+    expect(CodexResponsesAttempt.incompleteError(error)?.usage).toEqual({
+      input_tokens: 200,
+      output_tokens: 10,
+      total_tokens: 210,
+    })
+    expect(CodexResponsesCompact.canRetryWithCurrentModel(error)).toBe(false)
+    expect(server.captures).toHaveLength(1)
+  })
+}
 
 test("large encrypted state cannot veto compact or preemptively clear tool results", async () => {
   await using server = await fixture()

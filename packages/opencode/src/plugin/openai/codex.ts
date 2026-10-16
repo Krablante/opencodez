@@ -371,6 +371,18 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
         const websocketFetch =
           options.experimentalWebSockets || codexWire
             ? CodexResponsesTransport.createWebSocketFetch({
+                onContinuationUnavailable: (reason) => {
+                  void input.client?.app
+                    .log({
+                      body: {
+                        service: "codex-responses",
+                        level: "debug",
+                        message: "continuation unavailable",
+                        extra: { reason },
+                      },
+                    })
+                    .catch(() => {})
+                },
                 httpFetch: fetch,
                 wire: codexWire ? "codex" : "legacy",
                 onModelsEtag(etag, accountKey) {

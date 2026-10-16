@@ -209,12 +209,13 @@ rewrites personal prompts or assignments.
 ## Responses Wire Mode
 
 ChatGPT OAuth sessions can use the stateful Responses WebSocket protocol aligned
-with Codex `rust-v0.153.4`. The first request in a fresh transport chain sends the
+with Codex `rust-v0.153.4`, with response lifecycle and empty-delta continuation
+behavior updated against `rust-v0.163.0`. The first request in a fresh transport chain sends the
 full conversation. Later compatible requests send only new input items together
 with `previous_response_id` when the conversation prefix and model settings
 still match. This continuation can cross a logical user-turn boundary, while
 the turn-scoped `x-codex-turn-state` routing token is reset. A reconnect,
-interruption, incompatible history, or relevant request-setting change starts a
+cancelled request, incompatible history, or relevant request-setting change starts a
 new full chain without requiring a different local session.
 
 The default is `codex`. Set `opencodez.responses.wire` to `legacy` to restore the
@@ -268,8 +269,8 @@ routing hints, and remote compaction use the same lowered
 value. This adds no probe, entitlement check, warning, or persistent store;
 legacy mode and API-key requests do not inherit it.
 
-OpenCodez automatically sends a full request after a reconnect, interrupted
-response, context compaction, history edit, relevant model-setting change, or
+OpenCodez automatically sends a full request after a reconnect, cancelled
+request, terminal incomplete response, context compaction, history edit, relevant model-setting change, or
 failed compatibility check. A new logical user turn alone resets sticky routing
 but does not invalidate an otherwise compatible continuation.
 The existing HTTP fallback also receives the original full request rather than
@@ -320,6 +321,73 @@ error is surfaced after at most twelve network requests. A confirmed or
 retry-exhausted HTTP fallback remains sticky for that session-and-account entry
 until the session is removed or the bounded pool evicts it, avoiding periodic
 WebSocket reprobes after a known transport failure.
+
+### Response lifecycle / Жизненный цикл ответа
+
+The SDK and native Responses parsers preserve `commentary`, `partial_answer`,
+and `final_answer` phases in text metadata and replay them in history. A partial
+answer may precede more reasoning or tool calls. For Codex OAuth, a completed
+response with `end_turn: false`, or `response.incomplete` with reason
+`interrupted`, requests another model turn through the existing session loop.
+A server-controlled interruption keeps a compatible WebSocket continuation;
+the user's Stop action still cancels the request and invalidates it.
+
+Other incomplete responses, including `max_output_tokens`, `content_filter`,
+and missing or unknown reasons, stop with a non-retryable error. Received text,
+reasoning, token usage, and cost remain stored. They trigger neither automatic
+compaction nor model fallback. Their usage counts toward cost but does not
+replace the last completed context baseline for compaction decisions. An
+incomplete compact preserves its reported usage and leaves the active compacted
+state unchanged; it never installs a partial result or retries on another model.
+An interrupted compact also stops safely, allowing an explicit later retry.
+
+Continuation accepts an empty delta when the full current input exactly matches
+the previous request plus its output. It sends `input: []` with
+`previous_response_id`. Debug logs named `continuation unavailable` report only
+a bounded reason: missing previous response/id, invalid input, changed model,
+tools, instructions, reasoning or other settings, shortened input, or mismatched
+history. They never contain request content. Reconnect and HTTP fallback still
+send the full current working context. These policies apply only to Codex OAuth;
+API-key, legacy-wire, and other-provider lifecycle behavior is unchanged.
+
+SDK и встроенный клиент Responses сохраняют фазы `commentary`, `partial_answer`
+и `final_answer` в метаданных текста и передают их обратно с историей. После
+частичного ответа модель может продолжить рассуждение или вызвать инструменты.
+В Codex OAuth признак `end_turn: false` и неполный ответ с причиной `interrupted`
+запускают следующий запрос через обычный цикл сессии. Управляемое сервером
+прерывание сохраняет совместимый WebSocket continuation. Кнопка Stop отменяет
+запрос и сбрасывает continuation.
+
+Другие неполные ответы, включая выходной лимит, фильтр содержимого и неизвестную
+или отсутствующую причину, завершаются ошибкой без автоматического повтора,
+compact или смены модели. Полученный текст, рассуждение, токены и стоимость
+сохраняются. Расход учитывается в стоимости, но не заменяет последнее завершённое
+состояние контекста при решении о compact. Неполный compact сохраняет известный
+расход и прежнее рабочее состояние; частичный результат не устанавливается.
+Прерванный compact тоже останавливается, после чего его можно повторить явно.
+
+Если текущий контекст точно совпадает с предыдущим запросом и его ответом,
+continuation отправляет пустой `input` с `previous_response_id`. Debug-сообщение
+`continuation unavailable` содержит только короткую причину: нет предыдущего
+ответа или его id, некорректный input, изменились настройки, история сократилась
+или перестала совпадать. Содержимое запросов в этот лог не попадает. После
+переподключения и при HTTP fallback отправляется полный текущий рабочий контекст.
+Эти правила жизненного цикла относятся только к Codex OAuth.
+
+Maintenance: the pinned `@ai-sdk/openai` patch changes parsing and exposes
+`endTurn`/`incompleteReason` metadata; it does not decide session policy.
+`attempt.ts` owns Codex outcome classification, `processor.ts` persists output
+and usage before surfacing terminal errors, and `continuation.ts` owns prefix
+compatibility. Keep the SDK source, ESM/CJS bundles, and declarations aligned
+when refreshing the patch. Regression coverage lives in the Responses lifecycle,
+processor, remote-compaction, and native Responses provider tests.
+
+Для поддержки: патч SDK отвечает за разбор и метаданные, `attempt.ts` — за
+классификацию результата Codex, `processor.ts` — за сохранение ответа и расхода
+до показа ошибки, `continuation.ts` — за совместимость истории. При обновлении
+патча нужно согласованно менять исходники SDK, ESM/CJS и декларации типов.
+Поведение защищают тесты жизненного цикла Responses, процессора сессии,
+удалённого compact и встроенного клиента Responses.
 
 Continuation state is keyed by both the local session and the ChatGPT account.
 Changing accounts therefore opens a fresh chain and sends one full request
