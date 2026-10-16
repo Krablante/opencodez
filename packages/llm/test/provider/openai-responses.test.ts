@@ -40,6 +40,65 @@ const expectToolOutput = (body: OpenAIResponses.OpenAIResponsesBody): OpenAITool
 }
 
 describe("OpenAI Responses route", () => {
+  for (const terminal of [
+    { type: "response.completed", end_turn: false },
+    { type: "response.incomplete", reason: "interrupted" },
+    { type: "response.incomplete", reason: "max_output_tokens" },
+    { type: "response.incomplete", reason: "content_filter" },
+    { type: "response.incomplete" },
+  ]) {
+    it.effect(`retains partial answer and lifecycle metadata ${JSON.stringify(terminal)}`, () =>
+      Effect.gen(function* () {
+        const item = { type: "message", id: "msg_partial", phase: "partial_answer" }
+        const response = yield* LLMClient.generate(request).pipe(
+          Effect.provide(
+            fixedResponse(
+              sseEvents(
+                { type: "response.output_item.added", item },
+                { type: "response.output_text.delta", item_id: item.id, delta: "Partial answer" },
+                { type: "response.output_item.done", item },
+                {
+                  type: terminal.type,
+                  response: {
+                    id: "resp_partial",
+                    end_turn: terminal.end_turn,
+                    incomplete_details: terminal.reason ? { reason: terminal.reason } : null,
+                    usage: { input_tokens: 100, output_tokens: 5 },
+                  },
+                },
+              ),
+            ),
+          ),
+        )
+        expect(response.text).toBe("Partial answer")
+        expect(response.events.find((event) => event.type === "text-start")).toMatchObject({
+          providerMetadata: { openai: { phase: "partial_answer" } },
+        })
+        const finish = response.events.find((event) => event.type === "step-finish")
+        expect(finish?.usage).toMatchObject({ inputTokens: 100, outputTokens: 5 })
+        expect(finish?.providerMetadata?.openai).toMatchObject(
+          terminal.type === "response.incomplete"
+            ? { incompleteReason: terminal.reason ?? "unknown" }
+            : { endTurn: false },
+        )
+        const replay = yield* LLMClient.prepare<OpenAIResponses.OpenAIResponsesBody>(
+          LLM.updateRequest(request, {
+            messages: [
+              Message.assistant([
+                { type: "text", text: "Partial answer", providerMetadata: { openai: { phase: "partial_answer" } } },
+              ]),
+            ],
+          }),
+        )
+        expect(replay.body.input).toContainEqual({
+          role: "assistant",
+          content: [{ type: "output_text", text: "Partial answer" }],
+          phase: "partial_answer",
+        })
+      }),
+    )
+  }
+
   it.effect("prepares OpenAI Responses target", () =>
     Effect.gen(function* () {
       const prepared = yield* LLMClient.prepare(request)

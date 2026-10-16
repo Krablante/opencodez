@@ -1,7 +1,7 @@
 import WebSocket from "ws"
 import { ProviderError } from "@/provider/error"
 import { isRecord } from "@/util/record"
-import { Continuation } from "./continuation"
+import { Continuation, type RejectionReason } from "./continuation"
 import { OpenAIWebSocket } from "@/plugin/openai/ws"
 import { CodexResponsesAttempt } from "./attempt"
 import { CodexResponsesProtocol } from "./protocol"
@@ -26,6 +26,7 @@ export interface CreateWebSocketFetchOptions {
   streamRetries?: number
   wire?: Mode
   onModelsEtag?: (etag: string, accountKey: string | undefined) => void
+  onContinuationUnavailable?: (reason: RejectionReason) => void
 }
 
 interface PoolEntry {
@@ -157,7 +158,12 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         resolveFirstEvent = resolve
         rejectFirstEvent = reject
       })
-      const prepared = options?.wire === "codex" ? entry.continuation.prepare(body) : undefined
+      const prepared =
+        options?.wire === "codex"
+          ? entry.continuation.prepare(body, (reason) => {
+              options.onContinuationUnavailable?.(reason)
+            })
+          : undefined
       let transaction = options?.wire === "codex" ? entry.continuation.transaction(body) : undefined
       const requestBody = options?.wire === "codex" ? withTurnState(prepared ?? body, entry.turnState) : body
       let recoveredPreviousResponse = false
@@ -186,7 +192,12 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         onTerminal: (event) => {
           entry.busy = false
           entry.lastUsedAt = Date.now()
-          if (event.type === "response.completed" || event.type === "response.done") {
+          if (
+            (options?.wire === "codex" && CodexResponsesAttempt.completedEvent(event)) ||
+            event.type === "response.completed" ||
+            event.type === "response.done"
+          ) {
+            transaction?.complete(event)
             entry.streamFailures = 0
             return
           }

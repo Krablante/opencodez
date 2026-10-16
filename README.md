@@ -265,7 +265,9 @@ After one full canonical request, it sends incremental input with
 `previous_response_id` whenever the next request is a compatible extension,
 including across logical user turns. A new user turn resets its sticky
 `x-codex-turn-state` routing token without discarding a compatible continuation
-or warm WebSocket. Reconnects, interruptions, context changes, and relevant
+or warm WebSocket. Compatible follow-ups may send an empty input delta.
+Server-controlled interruptions keep continuation; user cancellation,
+reconnects, context changes, and relevant
 model-setting changes return safely to a full request.
 Set the value to `legacy` to restore the previous OpenCode request lifecycle:
 unchanged full request bodies, upstream retry and partial-output handling, and
@@ -276,7 +278,11 @@ session that already contains durable opaque OpenAI compaction state continues
 that state over authenticated HTTP so changing the
 setting cannot discard context. API-key OpenAI access, alternate OpenAI model
 adapters, and other providers bypass Codex request lowering and keep their
-existing behavior.
+existing behavior. Codex OAuth preserves `partial_answer` phases and continues
+when the server reports `end_turn: false` or a controlled interruption. Other
+incomplete responses stop without automatic retry, compaction, or model fallback,
+while retaining partial output and reported usage. See the bilingual
+[response lifecycle guide](docs/opencodez.md#response-lifecycle--жизненный-цикл-ответа).
 
 OpenCodez reads ChatGPT model capabilities from the authenticated Codex model
 catalog and refreshes them on the catalog ETag. GPT-5.6 and GPT-6 models that
@@ -306,7 +312,7 @@ catalog `comp_hash` changes between turns, or a model switch reduces the
 effective context window below the active token state, it compacts the previous
 history with the previous model before sampling the new turn. It retries once
 with the current model only when the previous model can no longer complete the
-compact.
+compact. Terminal incomplete responses never trigger this model fallback.
 The authenticated catalog profile is frozen for the complete logical turn, so
 an ETag refresh cannot change `comp_hash`, Responses Lite lowering, or context
 limits halfway through a tool loop. Switching ChatGPT login during an active

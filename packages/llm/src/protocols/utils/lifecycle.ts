@@ -24,6 +24,13 @@ export const textDelta = (state: State, events: LLMEvent[], id: string, text: st
   return { ...stepped, text: new Set([...stepped.text, id]) }
 }
 
+export const textStart = (state: State, events: LLMEvent[], id: string, providerMetadata?: ProviderMetadata): State => {
+  if (state.text.has(id)) return state
+  const stepped = stepStart(state, events)
+  events.push(LLMEvent.textStart({ id, providerMetadata }))
+  return { ...stepped, text: new Set([...stepped.text, id]) }
+}
+
 export const reasoningStart = (
   state: State,
   events: LLMEvent[],

@@ -10,6 +10,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { EventV2 } from "@opencode-ai/core/event"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { CodexResponsesCompact } from "./compact"
+import { CodexResponsesAttempt } from "./attempt"
 import { CodexResponsesCompaction } from "./compaction"
 import { CodexResponsesCatalog } from "./catalog"
 import { SystemPrompt } from "@/session/system"
@@ -558,7 +559,7 @@ export function make(deps: Dependencies) {
       const attempt = (attemptModel: Provider.Model, snapshot?: LLMRequestPrep.Prepared) =>
         run(attemptModel, snapshot).pipe(
           Effect.match({
-            onFailure: (error) => ({ ok: false as const, error }),
+            onFailure: (error) => ({ ok: false as const, error, model: attemptModel }),
             onSuccess: (value) => ({ ok: true as const, value, model: attemptModel }),
           }),
         )
@@ -577,7 +578,7 @@ export function make(deps: Dependencies) {
         error: errorMessage(primary.error),
       })
       const fallback = yield* attempt(input.targetModel)
-      if (fallback.ok) return fallback
+      if (fallback.ok || CodexResponsesAttempt.incompleteError(fallback.error)) return fallback
       yield* Effect.logError("current-model remote compaction fallback failed", {
         "session.id": input.sessionID,
         previousModel: input.sourceModel.api.id,
@@ -594,6 +595,31 @@ export function make(deps: Dependencies) {
         error: errorMessage(compacted.error),
       })
       msg.error = MessageV2.fromError(compacted.error, { providerID: input.sourceModel.providerID })
+      const raw = CodexResponsesAttempt.incompleteError(compacted.error)?.usage
+      if (raw) {
+        const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined)
+        const cached = isRecord(raw.input_tokens_details) ? number(raw.input_tokens_details.cached_tokens) : undefined
+        const usage = Session.getUsage({
+          model: compacted.model,
+          usage: new Usage({
+            inputTokens: number(raw.input_tokens),
+            outputTokens: number(raw.output_tokens),
+            totalTokens: number(raw.total_tokens),
+            cacheReadInputTokens: cached,
+            nonCachedInputTokens:
+              number(raw.input_tokens) !== undefined
+                ? Math.max(0, (number(raw.input_tokens) ?? 0) - (cached ?? 0))
+                : undefined,
+            reasoningTokens: isRecord(raw.output_tokens_details)
+              ? number(raw.output_tokens_details.reasoning_tokens)
+              : undefined,
+          }),
+        })
+        msg.tokens = usage.tokens
+        msg.cost = usage.cost
+        msg.modelID = compacted.model.id
+        msg.providerID = compacted.model.providerID
+      }
       msg.finish = "error"
       msg.time.completed = Date.now()
       yield* deps.session.updateMessage(msg)

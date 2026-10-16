@@ -25,7 +25,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { LLMEvent } from "@opencode-ai/llm"
+import { LLMEvent, Usage } from "@opencode-ai/llm"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -271,6 +271,100 @@ const boot = Effect.fn("test.boot")(function* () {
   const provider = yield* Provider.Service
   return { processors, session, provider }
 })
+
+for (const scenario of [
+  { codex: true, metadata: { endTurn: false }, followUp: true },
+  { codex: true, metadata: { incompleteReason: "interrupted" }, followUp: true },
+  { codex: true, metadata: { incompleteReason: "max_output_tokens" }, terminal: true },
+  { codex: true, metadata: { incompleteReason: "content_filter" }, terminal: true },
+  { codex: true, metadata: { incompleteReason: "future_reason" }, terminal: true },
+  { codex: false, metadata: { endTurn: false }, followUp: false },
+  { codex: false, metadata: { incompleteReason: "max_output_tokens" }, followUp: false },
+]) {
+  let calls = 0
+  const inputTokens = scenario.terminal ? 95000 : 100
+  const llm = Layer.succeed(
+    LLM.Service,
+    LLM.Service.of({
+      stream: (input) => {
+        calls++
+        input.onPrepared?.({
+          codexResponses: scenario.codex,
+          system: input.system,
+          messages: input.messages,
+          tools: input.tools,
+          params: { options: {} },
+          messageTransformOptions: {},
+          headers: {},
+        })
+        return Stream.make(
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.textStart({ id: "partial", providerMetadata: { openai: { phase: "partial_answer" } } }),
+          LLMEvent.textDelta({ id: "partial", text: "Retained partial answer" }),
+          LLMEvent.textEnd({ id: "partial" }),
+          LLMEvent.stepFinish({
+            index: 0,
+            reason: "stop",
+            usage: new Usage({ inputTokens, outputTokens: 5, totalTokens: inputTokens + 5 }),
+            providerMetadata: { openai: scenario.metadata },
+          }),
+          LLMEvent.finish({ reason: "stop" }),
+        )
+      },
+    }),
+  )
+  const lifecycle = testEffect(LayerNode.compile(root, [...replacements, [LLM.node, llm]]))
+  lifecycle.live(`session.processor lifecycle ${JSON.stringify(scenario)}`, () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          calls = 0
+          const { processors, session, provider } = yield* boot()
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "Continue the task")
+          const baseline = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+          const result = yield* handle.process({
+            user: parent,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "Continue the task" }],
+            tools: {},
+          })
+          expect(calls).toBe(1)
+          expect(result).toBe(scenario.terminal ? "stop" : "continue")
+          expect(handle.needsFollowUp).toBe(scenario.followUp === true)
+          const stored = yield* MessageV2.get({ sessionID: chat.id, messageID: msg.id })
+          expect(stored.parts.find((part) => part.type === "text")).toMatchObject({
+            text: "Retained partial answer",
+            metadata: { openai: { phase: "partial_answer" } },
+          })
+          expect(stored.info.role === "assistant" && stored.info.tokens).toMatchObject({
+            input: inputTokens,
+            output: 5,
+            total: inputTokens + 5,
+          })
+          if (scenario.terminal) {
+            expect(stored.info.role === "assistant" && stored.info.error).toMatchObject({
+              name: "APIError",
+              data: { isRetryable: false },
+            })
+            const latest = MessageV2.latest([{ info: baseline, parts: [] }, stored])
+            expect(latest.finished?.id).toBe(msg.id)
+            expect(latest.context?.id).toBe(baseline.id)
+            const replay = yield* MessageV2.toModelMessagesEffect([stored], mdl)
+            expect(JSON.stringify(replay)).toContain("Retained partial answer")
+            expect(JSON.stringify(replay)).toContain("partial_answer")
+          }
+        }),
+      { config: cfg },
+    ),
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Tests

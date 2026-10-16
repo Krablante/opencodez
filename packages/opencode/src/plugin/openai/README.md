@@ -25,9 +25,9 @@ The upstream full-request WebSocket transport is enabled by default on `local`,
 7. In `legacy` mode, send the complete `response.create` body. WebSocket frames
    retain the explicit `stream: true` request field and do not acquire Codex
    continuation, turn-state, catalog, or replay semantics.
-8. In `codex` mode, send the first request of each logical user turn in full.
-   Later matching requests inside that turn send only new input items with
-   `previous_response_id`; a healthy socket may remain open across the boundary.
+8. In `codex` mode, send the first request of a fresh transport chain in full.
+   Later matching requests send only new input items with `previous_response_id`,
+   including empty deltas and compatible requests across user turns.
 9. Capture `x-codex-turn-state` from response metadata or HTTP fallback
    headers, plus WebSocket upgrade headers when the runtime exposes them. Bun's
    client exposes neither rejected-upgrade status nor headers, so the standalone
@@ -35,8 +35,8 @@ The upstream full-request WebSocket transport is enabled by default on `local`,
    waits one minute before trying WebSocket again, and uses backend metadata
    without adding another socket stack. Keep the state in
    `client_metadata` for follow-ups within the same logical user turn,
-   including compaction, then clear it together with continuation at the next
-   turn without discarding a healthy socket.
+   including compaction, then clear the routing token at the next turn while
+   retaining compatible continuation and a healthy socket.
 10. Return WebSocket events as SSE. Preserve the handshake's
     `x-reasoning-included` signal on the synthetic response so normal usage
     accounting can distinguish server-counted historical reasoning.
@@ -80,8 +80,9 @@ message starts a fresh lane while durable encrypted compaction remains portable.
 - Reuse a socket for up to 55 minutes, then replace it on the next request.
 - Cool down WebSocket for one minute after an opaque Bun upgrade rejection.
 - Reset Codex continuation state whenever the socket is replaced, aborted, or
-  fails, and at every logical user-turn boundary. Turn changes do not close a
-  healthy socket.
+  fails. A logical user-turn boundary resets routing state only.
+- A server-controlled `interrupted` response is continuable; user cancellation
+  and terminal incomplete responses invalidate continuation.
 - Scope pool entries to both session ID and ChatGPT account ID. A login change
   therefore starts a full request chain instead of reusing account-scoped
   response or reasoning IDs. If the account id claim is absent, the OAuth
@@ -123,6 +124,12 @@ message starts a fresh lane while durable encrypted compaction remains portable.
   exponential delay for that retry; the existing attempt and operation limits
   remain authoritative.
 - Abort or cancel closes the socket.
+
+The SDK and native parsers pass phase and termination metadata to the session
+processor. Codex outcome classification lives in `codex-responses/attempt.ts`.
+The [bilingual lifecycle guide](../../../../../docs/opencodez.md#response-lifecycle--жизненный-цикл-ответа)
+defines incomplete-response policy, usage accounting, empty-delta continuation,
+debug rejection reasons, and the SDK patch maintenance boundary.
 
 ## Concurrency
 
@@ -235,6 +242,7 @@ A login change discards account-scoped continuation and sends a fresh full
 request. The encrypted compaction item remains in that request as durable session
 history, matching Codex without carrying response or reasoning IDs across the
 account boundary.
+
 ## Model catalog defaults
 
 GPT-6 Sol and Luna use the same account-scoped catalog and turn snapshot as

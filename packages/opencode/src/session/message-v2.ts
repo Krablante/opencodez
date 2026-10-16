@@ -36,6 +36,7 @@ import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 import { Effect, Schema } from "effect"
 import { CodexResponsesCompaction } from "@/opencodez/codex-responses/compaction"
+import { CodexResponsesAttempt } from "@/opencodez/codex-responses/attempt"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -252,6 +253,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 
       if (
         msg.info.error &&
+        !isIncompleteResponse(msg.info.error) &&
         !(
           AbortedError.isInstance(msg.info.error) &&
           msg.parts.some((part) => part.type !== "step-start" && part.type !== "reasoning")
@@ -609,18 +611,21 @@ export function latest(msgs: WithParts[]) {
   let user: User | undefined
   let assistant: Assistant | undefined
   let finished: Assistant | undefined
+  let context: Assistant | undefined
   for (const msg of msgs) {
     const info = msg.info
     if (info.role === "user" && isAfter(info, user)) user = info
     if (info.role === "assistant" && isAfter(info, assistant)) assistant = info
     if (info.role === "assistant" && info.finish && isAfter(info, finished)) finished = info
+    if (info.role === "assistant" && info.finish && !isIncompleteResponse(info.error) && isAfter(info, context))
+      context = info
   }
   const tasks = msgs.flatMap((m) =>
     finished && !isAfter(m.info, finished)
       ? []
       : m.parts.filter((p): p is CompactionPart | SubtaskPart => p.type === "compaction" || p.type === "subtask"),
   )
-  return { user, assistant, finished, tasks }
+  return { user, assistant, finished, context, tasks }
 }
 
 function isAfter(info: Info, other?: Info) {
@@ -629,10 +634,24 @@ function isAfter(info: Info, other?: Info) {
   return info.id > other.id
 }
 
+function isIncompleteResponse(error: Assistant["error"]) {
+  return error?.name === "APIError" && error.data.metadata?.code === "response_incomplete"
+}
+
 export function fromError(
   e: unknown,
   ctx: { providerID: ProviderV2.ID; aborted?: boolean },
 ): NonNullable<Assistant["error"]> {
+  const incomplete = CodexResponsesAttempt.incompleteError(e)
+  if (incomplete)
+    return new APIError(
+      {
+        message: incomplete.message,
+        isRetryable: false,
+        metadata: { code: "response_incomplete", reason: incomplete.reason },
+      },
+      { cause: e },
+    ).toObject()
   switch (true) {
     case e instanceof DOMException && e.name === "AbortError":
       return new AbortedError(

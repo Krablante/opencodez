@@ -80,7 +80,7 @@ const OpenAIResponsesInputItem = Schema.Union([
   Schema.Struct({
     role: Schema.tag("assistant"),
     content: Schema.Array(OpenAIResponsesOutputText),
-    phase: Schema.optionalKey(Schema.Literals(["commentary", "final_answer"])),
+    phase: Schema.optionalKey(Schema.Literals(["commentary", "partial_answer", "final_answer"])),
   }),
   OpenAIResponsesReasoningItem,
   OpenAIResponsesItemReference,
@@ -180,6 +180,7 @@ type OpenAIResponsesUsage = Schema.Schema.Type<typeof OpenAIResponsesUsage>
 const OpenAIResponsesStreamItem = Schema.Struct({
   type: Schema.String,
   id: Schema.optional(Schema.String),
+  phase: optionalNull(Schema.Literals(["commentary", "partial_answer", "final_answer"])),
   call_id: Schema.optional(Schema.String),
   name: Schema.optional(Schema.String),
   arguments: Schema.optional(Schema.String),
@@ -222,6 +223,7 @@ const OpenAIResponsesEvent = Schema.Struct({
     Schema.StructWithRest(
       Schema.Struct({
         id: Schema.optional(Schema.String),
+        end_turn: optionalNull(Schema.Boolean),
         service_tier: optionalNull(Schema.String),
         incomplete_details: optionalNull(Schema.Struct({ reason: Schema.String })),
         usage: optionalNull(OpenAIResponsesUsage),
@@ -381,7 +383,8 @@ const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (requ
           input.push({
             role: "assistant",
             content: [{ type: "output_text", text: part.text }],
-            ...(ProviderShared.isRecord(openai) && (openai.phase === "commentary" || openai.phase === "final_answer")
+            ...(ProviderShared.isRecord(openai) &&
+            (openai.phase === "commentary" || openai.phase === "partial_answer" || openai.phase === "final_answer")
               ? { phase: openai.phase }
               : {}),
           })
@@ -662,6 +665,16 @@ const reasoningMetadata = (item: OpenAIResponsesStreamItem & { id: string }) =>
 // best-effort, not guaranteed.
 const onOutputItemAdded = (state: ParserState, event: OpenAIResponsesEvent): StepResult => {
   const item = event.item
+  if (item?.type === "message" && item.id) {
+    const events: LLMEvent[] = []
+    const lifecycle = Lifecycle.textStart(
+      state.lifecycle,
+      events,
+      item.id,
+      openaiMetadata({ itemId: item.id, ...(item.phase != null ? { phase: item.phase } : {}) }),
+    )
+    return [{ ...state, lifecycle }, events]
+  }
   if (item && isReasoningItem(item)) {
     const events: LLMEvent[] = []
     return [
@@ -850,6 +863,17 @@ const onOutputItemDone = Effect.fn("OpenAIResponses.onOutputItemDone")(function*
     return [{ ...state, lifecycle }, events] satisfies StepResult
   }
 
+  if (item.type === "message" && item.id) {
+    const events: LLMEvent[] = []
+    const lifecycle = Lifecycle.textEnd(
+      state.lifecycle,
+      events,
+      item.id,
+      openaiMetadata({ itemId: item.id, ...(item.phase != null ? { phase: item.phase } : {}) }),
+    )
+    return [{ ...state, lifecycle }, events] satisfies StepResult
+  }
+
   if (isReasoningItem(item)) {
     const events: LLMEvent[] = []
     const providerMetadata = reasoningMetadata(item)
@@ -885,10 +909,17 @@ const onResponseFinish = (state: ParserState, event: OpenAIResponsesEvent): Step
     reason: mapFinishReason(event, state.hasFunctionCall),
     usage: mapUsage(event.response?.usage),
     providerMetadata:
-      event.response?.id || event.response?.service_tier
+      event.response?.id ||
+      event.response?.service_tier ||
+      typeof event.response?.end_turn === "boolean" ||
+      event.type === "response.incomplete"
         ? openaiMetadata({
-            responseId: event.response.id,
-            serviceTier: event.response.service_tier,
+            responseId: event.response?.id,
+            serviceTier: event.response?.service_tier,
+            ...(event.response?.end_turn != null ? { endTurn: event.response.end_turn } : {}),
+            ...(event.type === "response.incomplete"
+              ? { incompleteReason: event.response?.incomplete_details?.reason ?? "unknown" }
+              : {}),
           })
         : undefined,
   })
