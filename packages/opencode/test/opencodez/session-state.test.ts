@@ -11,10 +11,13 @@ describe("OpenCodezSession", () => {
   beforeEach(() => OpenCodezSession.resetPending())
 
   test.each([
-    ["gpt-5.5", "codex_gpt_5_5"],
+    ["gpt-5.5", "codex_gpt_6_2_sol"],
     ["gpt-5.6-luna", "codex_gpt_5_6_luna_terra"],
     ["gpt-5.6-terra", "codex_gpt_5_6_luna_terra"],
     ["gpt-5.6-sol", "codex_gpt_5_6_sol"],
+    ["gpt-6.1-terra", "codex_gpt_6_1_terra"],
+    ["gpt-6.2-sol", "codex_gpt_6_2_sol"],
+    ["gpt-6.2-astra", "codex_gpt_6_2_astra"],
   ])("maps %s to %s", (modelID, system) => {
     expect(OpenCodezSession.effective({ config: {}, model: model(modelID) })).toMatchObject({
       system,

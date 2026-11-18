@@ -73,7 +73,9 @@ beforeAll(async () => {
   process.env.OPENCODE_CONFIG_DIR = path.join(tmp, "config", "opencodez")
   const root = path.join(process.env.OPENCODE_CONFIG_DIR, "prompts", "core")
   await fs.mkdir(root, { recursive: true })
-  await fs.writeFile(path.join(root, "codex_gpt_5_5.md"), "GPT 5.5 SYSTEM")
+  await fs.writeFile(path.join(root, "codex_gpt_6_2_sol.md"), "GPT 6.2 SOL SYSTEM")
+  await fs.writeFile(path.join(root, "codex_gpt_6_2_astra.md"), "GPT 6.2 ASTRA SYSTEM")
+  await fs.writeFile(path.join(root, "codex_gpt_6_1_terra.md"), "GPT 6.1 TERRA SYSTEM")
   await fs.writeFile(path.join(root, "codex_gpt_5_6_luna_terra.md"), "GPT 5.6 LUNA TERRA SYSTEM")
   await fs.writeFile(path.join(root, "codex_gpt_5_6_sol.md"), "GPT 5.6 SOL SYSTEM")
   await fs.writeFile(path.join(root, "codex_gpt_6_1_sol.md"), "GPT 6.1 SOL SYSTEM")
@@ -90,17 +92,21 @@ afterAll(async () => {
 
 describe("LLMRequestPrep", () => {
   test.each([
-    ["gpt-5.5", "GPT 5.5 SYSTEM"],
+    ["gpt-5.5", "GPT 6.2 SOL SYSTEM"],
     ["gpt-5.6-luna", "GPT 5.6 LUNA TERRA SYSTEM"],
     ["gpt-5.6-terra", "GPT 5.6 LUNA TERRA SYSTEM"],
     ["gpt-5.6-sol", "GPT 5.6 SOL SYSTEM"],
     ["gpt-6.1-sol", "GPT 6.1 SOL SYSTEM"],
+    ["gpt-6.1-terra", "GPT 6.1 TERRA SYSTEM"],
+    ["gpt-6.2-sol", "GPT 6.2 SOL SYSTEM"],
+    ["gpt-6.2-astra", "GPT 6.2 ASTRA SYSTEM"],
+    ["gpt-6.2-sol-fast", "GPT 6.2 SOL SYSTEM"],
   ])("uses the mapped System for %s", async (modelID, expected) => {
     const prepared = await Effect.runPromise(
       LLMRequestPrep.prepare({
         ...input,
         sessionID: `session-${modelID}`,
-        model: { ...model, id: modelID, api: { ...model.api, id: modelID } },
+        model: { ...model, id: modelID, api: { ...model.api, id: modelID.replace(/-fast$/, "") } },
       }),
     )
 
@@ -133,6 +139,6 @@ describe("LLMRequestPrep", () => {
       }),
     )
 
-    expect(prepared.system.join("\n")).not.toContain("GPT 5.5 SYSTEM")
+    expect(prepared.system.join("\n")).not.toContain("GPT 6.2 SOL SYSTEM")
   })
 })

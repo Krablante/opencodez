@@ -109,41 +109,54 @@ codex_gpt_5_2_codex
 codex_gpt_5_3_codex
 codex_gpt_5_4
 codex_gpt_5_4_mini
-codex_gpt_5_5
 codex_gpt_5_6_luna_terra
 codex_gpt_5_6_sol
 codex_gpt_6_astra
 codex_gpt_6_sol
 codex_gpt_6_luna
 codex_gpt_6_1_sol
+codex_gpt_6_1_terra
+codex_gpt_6_2_sol
+codex_gpt_6_2_astra
 ```
 
-The prompt library is reviewed against stable Codex `rust-v0.159.1`. GPT-6
-Astra, Sol, Luna, and GPT-6.1 Sol each use their own
+The prompt library is reviewed against stable Codex `rust-v0.170.0`, using
 `model_messages.instructions_template` from `codex-rs/models-manager/models.json`.
-GPT-5.5 includes the
-personality text embedded by that release. GPT-5.6 Luna, Terra, and Sol still
-share one template and retain their existing selector names. Unchanged templates
-keep their existing bytes; an upstream release does not require rewriting them.
+GPT-6.2 Sol and Astra share one template. GPT-6.1 Terra shares GPT-6 Astra's
+template; GPT-6 Sol, Luna, and GPT-6.1 Sol retain their distinct templates.
+GPT-5.6 Luna, Terra, and Sol share one template and retain their selector names.
+GPT-5.5's preset is retired. Saved references to the retired built-in resolve to
+GPT-6.2 Sol without restoring a selectable GPT-5.5 item. Existing personal files
+are preserved and retain precedence over bare legacy names.
 
-GPT-5.2 and GPT-5.2 Codex retain their unchanged upstream file-based prompts.
+GPT-5.2 and GPT-5.2 Codex retain their upstream file-based foundations.
 GPT-5.4 retains its adapted template from the earlier catalog because it is
-absent from `rust-v0.159.1`. GPT-5.4 Mini retains its last catalog template
+absent from the current catalog. GPT-5.4 Mini retains its last catalog template
 from `rust-v0.153.4`, and
 GPT-5.3 Codex retains its existing legacy asset because neither has a template
 in the current catalog. Keeping these selectable assets preserves saved choices;
 it does not imply that the provider still offers the corresponding models.
 
-Adaptation is limited to the host tool contract: unsupported Codex Apps,
-orchestrator skill discovery, automatic approval review, and exec-wrapper
-instructions are removed or expressed through OpenCodez's available tools.
-Model-specific writing, autonomy, and verification guidance stays model-specific;
-Sol, Luna, and GPT-6.1 Sol are not aliases of Astra or each other. No personality
-manager or runtime prompt downloader is involved. Maintain assets and exports in
+All Codex-derived presets identify the assistant as OpenCodez and follow its
+actual tool schemas. File work uses the available file tools and patch/edit
+tools, commands use `bash`, planning uses `todowrite`, and questions use
+`question` when exposed. Skills, plugins, and MCP instructions depend on the
+current catalog. Unsupported Codex Apps, orchestrator discovery, automatic
+approval review, and execution wrappers are removed. Model-specific writing,
+autonomy, and verification guidance remains intact, including GPT-6.2's
+requirement to disclose blockers and unverified outcomes. No personality manager
+or runtime prompt downloader is involved. Maintain assets and exports in
 `default-prompts/`, model mappings in `core/src/opencodez/settings.ts`, and the
 upstream builtin registry in `session/system.ts` together. The upstream
 `gpt-astra` builtin remains separately selectable and is the provider fallback
 for GPT-6 when no OpenCodez System is selected by configuration.
+
+**По-русски.** Встроенные пресеты сверены со стабильным Codex `0.170.0` и
+адаптированы под инструменты OpenCodez. GPT-6.2 Sol и Astra используют общий
+исходный шаблон, а GPT-6.1 Terra — шаблон GPT-6 Astra. Старый встроенный пресет
+GPT-5.5 убран из списка; сохранённые обращения к нему используют GPT-6.2 Sol.
+Личные файлы сохраняются. Навыки, плагины и MCP используются по фактическому
+набору инструментов текущей установки.
 
 ## Model Defaults
 
@@ -165,7 +178,6 @@ gpt-5.3-codex -> codex_gpt_5_3_codex
 gpt-5.3-codex-spark -> codex_gpt_5_3_codex
 gpt-5.4 -> codex_gpt_5_4
 gpt-5.4-mini -> codex_gpt_5_4_mini
-gpt-5.5 -> codex_gpt_5_5
 gpt-5.6-luna -> codex_gpt_5_6_luna_terra
 gpt-5.6-terra -> codex_gpt_5_6_luna_terra
 gpt-5.6-sol -> codex_gpt_5_6_sol
@@ -173,6 +185,9 @@ gpt-6-astra -> codex_gpt_6_astra
 gpt-6-sol -> codex_gpt_6_sol
 gpt-6-luna -> codex_gpt_6_luna
 gpt-6.1-sol -> codex_gpt_6_1_sol
+gpt-6.1-terra -> codex_gpt_6_1_terra
+gpt-6.2-sol -> codex_gpt_6_2_sol
+gpt-6.2-astra -> codex_gpt_6_2_astra
 ```
 
 Users can override defaults in `~/.config/opencodez/opencode.jsonc`:
@@ -195,7 +210,7 @@ rewrites personal prompts or assignments.
         "token_limit": 300000,
       },
       "system": {
-        "default": "codex_gpt_5_5",
+        "default": "codex_gpt_6_2_sol",
         "gpt-5.6-luna": "codex_gpt_5_6_luna_terra",
         "gpt-5.6-terra": "codex_gpt_5_6_luna_terra",
         "gpt-5.6-sol": "codex_gpt_5_6_sol",
@@ -262,8 +277,9 @@ product-level validation.
 In Codex wire mode, an omitted `service_tier` uses the authenticated model
 profile's `default_service_tier`, frozen with the other turn settings. The
 bundled GPT-6 Sol and Luna fallback profiles default to `priority`, matching
-Codex `rust-v0.159.1`. GPT-6.1 Sol has the same 272k working window, 872k
-maximum, `comp_hash: "3000"`, and Responses Lite support but no default tier.
+Codex `rust-v0.170.0`. GPT-6.1 Sol, GPT-6.1 Terra, and GPT-6.2 Sol have a
+500k default working window. GPT-6.2 Astra defaults to 272k. Their maximum is
+872k, with `comp_hash: "3000"`, Responses Lite, and no default service tier.
 An explicit request tier, including `default` or `auto`, wins. HTTP, WebSocket,
 routing hints, and remote compaction use the same lowered
 value. This adds no probe, entitlement check, warning, or persistent store;
@@ -894,7 +910,7 @@ behavior first, then reconnect the isolated System control at the existing
 model-control seam. Generated Protocol, OpenAPI, and SDK files must come from
 their normal generators rather than manual edits.
 
-The current OpenCode base is `v1.18.33`. Prompt provenance (`rust-v0.159.1`)
+The current OpenCode base is `v1.18.33`. Prompt provenance (`rust-v0.170.0`)
 is separate from the Responses protocol baseline (`rust-v0.153.4` with the
 documented catalog-tier addition). Updating prompts does not claim complete
 parity with every new Codex subsystem. In particular, the fork does not import

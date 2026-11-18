@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { createServer, type IncomingMessage } from "node:http"
 import { type AddressInfo } from "node:net"
 import { WebSocketServer } from "ws"
+import { CodexResponsesCatalog } from "../../src/opencodez/codex-responses/catalog"
 import {
   CodexAuthPlugin,
   parseJwtClaims,
@@ -337,6 +338,9 @@ describe("plugin.codex", () => {
   })
 
   test.each([
+    ["gpt-6.1-terra", true],
+    ["gpt-6.2-sol", true],
+    ["gpt-6.2-astra", true],
     ["gpt-6-astra", true],
     ["gpt-6", true],
     ["gpt-6.0-astra", true],
@@ -369,6 +373,22 @@ describe("plugin.codex", () => {
     const models = await hooks.provider!.models!(provider as never, { auth: { type: "oauth" } } as never)
 
     expect(Object.keys(models)).toEqual(allowed ? [id] : [])
+  })
+
+  test.each([
+    ["gpt-6.1-sol", 500_000],
+    ["gpt-6.1-terra", 500_000],
+    ["gpt-6.2-sol", 500_000],
+    ["gpt-6.2-astra", 272_000],
+  ])("preserves Lite requests and context ceilings for %s without a live catalog", (id, contextWindow) => {
+    expect(CodexResponsesCatalog.resolveID(id)).toEqual({
+      modelID: id,
+      contextWindow,
+      maxContextWindow: 872_000,
+      compHash: "3000",
+      responsesLite: true,
+    })
+    expect(CodexResponsesCatalog.resolveID(id, undefined, undefined, 1_000_000)?.contextWindow).toBe(872_000)
   })
 
   test("deduplicates concurrent Codex token refreshes", async () => {
