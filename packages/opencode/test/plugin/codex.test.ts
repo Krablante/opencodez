@@ -317,6 +317,20 @@ describe("plugin.codex", () => {
           cost: {},
           options: { reasoningEffort: "high" },
         },
+        "gpt-6.1-terra-flex": {
+          id: "gpt-6.1-terra-flex",
+          api: { id: "gpt-6.1-terra" },
+          limit,
+          cost: {},
+          options: { serviceTier: "flex" },
+        },
+        "gpt-6.1-terra-fast": {
+          id: "gpt-6.1-terra-fast",
+          api: { id: "gpt-6.1-terra" },
+          limit,
+          cost: {},
+          options: { serviceTier: "priority" },
+        },
       },
     }
 
@@ -332,6 +346,8 @@ describe("plugin.codex", () => {
     expect(models["gpt-5.4-pro"]).toBeUndefined()
     expect(models["gpt-5.7-pro"]).toBeDefined()
     expect(models["gpt-5.6-sol-high"]).toBeDefined()
+    expect(models["gpt-6.1-terra-flex"]).toBeUndefined()
+    expect(models["gpt-6.1-terra-fast"]).toBeDefined()
     expect(await hooks.provider!.models!(provider as never, { auth: { type: "api" } } as never)).toBe(
       provider.models as never,
     )

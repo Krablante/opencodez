@@ -139,7 +139,7 @@ binary inside.
 Development/source binaries are never valid install or deployment artifacts.
 Do not copy them into an executable path or use them for a canary; build an
 explicit production artifact first.
-Normal public releases should use the `publish` GitHub Actions workflow. Give it an OpenCodez release version such as `1.18.33+opencodez.1`; the release version must include `opencodez` so accidental upstream-looking tags are rejected. The workflow embeds that complete version by default, typechecks the fork boundary, verifies generated-client drift, builds the `opencodez-*` assets, verifies their names and archive contents, uploads them to GitHub Releases, and publishes the release unless `draft` is enabled.
+GitHub hosts source and release assets only. GitHub Actions, automated PR/issue bots, and scheduled workflows are disabled in this fork. Run the relevant typechecks and tests on the build host, build every release target with the production flags above, and package each binary as an `opencodez-*` archive with its own SHA-256 file. Verify the archives and the installed production artifact before publishing them with `gh release` at the exact source commit. The embedded version and release tag must include the full OpenCodez version, such as `1.18.33+opencodez.8`.
 
 ## Side-by-Side With OpenCode
 

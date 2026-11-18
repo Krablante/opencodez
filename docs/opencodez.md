@@ -902,7 +902,7 @@ The OpenAPI document and JavaScript SDK are generated from the server contract.
 ## Release Verification
 
 A release update should merge the upstream release tag rather than copy its
-tree. Keep the OpenCodez publish workflow, binary identity, updater, runtime
+tree. Keep the OpenCodez release assets, binary identity, updater, runtime
 roots, System control, project-safety guards, and Codex Responses subsystem as
 the protected fork boundary. When upstream changes a shared composer, retain
 its current draft, attachment, localization, accessibility, and directionality
@@ -916,20 +916,18 @@ documented catalog-tier addition). Updating prompts does not claim complete
 parity with every new Codex subsystem. In particular, the fork does not import
 Codex Guardian, daemon, workspace-routing, or post-final compaction machinery.
 
-The release workflow deliberately uses typechecks, generated-client drift,
-archive verification, and a production build instead of carrying the broad
-upstream unit and integration matrix into the small public fork. Runtime
-behavior is then checked manually against the final production artifact and its
-published checksum.
+GitHub hosts source and ready release archives. This fork has no Actions
+workflows, PR/issue bots, scheduled automation, or required status checks.
+Run relevant package typechecks, generated-client drift checks, and targeted
+tests on the build host. Build all targets with `OPENCODEZ_BUILD=1`,
+`OPENCODE_CHANNEL=latest`, and the complete `OPENCODE_VERSION`. Package each
+binary with its own SHA-256 file, check archive contents, and verify runtime
+behavior against the final production artifact. Publish the verified archives
+with `gh release` at the exact source commit.
 
-Fork pull requests and pushes run **OpenCodez checks** on a GitHub-hosted runner:
-the four fork-boundary typechecks, generated-client drift, and targeted prompt
-and Responses tests. The broad Blacksmith unit/e2e and root typecheck jobs run
-only in the upstream repository.
-
-**По-русски.** Проверка OpenCodez в PR и основных ветках использует обычный
-GitHub-раннер: типы четырёх пакетов, актуальность клиента и целевые тесты
-промптов/Responses. Задания с Blacksmith-раннерами выполняются только в upstream.
+**По-русски.** Проверки и сборка выполняются на сборочном сервере. GitHub
+хранит исходники и готовые релизы; Actions, боты PR/issues, задания по
+расписанию и обязательные статусные проверки в форке отключены.
 
 A release should confirm the mapped System prompts, both Responses wire modes,
 strict legacy local-compaction and partial-output parity, non-OpenAI provider
