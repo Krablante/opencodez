@@ -24,6 +24,7 @@ env:
 
 jobs:
   unit:
+    if: github.repository == 'anomalyco/opencode'
     name: unit (${{ matrix.settings.name }})
     strategy:
       fail-fast: false
@@ -86,6 +87,7 @@ jobs:
         run: bun run test:httpapi
 
   e2e:
+    if: github.repository == 'anomalyco/opencode'
     name: e2e (${{ matrix.settings.name }})
     strategy:
       fail-fast: false
@@ -155,3 +157,34 @@ jobs:
           path: |
             packages/app/e2e/test-results
             packages/app/e2e/playwright-report
+
+  opencodez:
+    name: OpenCodez checks
+    if: github.repository != 'anomalyco/opencode'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPENCODEZ: "1"
+      OPENCODE_APP_NAME: opencodez
+      OPENCODE_CLI_NAME: opencodez
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: ./.github/actions/setup-bun
+      - name: Typecheck core
+        working-directory: packages/core
+        run: bun typecheck
+      - name: Typecheck runtime
+        working-directory: packages/opencode
+        run: bun typecheck
+      - name: Typecheck app
+        working-directory: packages/app
+        run: bun typecheck
+      - name: Typecheck session UI
+        working-directory: packages/session-ui
+        run: bun typecheck
+      - name: Check generated client
+        working-directory: packages/client
+        run: bun run check:generated
+      - name: Test OpenCodez prompts and Responses
+        working-directory: packages/opencode
+        run: bun test --timeout 30000 test/opencodez test/plugin/codex.test.ts test/session/remote-compaction.test.ts

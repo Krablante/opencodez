@@ -922,6 +922,15 @@ upstream unit and integration matrix into the small public fork. Runtime
 behavior is then checked manually against the final production artifact and its
 published checksum.
 
+Fork pull requests and pushes run **OpenCodez checks** on a GitHub-hosted runner:
+the four fork-boundary typechecks, generated-client drift, and targeted prompt
+and Responses tests. The broad Blacksmith unit/e2e and root typecheck jobs run
+only in the upstream repository.
+
+**По-русски.** Проверка OpenCodez в PR и основных ветках использует обычный
+GitHub-раннер: типы четырёх пакетов, актуальность клиента и целевые тесты
+промптов/Responses. Задания с Blacksmith-раннерами выполняются только в upstream.
+
 A release should confirm the mapped System prompts, both Responses wire modes,
 strict legacy local-compaction and partial-output parity, non-OpenAI provider
 isolation, default and configured compaction thresholds, one streamed V2
