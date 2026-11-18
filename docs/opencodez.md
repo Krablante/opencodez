@@ -274,6 +274,11 @@ warning, or UI state is involved. The response may still report
 `service_tier: "default"`; paired Standard/Fast latency checks are the reliable
 product-level validation.
 
+The ChatGPT OAuth catalog hides Flex aliases because the backend rejects that
+tier. It also hides Ultrafast aliases because the request SDK in this OpenCode
+base cannot encode that tier. Standard and Fast remain available; API-key
+catalog filtering is unchanged.
+
 In Codex wire mode, an omitted `service_tier` uses the authenticated model
 profile's `default_service_tier`, frozen with the other turn settings. The
 bundled GPT-6 Sol and Luna fallback profiles default to `priority`, matching

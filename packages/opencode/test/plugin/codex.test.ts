@@ -331,6 +331,13 @@ describe("plugin.codex", () => {
           cost: {},
           options: { serviceTier: "priority" },
         },
+        "gpt-6.2-sol-ultrafast": {
+          id: "gpt-6.2-sol-ultrafast",
+          api: { id: "gpt-6.2-sol" },
+          limit,
+          cost: {},
+          options: { serviceTier: "ultrafast" },
+        },
       },
     }
 
@@ -348,6 +355,7 @@ describe("plugin.codex", () => {
     expect(models["gpt-5.6-sol-high"]).toBeDefined()
     expect(models["gpt-6.1-terra-flex"]).toBeUndefined()
     expect(models["gpt-6.1-terra-fast"]).toBeDefined()
+    expect(models["gpt-6.2-sol-ultrafast"]).toBeUndefined()
     expect(await hooks.provider!.models!(provider as never, { auth: { type: "api" } } as never)).toBe(
       provider.models as never,
     )
