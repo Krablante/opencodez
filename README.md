@@ -195,13 +195,15 @@ codex_gpt_5_2_codex
 codex_gpt_5_3_codex
 codex_gpt_5_4
 codex_gpt_5_4_mini
-codex_gpt_5_5
 codex_gpt_5_6_luna_terra
 codex_gpt_5_6_sol
 codex_gpt_6_astra
 codex_gpt_6_sol
 codex_gpt_6_luna
 codex_gpt_6_1_sol
+codex_gpt_6_1_terra
+codex_gpt_6_2_sol
+codex_gpt_6_2_astra
 ```
 
 Out-of-the-box OpenAI Responses GPT System defaults:
@@ -213,7 +215,6 @@ gpt-5.3-codex -> codex_gpt_5_3_codex
 gpt-5.3-codex-spark -> codex_gpt_5_3_codex
 gpt-5.4 -> codex_gpt_5_4
 gpt-5.4-mini -> codex_gpt_5_4_mini
-gpt-5.5 -> codex_gpt_5_5
 gpt-5.6-luna -> codex_gpt_5_6_luna_terra
 gpt-5.6-terra -> codex_gpt_5_6_luna_terra
 gpt-5.6-sol -> codex_gpt_5_6_sol
@@ -221,13 +222,18 @@ gpt-6-astra -> codex_gpt_6_astra
 gpt-6-sol -> codex_gpt_6_sol
 gpt-6-luna -> codex_gpt_6_luna
 gpt-6.1-sol -> codex_gpt_6_1_sol
+gpt-6.1-terra -> codex_gpt_6_1_terra
+gpt-6.2-sol -> codex_gpt_6_2_sol
+gpt-6.2-astra -> codex_gpt_6_2_astra
 ```
 
 Model defaults live in `~/.config/opencodez/opencode.jsonc`. Values can be one prompt name for all models, or a mapping keyed by model id, family, `provider/model`, or `default`:
 
-The library is reviewed against Codex `rust-v0.159.1`, with separate GPT-6
-Astra, Sol, Luna, and GPT-6.1 Sol presets. Older presets without a current
-upstream asset remain available for saved selections. See the
+The library is reviewed against stable Codex `rust-v0.170.0`. Its prompts use
+OpenCodez's available file, shell, question, skill, plugin, and MCP tools.
+GPT-6.2 Sol and Astra share their upstream template; GPT-6.1 Terra shares the
+GPT-6 Astra template. GPT-5.5's preset is retired, and saved references to the
+retired built-in resolve to GPT-6.2 Sol. Personal prompt files remain user data. See the
 [prompt provenance and adaptation contract](docs/opencodez.md#system-prompt-library)
 for the exact sources.
 Explicit user model and family entries take precedence. A mapping's `default`
@@ -245,7 +251,7 @@ for new changes; the old config forms remain compatible.
         "token_limit": 300000,
       },
       "system": {
-        "default": "codex_gpt_5_5",
+        "default": "codex_gpt_6_2_sol",
         "gpt-5.2-codex": "codex_gpt_5_2_codex",
         "gpt-5.3-codex-spark": "codex_gpt_5_3_codex",
         "gpt-5.4": "codex_gpt_5_4",
@@ -396,11 +402,11 @@ lower threshold or absolute cap is applied.
 
 ## Commands
 
-| Command                 | What it does                                                              |
-| ----------------------- | ------------------------------------------------------------------------- |
-| `/system`               | Opens the Core/System prompt selector.                                    |
-| `/system codex_gpt_5_5` | Sets the current session System prompt directly.                          |
-| `/system none`          | Explicitly disables the selectable System prompt for the current session. |
+| Command                     | What it does                                                              |
+| --------------------------- | ------------------------------------------------------------------------- |
+| `/system`                   | Opens the Core/System prompt selector.                                    |
+| `/system codex_gpt_6_2_sol` | Sets the current session System prompt directly.                          |
+| `/system none`              | Explicitly disables the selectable System prompt for the current session. |
 
 ## Upstream OpenCode README
 

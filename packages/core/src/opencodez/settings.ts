@@ -37,14 +37,13 @@ export const defaults = {
     threshold: 0.9,
   },
   system: {
-    default: "codex_gpt_5_5",
+    default: "codex_gpt_6_2_sol",
     "gpt-5.2": "codex_gpt_5_2",
     "gpt-5.2-codex": "codex_gpt_5_2_codex",
     "gpt-5.3-codex": "codex_gpt_5_3_codex",
     "gpt-5.3-codex-spark": "codex_gpt_5_3_codex",
     "gpt-5.4": "codex_gpt_5_4",
     "gpt-5.4-mini": "codex_gpt_5_4_mini",
-    "gpt-5.5": "codex_gpt_5_5",
     "gpt-5.6-luna": "codex_gpt_5_6_luna_terra",
     "gpt-5.6-terra": "codex_gpt_5_6_luna_terra",
     "gpt-5.6-sol": "codex_gpt_5_6_sol",
@@ -52,6 +51,9 @@ export const defaults = {
     "gpt-6-sol": "codex_gpt_6_sol",
     "gpt-6-luna": "codex_gpt_6_luna",
     "gpt-6.1-sol": "codex_gpt_6_1_sol",
+    "gpt-6.1-terra": "codex_gpt_6_1_terra",
+    "gpt-6.2-sol": "codex_gpt_6_2_sol",
+    "gpt-6.2-astra": "codex_gpt_6_2_astra",
   },
 }
 

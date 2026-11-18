@@ -94,11 +94,18 @@ const FALLBACK_PROFILES: Profile[] = [
   })),
   {
     modelID: "gpt-6.1-sol",
-    contextWindow: 272_000,
+    contextWindow: 500_000,
     maxContextWindow: 872_000,
     compHash: "3000",
     responsesLite: true,
   },
+  ...["gpt-6.1-terra", "gpt-6.2-sol", "gpt-6.2-astra"].map((modelID) => ({
+    modelID,
+    contextWindow: modelID === "gpt-6.2-astra" ? 272_000 : 500_000,
+    maxContextWindow: 872_000,
+    compHash: "3000",
+    responsesLite: true,
+  })),
   {
     modelID: "gpt-5.4",
     contextWindow: 272_000,

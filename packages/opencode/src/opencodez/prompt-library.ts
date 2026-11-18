@@ -78,12 +78,13 @@ export async function list(): Promise<Entry[]> {
   ).sort((a, b) => a.name.localeCompare(b.name))
 }
 
-export async function get(name: string) {
+export async function get(name: string): Promise<Entry | undefined> {
   await ensureDefaults()
   const stored = await OpenCodezPromptStore.read(directories().root)
   const managed = stored.entries.find((entry) => entry.id === name)
   if (managed) return { name, path: `managed:${name}`, source: "library" as const }
   if (name.startsWith("builtin:")) {
+    if (name === "builtin:codex_gpt_5_5") return get("builtin:codex_gpt_6_2_sol")
     const id = name.slice(8)
     if (`${id}.md` in defaultPromptAssets.core || SystemPrompt.builtinPrompt(id) !== undefined)
       return { name, path: `bundled:${id}.md`, source: "builtin" as const }
@@ -93,6 +94,7 @@ export async function get(name: string) {
   if (!validName(name)) return undefined
   const library = path.join(directories().system, `${name}.md`)
   if (await Bun.file(library).exists()) return { name, path: library, source: "library" as const }
+  if (name === "codex_gpt_5_5") return get("builtin:codex_gpt_6_2_sol")
   if (`${name}.md` in defaultPromptAssets.core) {
     return { name, path: `bundled:${name}.md`, source: "builtin" as const }
   }
@@ -108,7 +110,7 @@ export async function readPrompt(name: string) {
     return (await OpenCodezPromptStore.read(directories().root)).entries.find((item) => item.id === name)?.text
   }
   if (entry.source === "library") return Bun.file(entry.path).text()
-  const id = name.replace(/^builtin:/, "")
+  const id = entry.name.replace(/^builtin:/, "")
   const bundled = (defaultPromptAssets.core as Record<string, string>)[`${id}.md`]
   return bundled ?? SystemPrompt.builtinPrompt(id)
 }
@@ -225,6 +227,8 @@ export async function item(id: string): Promise<OpenCodezPrompts.Item> {
 
 function resolveID(id: string, entries: ReadonlyArray<OpenCodezPrompts.Entry>) {
   if (entries.some((entry) => entry.id === id)) return id
+  if (id === "builtin:codex_gpt_5_5" || (id === "codex_gpt_5_5" && !entries.some((entry) => entry.id === `file:${id}`)))
+    return "builtin:codex_gpt_6_2_sol"
   return (
     entries.find((entry) => entry.id === `file:${id}`)?.id ??
     entries.find((entry) => entry.id === `builtin:${id}`)?.id ??

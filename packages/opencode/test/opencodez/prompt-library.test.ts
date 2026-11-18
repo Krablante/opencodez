@@ -35,12 +35,23 @@ describe("OpenCodez prompt library", () => {
     expect(names).toContain("codex_gpt_5_3_codex")
     expect(names).toContain("codex_gpt_5_4")
     expect(names).toContain("codex_gpt_5_4_mini")
-    expect(names).toContain("codex_gpt_5_5")
+    expect(names).not.toContain("codex_gpt_5_5")
     expect(names).toContain("codex_gpt_5_6_luna_terra")
     expect(names).toContain("codex_gpt_5_6_sol")
+    expect(names).toContain("codex_gpt_6_1_terra")
+    expect(names).toContain("codex_gpt_6_2_sol")
+    expect(names).toContain("codex_gpt_6_2_astra")
     expect(names).toContain("custom_system")
     expect(await OpenCodezPromptLibrary.readPrompt("default")).toBe(SystemPrompt.builtinPrompt("default"))
     expect(await OpenCodezPromptLibrary.readPrompt("custom_system")).toBe("CUSTOM SYSTEM")
+    expect(await OpenCodezPromptLibrary.readPrompt("builtin:codex_gpt_5_5")).toBe(
+      await OpenCodezPromptLibrary.readPrompt("builtin:codex_gpt_6_2_sol"),
+    )
+    expect(await OpenCodezPromptLibrary.readPrompt("codex_gpt_5_5")).toBe(
+      await OpenCodezPromptLibrary.readPrompt("builtin:codex_gpt_6_2_sol"),
+    )
+    expect((await OpenCodezPromptLibrary.item("builtin:codex_gpt_5_5")).id).toBe("builtin:codex_gpt_6_2_sol")
+    expect((await OpenCodezPromptLibrary.item("codex_gpt_5_5")).id).toBe("builtin:codex_gpt_6_2_sol")
   })
 
   test("lets prompt library files override builtin Core prompt names", async () => {
