@@ -262,14 +262,16 @@ function isToolOutput(value: unknown) {
 function rewriteOutput(item: Record<string, unknown>, preserveMedia: boolean) {
   if (item.type === "tool_search_output") return { ...item, tools: [] }
   if (!preserveMedia || !Array.isArray(item.output)) return { ...item, output: TRUNCATED_OUTPUT }
-  const media = item.output.filter((part) => isRecord(part) && part.type === "input_image")
+  const media = item.output.filter(
+    (part) => isRecord(part) && (part.type === "input_image" || part.type === "input_file"),
+  )
   return {
     ...item,
     output: [{ type: "input_text", text: TRUNCATED_OUTPUT }, ...media],
   }
 }
 
-export function estimateInput(value: unknown) {
+export function estimateInput(value: unknown, options?: { excludePdfPayload?: boolean }) {
   let estimate = estimateText(JSON.stringify(value))
   const visit = (item: unknown): void => {
     if (Array.isArray(item)) {
@@ -277,6 +279,15 @@ export function estimateInput(value: unknown) {
       return
     }
     if (!isRecord(item)) return
+    // Before sampling, let the provider measure the PDF's pages and text. Keep
+    // charging for the full encoded size when bounding retained history.
+    if (options?.excludePdfPayload && item.type === "file" && item.mime === "application/pdf") {
+      const prefix = "data:application/pdf;base64,"
+      if (typeof item.url === "string" && item.url.startsWith(prefix)) {
+        estimate = Math.max(0, estimate - Math.ceil((item.url.length - prefix.length) / 4))
+        return
+      }
+    }
     // Tool-result preflight sees the persisted SessionV1 FilePart before the
     // provider lowers it to an input_image. Treat both forms as the same media.
     const imageURL =
@@ -455,7 +466,7 @@ function truncateMessage(item: Record<string, unknown>, tokens: number) {
   let remaining = tokens
   const content = item.content.flatMap((part) => {
     if (!isRecord(part) || remaining <= 0) return []
-    if (part.type === "input_image") {
+    if (part.type === "input_image" || part.type === "input_file") {
       const estimate = Math.max(1, estimateInput(part))
       if (estimate > remaining) return []
       remaining -= estimate

@@ -30,7 +30,7 @@ const model: Provider.Model = {
     attachment: true,
     toolcall: true,
     interleaved: false,
-    input: { text: true, image: true, audio: false, video: false, pdf: false },
+    input: { text: true, image: true, audio: false, video: false, pdf: true },
     output: { text: true, image: false, audio: false, video: false, pdf: false },
   },
   cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
@@ -60,6 +60,8 @@ const output = {
   content: [{ type: "output_text", text: "Work completed" }],
 }
 const opaque = { type: "compaction", encrypted_content: "compacted-state" }
+const pdfData = "data:application/pdf;base64,JVBERi0="
+const toolPdf = { type: "input_file", filename: "data", file_data: pdfData }
 type Capture = { via: "http" | "ws"; body: Record<string, unknown>; input: unknown[] }
 
 function prepared(messages: ModelMessage[]): LLMRequestPrep.Prepared {
@@ -368,10 +370,10 @@ test("large encrypted state cannot veto compact or preemptively clear tool resul
   expect(JSON.stringify(server.captures[0]?.input)).toContain("Complete tool work")
 })
 
-test("compact matches sampling with split reasoning, phased text, and tool media", async () => {
+test("compact and sampling encode PDF attachments and tool media identically", async () => {
   await using server = await fixture()
   const history: ModelMessage[] = [
-    user,
+    { role: "user", content: [{ type: "file", data: pdfData, mediaType: "application/pdf", filename: "user.pdf" }] },
     {
       role: "assistant",
       content: [
@@ -396,12 +398,28 @@ test("compact matches sampling with split reasoning, phased text, and tool media
             value: [
               { type: "text", text: "Current image" },
               { type: "media", mediaType: "image/png", data: "AQID" },
+              { type: "media", mediaType: "application/pdf", data: "JVBERi0=" },
             ],
           },
         },
       ],
     },
   ]
+  const compacted = await server.compact(prepared(history))
+  const full = server.captures.at(-1)?.input
+  expect(full).toContainEqual({
+    type: "function_call_output",
+    call_id: "call_image",
+    output: [
+      { type: "input_text", text: "Current image" },
+      { type: "input_image", image_url: "data:image/png;base64,AQID" },
+      toolPdf,
+    ],
+  })
+  expect(compacted.items).toEqual([
+    { type: "message", role: "user", content: [{ ...toolPdf, filename: "user.pdf" }] },
+    opaque,
+  ])
   await server.send(await sdkBody(prepared(history)))
   await server.compact(prepared([...history, assistant]))
   expect(server.captures.at(-1)?.body.previous_response_id).toBeString()
@@ -409,7 +427,7 @@ test("compact matches sampling with split reasoning, phased text, and tool media
 })
 
 for (const httpOnly of [false, true]) {
-  test(`confirmed ${httpOnly ? "HTTP" : "stream"} overflow bounds tool text once and preserves active images`, async () => {
+  test(`confirmed ${httpOnly ? "HTTP" : "stream"} overflow bounds tool text once and preserves active media`, async () => {
     await using server = await fixture({ overflows: 1, httpOnly, streamOverflow: !httpOnly })
     const messages: ModelMessage[] = [
       user,
@@ -434,6 +452,7 @@ for (const httpOnly of [false, true]) {
             value: [
               { type: "text", text: "Tool result ".repeat(1000) },
               { type: "media", mediaType: "image/png", data: "AQID" },
+              { type: "media", mediaType: "application/pdf", data: "JVBERi0=" },
             ],
           },
         })),
@@ -448,12 +467,23 @@ for (const httpOnly of [false, true]) {
       for (const item of outputs) {
         if (!isRecord(item) || !Array.isArray(item.output)) throw new Error("Tool media was serialized as text")
         expect(item.output).toContainEqual({ type: "input_image", image_url: "data:image/png;base64,AQID" })
+        expect(item.output).toContainEqual(toolPdf)
       }
     }
     expect(JSON.stringify(server.captures[1]?.input)).not.toContain("Tool result Tool result")
     expect(server.captures[1]?.body.previous_response_id).toBeUndefined()
   })
 }
+
+test("new tool PDFs contribute metadata to the sampling estimate while retained PDFs use the encoded size", () => {
+  const attachment = {
+    type: "file",
+    mime: "application/pdf",
+    url: `data:application/pdf;base64,${"AAAA".repeat(100_000)}`,
+  }
+  expect(CodexResponsesCompact.estimateInput(attachment, { excludePdfPayload: true })).toBeLessThan(100)
+  expect(CodexResponsesCompact.estimateInput(attachment)).toBeGreaterThan(100_000)
+})
 
 test("a second provider overflow stops without an unbounded compact loop", async () => {
   await using server = await fixture({ overflows: 10 })

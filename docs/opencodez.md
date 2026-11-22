@@ -516,8 +516,10 @@ provider rejects the next request; if rejection still occurs, the durable
 assistant/tool progress keeps recovery in the same mid-turn phase. This
 preflight recognizes both persisted OpenCode `FilePart` image attachments and
 their lowered Responses `input_image` form. Inline image data therefore uses the
-same media estimate at both boundaries instead of being counted as base64 text
-before provider lowering.
+same media estimate at both boundaries. For newly read PDFs, OpenCodez uses the
+provider's token accounting for the document and excludes its base64 bytes from
+the preflight token estimate. Retained user history still counts PDF bytes toward
+its local budget.
 
 The active runner freezes the prepared effective System, transformed options,
 model profile, and model-visible tool schemas used for sampling. Mid-turn compact
@@ -526,8 +528,15 @@ work. Manual compaction and restart recovery reconstruct the same context throug
 the shared preparation boundary. The compact request carries the Codex capability
 and turn profile through the authenticated adapter, so it uses the same Responses
 Lite shaping, WebSocket continuation, and HTTP fallback as sampling. System
-instructions appear once, assistant phases are preserved, and tool images remain
-native image inputs. An already consumed sampling handoff is never replayed.
+instructions appear once and assistant phases are preserved. Images and inline
+PDFs from user messages and tool results stay native Responses inputs, including
+PDFs already present in saved sessions. An already consumed sampling handoff is
+never replayed.
+
+**По-русски.** OpenCodez передаёт серверу сжатия вложенные PDF и документы из
+результатов `read`, в том числе в ранее сохранённых сессиях. Он берёт
+расход токенов PDF у провайдера, а размер base64 учитывает при ограничении
+объёма истории, которая переносится после сжатия.
 
 If user steering arrives around compaction, it remains pending until after the
 first mandatory post-compact continuation. A successful compact replaces the
@@ -543,7 +552,7 @@ it bounds eligible tool outputs and retries once. That reduction uses a 90% inpu
 window target, separate from an earlier automatic-compaction threshold. It never
 locally rejects the retry merely because the estimate still exceeds that target.
 A second overflow remains a provider error. Every tool result in the active
-parallel-output batch keeps its images during reduction; user messages, tool
+parallel-output batch keeps its images and PDFs during reduction. User messages, tool
 calls, and opaque state are preserved. The saved compacted working window is
 replaced only after a completed compaction response.
 

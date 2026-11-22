@@ -25,6 +25,8 @@ import { ToolSchemaProjection } from "./utils/tool-schema"
 import { ToolStream } from "./utils/tool-stream"
 
 const ADAPTER = "openai-responses"
+const PDF_MIME = "application/pdf"
+const INPUT_MIMES = new Set<string>([...ProviderShared.IMAGE_MIMES, PDF_MIME])
 export const DEFAULT_BASE_URL = "https://api.openai.com/v1"
 export const PATH = "/responses"
 
@@ -39,7 +41,16 @@ const OpenAIResponsesInputImage = Schema.Struct({
   type: Schema.tag("input_image"),
   image_url: Schema.String,
 })
-const OpenAIResponsesInputContent = Schema.Union([OpenAIResponsesInputText, OpenAIResponsesInputImage])
+const OpenAIResponsesInputFile = Schema.Struct({
+  type: Schema.tag("input_file"),
+  filename: Schema.String,
+  file_data: Schema.String,
+})
+const OpenAIResponsesInputContent = Schema.Union([
+  OpenAIResponsesInputText,
+  OpenAIResponsesInputImage,
+  OpenAIResponsesInputFile,
+])
 type OpenAIResponsesInputContent = Schema.Schema.Type<typeof OpenAIResponsesInputContent>
 
 const OpenAIResponsesOutputText = Schema.Struct({
@@ -65,14 +76,9 @@ const OpenAIResponsesItemReference = Schema.Struct({
 })
 
 // `function_call_output.output` accepts either a plain string or an ordered
-// array of content items so tools can return images in addition to text.
+// array of content items so tools can return images and PDFs alongside text.
 // https://platform.openai.com/docs/api-reference/responses/object
-const OpenAIResponsesFunctionCallOutputContent = Schema.Union([OpenAIResponsesInputText, OpenAIResponsesInputImage])
-
-const OpenAIResponsesFunctionCallOutput = Schema.Union([
-  Schema.String,
-  Schema.Array(OpenAIResponsesFunctionCallOutputContent),
-])
+const OpenAIResponsesFunctionCallOutput = Schema.Union([Schema.String, Schema.Array(OpenAIResponsesInputContent)])
 
 const OpenAIResponsesInputItem = Schema.Union([
   Schema.Struct({ role: Schema.tag("system"), content: Schema.String }),
@@ -311,33 +317,32 @@ const hostedToolItemID = (part: ToolResultPart) => {
     : undefined
 }
 
+function mediaContent(media: ProviderShared.ValidatedMedia, filename: string): OpenAIResponsesInputContent {
+  if (media.mime === PDF_MIME) return { type: "input_file", filename, file_data: media.dataUrl }
+  return { type: "input_image", image_url: media.dataUrl }
+}
+
 const lowerUserContent = Effect.fn("OpenAIResponses.lowerUserContent")(function* (
   part: LLMRequest["messages"][number]["content"][number],
+  index: number,
 ) {
   if (part.type === "text") return { type: "input_text" as const, text: part.text }
   if (part.type === "media") {
-    const media = yield* ProviderShared.validateMedia(
-      "OpenAI Responses",
-      part,
-      new Set<string>(ProviderShared.IMAGE_MIMES),
-    )
-    return { type: "input_image" as const, image_url: media.dataUrl }
+    const media = yield* ProviderShared.validateMedia("OpenAI Responses", part, INPUT_MIMES)
+    return mediaContent(media, part.filename ?? `part-${index}.pdf`)
   }
   return yield* ProviderShared.unsupportedContent("OpenAI Responses", "user", ["text", "media"])
 })
 
-// Tool results may carry structured text/images. Keep media as provider-native
+// Keep tool media as provider-native
 // content instead of JSON-stringifying base64 into a prompt string.
 const lowerToolResultContentItem = Effect.fn("OpenAIResponses.lowerToolResultContentItem")(function* (
   item: ToolContent,
 ) {
   if (item.type === "text") return { type: "input_text" as const, text: item.text }
-  const media = yield* ProviderShared.validateToolFile(
-    "OpenAI Responses",
-    item,
-    new Set<string>(ProviderShared.IMAGE_MIMES),
-  )
-  return { type: "input_image" as const, image_url: media.dataUrl }
+  const media = yield* ProviderShared.validateToolFile("OpenAI Responses", item, INPUT_MIMES)
+  // Match the AI SDK fallback for unnamed tool files in saved sessions.
+  return mediaContent(media, item.name ?? "data")
 })
 
 const lowerToolResultOutput = Effect.fn("OpenAIResponses.lowerToolResultOutput")(function* (part: ToolResultPart) {

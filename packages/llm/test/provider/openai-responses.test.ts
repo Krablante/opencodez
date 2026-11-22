@@ -540,7 +540,7 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
-  it.effect("rejects non-image media in tool-result content with a clear error", () =>
+  it.effect("rejects unsupported media in tool-result content with a clear error", () =>
     Effect.gen(function* () {
       const error = yield* LLMClient.prepare(
         LLM.request({
@@ -1374,17 +1374,67 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
-  it.effect("rejects unsupported user media content", () =>
+  it.effect("lowers inline PDF attachments as input_file items", () =>
     Effect.gen(function* () {
-      const error = yield* LLMClient.prepare(
+      const prepared = yield* LLMClient.prepare<OpenAIResponses.OpenAIResponsesBody>(
         LLM.request({
-          id: "req_media",
           model,
-          messages: [Message.user({ type: "media", mediaType: "application/pdf", data: "AAECAw==" })],
+          messages: [
+            Message.user([
+              { type: "text", text: "Read the reports" },
+              { type: "media", mediaType: "application/pdf", data: "JVBERi0=", filename: "report.pdf" },
+              { type: "media", mediaType: "application/pdf", data: "data:application/pdf;base64,JVBERi0=" },
+            ]),
+          ],
         }),
-      ).pipe(Effect.flip)
+      )
 
-      expect(error.message).toContain("OpenAI Responses does not support media type application/pdf")
+      expect(prepared.body.input).toEqual([
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: "Read the reports" },
+            { type: "input_file", filename: "report.pdf", file_data: "data:application/pdf;base64,JVBERi0=" },
+            { type: "input_file", filename: "part-2.pdf", file_data: "data:application/pdf;base64,JVBERi0=" },
+          ],
+        },
+      ])
+    }),
+  )
+
+  it.effect("accepts canonical base64 up to the decoded attachment limit", () =>
+    Effect.gen(function* () {
+      const limit = ProviderShared.MAX_MEDIA_DECODED_BYTES
+      const requestWithPdf = (size: number) =>
+        LLM.request({
+          model,
+          messages: [
+            Message.user({
+              type: "media",
+              mediaType: "application/pdf",
+              data: `data:application/pdf;base64,${Buffer.alloc(size).toString("base64")}`,
+            }),
+          ],
+        })
+
+      const prepared = yield* LLMClient.prepare<OpenAIResponses.OpenAIResponsesBody>(requestWithPdf(limit))
+      expect(prepared.body.input[0]).toMatchObject({ role: "user", content: [{ type: "input_file" }] })
+      const error = yield* LLMClient.prepare(requestWithPdf(limit + 1)).pipe(Effect.flip)
+      expect(error.message).toContain("decoded limit")
+    }),
+  )
+
+  it.effect("rejects malformed PDF data and unsupported user media", () =>
+    Effect.gen(function* () {
+      for (const [mediaType, data, message] of [
+        ["application/pdf", "data:application/pdf;base64,%%%", "media data URL must contain valid base64"],
+        ["audio/mpeg", "AAECAw==", "OpenAI Responses does not support media type audio/mpeg"],
+      ]) {
+        const error = yield* LLMClient.prepare(
+          LLM.request({ model, messages: [Message.user({ type: "media", mediaType, data })] }),
+        ).pipe(Effect.flip)
+        expect(error.message).toContain(message)
+      }
     }),
   )
 

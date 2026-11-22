@@ -1349,7 +1349,7 @@ const layer = Layer.effect(
                       total +
                       Token.estimate(part.state.output) +
                       (model.providerID === "openai"
-                        ? CodexResponsesCompact.estimateInput(part.state.attachments ?? [])
+                        ? CodexResponsesCompact.estimateInput(part.state.attachments ?? [], { excludePdfPayload: true })
                         : Token.estimate(JSON.stringify(part.state.attachments ?? [])))
                     )
                   }
